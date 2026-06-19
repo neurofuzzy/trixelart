@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface SymmetriaGridProps {
@@ -18,6 +18,11 @@ interface SymmetriaGridProps {
 export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridProps) {
   const isDragging = useRef(false);
   const lastInteraction = useRef<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const SIDE = 60;
   const HEIGHT = SIDE * (Math.sqrt(3) / 2);
@@ -25,21 +30,14 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   const CENTER_X = SVG_SIZE / 2;
   const CENTER_Y = SVG_SIZE / 2;
 
-  // The centroid of a side-6 triangle is located 4 heights down from the tip (vertex)
-  // because the total height is 6H, and the centroid of an equilateral triangle
-  // is 2/3 down from the top. 2/3 * 6H = 4H.
-  const OFFSET_Y = CENTER_Y - 4 * HEIGHT;
-
   const triangles = useMemo(() => {
     const list = [];
     // We render the side-6 triangle row by row
-    // For 3-fold symmetry consistency with the hook, we map them into 3 logical sectors.
+    // For 3-fold symmetry consistency, we map them into 3 logical sectors.
     for (let sector = 0; sector < 3; sector++) {
       const rotation = sector * 120;
       const rad = (rotation * Math.PI) / 180;
 
-      // Each sector is a "kite" or "rhombus-like" section of 12 triangles
-      // to ensure perfect 3-fold rotational mapping.
       const sectorTriangles = [
         { r: 0, c: 0, up: true }, // Tip
         { r: 1, c: 0, up: true }, { r: 1, c: 1, up: true }, { r: 1, c: 0, up: false },
@@ -48,25 +46,10 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
       ];
 
       sectorTriangles.forEach((t) => {
-        let x = (t.c - t.r / 2) * SIDE;
-        let y = t.r * HEIGHT;
-
-        const rotate = (px: number, py: number) => {
-          const rx = px * Math.cos(rad) - py * Math.sin(rad);
-          const ry = px * Math.sin(rad) + py * Math.cos(rad);
-          return [rx + CENTER_X, ry + OFFSET_Y + (4 * HEIGHT)]; 
-          // Note: we offset back to the centroid which we defined as the rotation pivot.
-        };
-
-        // Pivot rotation around (CENTER_X, CENTER_Y)
         const pivotX = CENTER_X;
         const pivotY = CENTER_Y;
 
-        const rotateAroundPivot = (px: number, py: number) => {
-          // Point relative to Tip
-          let relX = (t.c - t.r / 2) * SIDE;
-          let relY = t.r * HEIGHT;
-
+        const rotateAroundPivot = (relX: number, relY: number) => {
           // Tip position relative to Pivot is (0, -4H)
           let finalRelX = relX;
           let finalRelY = relY - 4 * HEIGHT;
@@ -75,25 +58,36 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
           const rx = finalRelX * Math.cos(rad) - finalRelY * Math.sin(rad);
           const ry = finalRelX * Math.sin(rad) + finalRelY * Math.cos(rad);
 
-          return [rx + pivotX, ry + pivotY];
+          // Use toFixed to prevent hydration mismatches from floating point drift
+          return [(rx + pivotX).toFixed(3), (ry + pivotY).toFixed(3)];
         };
 
         let p1, p2, p3;
+        const rX = (t.c - t.r / 2) * SIDE;
+        const rY = t.r * HEIGHT;
+
         if (t.up) {
-          p1 = rotateAroundPivot(0, 0);
-          p2 = rotateAroundPivot(SIDE / 2, HEIGHT);
-          p3 = rotateAroundPivot(-SIDE / 2, HEIGHT);
+          p1 = rotateAroundPivot(rX, rY);
+          p2 = rotateAroundPivot(rX + SIDE / 2, rY + HEIGHT);
+          p3 = rotateAroundPivot(rX - SIDE / 2, rY + HEIGHT);
         } else {
-          p1 = rotateAroundPivot(0, HEIGHT);
-          p2 = rotateAroundPivot(SIDE / 2, 0);
-          p3 = rotateAroundPivot(-SIDE / 2, 0);
+          p1 = rotateAroundPivot(rX, rY + HEIGHT);
+          p2 = rotateAroundPivot(rX + SIDE / 2, rY);
+          p3 = rotateAroundPivot(rX - SIDE / 2, rY);
         }
 
         list.push(`${p1[0]},${p1[1]} ${p2[0]},${p2[1]} ${p3[0]},${p3[1]}`);
       });
     }
     return list;
-  }, []);
+  }, [CENTER_X, CENTER_Y, HEIGHT]);
+
+  // Prevent hydration mismatch by only rendering after component mounts
+  if (!mounted) {
+    return (
+      <div className="relative aspect-square w-full max-w-[500px] mx-auto bg-card/10 animate-pulse rounded-full" />
+    );
+  }
 
   return (
     <div className="relative aspect-square w-full max-w-[500px] mx-auto select-none">
