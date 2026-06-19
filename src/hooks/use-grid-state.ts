@@ -6,11 +6,12 @@ import { useState, useCallback } from "react";
 const GRID_SIZE = 36;
 
 /**
- * useGridState manages the state of a 36-triangle equilateral grid.
- * The grid is structured as a side-6 equilateral triangle, which is 3-fold symmetric
- * around its centroid (a vertex where 6 small triangles meet).
+ * useGridState manages the state of a 36-triangle side-6 equilateral grid.
+ * The grid is a simple triangular layout where total triangles = 6^2 = 36.
+ * It exhibits 3-fold rotational symmetry around its centroid (which is a vertex where 6 triangles meet).
  * 
- * The indices 0-11, 12-23, and 24-35 represent the three rotationally symmetric sectors.
+ * The 36 triangles are indexed 0-35, corresponding to rows 0-5.
+ * Row 0: 1 triangle, Row 1: 3, Row 2: 5, Row 3: 7, Row 4: 9, Row 5: 11.
  */
 export function useGridState() {
   const [grid, setGrid] = useState<(string | null)[]>(new Array(GRID_SIZE).fill(null));
@@ -23,26 +24,29 @@ export function useGridState() {
     setGrid(newGrid);
   }, [grid]);
 
+  /**
+   * For a side-6 equilateral triangle, the 3-fold symmetry around the centroid
+   * partitions the 36 triangles into 12 triplets.
+   * Mapping index -> [s1, s2, s3]
+   */
+  const getSymmetricIndices = useCallback((index: number) => {
+    // Each sector of the side-6 triangle contains 12 triangles.
+    // Index i in sector 0 maps to i+12 and i+24.
+    const sectorSize = 12;
+    const base = index % sectorSize;
+    return [base, base + sectorSize, base + (sectorSize * 2)];
+  }, []);
+
   const updateCell = useCallback((index: number, color: string | null) => {
     const newGrid = [...grid];
-    
-    // In our side-6 equilateral triangle mapping, the symmetry is defined by sectors.
-    // Each sector has 12 triangles. Triangle i in sector 0 maps to i+12 and i+24.
-    const sectorSize = 12;
-    const baseIndex = index % sectorSize;
-    
-    const indices = [
-      baseIndex,
-      baseIndex + sectorSize,
-      baseIndex + (sectorSize * 2),
-    ];
+    const indices = getSymmetricIndices(index);
 
     indices.forEach((i) => {
       newGrid[i] = color;
     });
 
     addToHistory(newGrid);
-  }, [grid, addToHistory]);
+  }, [grid, addToHistory, getSymmetricIndices]);
 
   const setFullPattern = useCallback((indices: number[], color: string) => {
     const newGrid = new Array(GRID_SIZE).fill(null);
