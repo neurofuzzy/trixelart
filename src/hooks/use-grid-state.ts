@@ -1,10 +1,17 @@
+
 "use client";
 
 import { useState, useCallback } from "react";
 
 const GRID_SIZE = 36;
-const SYMMETRY_FACTOR = 3;
 
+/**
+ * useGridState manages the state of a 36-triangle equilateral grid.
+ * The grid is structured as a side-6 equilateral triangle, which is 3-fold symmetric
+ * around its centroid (a vertex where 6 small triangles meet).
+ * 
+ * The indices 0-11, 12-23, and 24-35 represent the three rotationally symmetric sectors.
+ */
 export function useGridState() {
   const [grid, setGrid] = useState<(string | null)[]>(new Array(GRID_SIZE).fill(null));
   const [history, setHistory] = useState<(string | null)[][]>([]);
@@ -18,11 +25,16 @@ export function useGridState() {
 
   const updateCell = useCallback((index: number, color: string | null) => {
     const newGrid = [...grid];
-    // 3-fold rotational symmetry: index, (index + 12) % 36, (index + 24) % 36
+    
+    // In our side-6 equilateral triangle mapping, the symmetry is defined by sectors.
+    // Each sector has 12 triangles. Triangle i in sector 0 maps to i+12 and i+24.
+    const sectorSize = 12;
+    const baseIndex = index % sectorSize;
+    
     const indices = [
-      index,
-      (index + 12) % GRID_SIZE,
-      (index + 24) % GRID_SIZE,
+      baseIndex,
+      baseIndex + sectorSize,
+      baseIndex + (sectorSize * 2),
     ];
 
     indices.forEach((i) => {
