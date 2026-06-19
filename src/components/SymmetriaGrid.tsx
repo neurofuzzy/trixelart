@@ -11,9 +11,8 @@ interface SymmetriaGridProps {
 }
 
 /**
- * SymmetriaGrid renders a 36-triangle isotropic grid.
- * It is constructed of 3 rhombi (each 2x3 units) meeting at a central vertex.
- * This ensures perfect 3-fold symmetry and a clean, paintable center.
+ * SymmetriaGrid renders a unified 36-triangle side-6 equilateral grid.
+ * The construction is centered on its centroid for balanced interaction.
  */
 export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridProps) {
   const isDragging = useRef(false);
@@ -24,57 +23,68 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     setMounted(true);
   }, []);
 
-  const SIDE = 45;
+  const SIDE_UNIT = 60;
   const SVG_SIZE = 500;
   const CENTER_X = SVG_SIZE / 2;
   const CENTER_Y = SVG_SIZE / 2;
 
   const triangles = useMemo(() => {
     const list: string[] = [];
-    const H = SIDE * (Math.sqrt(3) / 2);
-
-    // Vector basis for a rhombus with 120 degree interior angle at origin
-    const u = { x: SIDE, y: 0 };
-    const v = { 
-      x: SIDE * Math.cos((2 * Math.PI) / 3), 
-      y: SIDE * Math.sin((2 * Math.PI) / 3) 
+    const H = (Math.sqrt(3) / 2) * SIDE_UNIT;
+    
+    // Large triangle side length 6
+    const totalHeight = 6 * H;
+    const totalWidth = 6 * SIDE_UNIT;
+    
+    // Centroid of the large triangle
+    const centroidOffset = {
+      x: totalWidth / 2,
+      y: totalHeight / 3 // Distance from bottom to centroid
     };
 
-    // 3 sectors (rhombi)
-    for (let s = 0; s < 3; s++) {
-      const rotationAngle = (s * 120 * Math.PI) / 180;
+    // Calculate row by row (6 rows, total 36 triangles)
+    for (let r = 0; r < 6; r++) {
+      const rowY = (6 - r) * H;
+      const startX = (6 - r - 1) * (SIDE_UNIT / 2);
 
-      // Each sector is a 2x3 rhombus (6 unit rhombi = 12 triangles)
-      for (let a = 0; a < 2; a++) {
-        for (let b = 0; b < 3; b++) {
-          const p1 = { x: a * u.x + b * v.x, y: a * u.y + b * v.y };
-          const p2 = { x: (a + 1) * u.x + b * v.x, y: (a + 1) * u.y + b * v.y };
-          const p3 = { x: (a + 1) * u.x + (b + 1) * v.x, y: (a + 1) * u.y + (b + 1) * v.y };
-          const p4 = { x: a * u.x + (b + 1) * v.x, y: a * u.y + (b + 1) * v.y };
+      for (let k = 0; k < 2 * r + 1; k++) {
+        const isUpward = k % 2 === 0;
+        let p1, p2, p3;
 
-          const rotate = (p: { x: number; y: number }) => {
-            const nx = p.x * Math.cos(rotationAngle) - p.y * Math.sin(rotationAngle);
-            const ny = p.x * Math.sin(rotationAngle) + p.y * Math.cos(rotationAngle);
-            // Use fixed precision to prevent hydration mismatches
-            return [(nx + CENTER_X).toFixed(3), (ny + CENTER_Y).toFixed(3)];
-          };
-
-          const pts1 = [rotate(p1), rotate(p2), rotate(p3)];
-          const pts2 = [rotate(p1), rotate(p3), rotate(p4)];
-
-          list.push(pts1.map(p => p.join(',')).join(' '));
-          list.push(pts2.map(p => p.join(',')).join(' '));
+        if (isUpward) {
+          p1 = { x: startX + (k / 2) * SIDE_UNIT, y: rowY };
+          p2 = { x: startX + (k / 2 + 1) * SIDE_UNIT, y: rowY };
+          p3 = { x: startX + (k / 2 + 0.5) * SIDE_UNIT, y: rowY - H };
+        } else {
+          p1 = { x: startX + Math.floor(k / 2) * SIDE_UNIT + SIDE_UNIT / 2, y: rowY - H };
+          p2 = { x: startX + Math.floor(k / 2) * SIDE_UNIT + 1.5 * SIDE_UNIT, y: rowY - H };
+          p3 = { x: startX + Math.floor(k / 2) * SIDE_UNIT + SIDE_UNIT, y: rowY };
         }
+
+        const format = (p: { x: number; y: number }) => {
+          const finalX = (p.x - centroidOffset.x + CENTER_X).toFixed(3);
+          const finalY = (p.y - (totalHeight - centroidOffset.y) + CENTER_Y).toFixed(3);
+          return `${finalX},${finalY}`;
+        };
+
+        list.push([format(p1), format(p2), format(p3)].join(' '));
       }
     }
     return list;
-  }, [SIDE, CENTER_X, CENTER_Y]);
+  }, [SIDE_UNIT, CENTER_X, CENTER_Y]);
 
   if (!mounted) {
     return (
       <div className="relative aspect-square w-full max-w-[500px] mx-auto bg-card/10 animate-pulse rounded-full" />
     );
   }
+
+  const handleInteraction = (i: number) => {
+    if (lastInteraction.current !== i) {
+      onCellClick(i);
+      lastInteraction.current = i;
+    }
+  };
 
   return (
     <div className="relative aspect-square w-full max-w-[500px] mx-auto select-none">
@@ -104,15 +114,14 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
               lastInteraction.current = i;
             }}
             onMouseEnter={() => {
-              if (isDragging.current && lastInteraction.current !== i) {
-                onCellClick(i);
-                lastInteraction.current = i;
+              if (isDragging.current) {
+                handleInteraction(i);
               }
             }}
           />
         ))}
         
-        {/* Center vertex indicator */}
+        {/* Centroid indicator - where 6 triangles meet */}
         <circle cx="250" cy="250" r="4" className="fill-accent shadow-sm animate-pulse pointer-events-none" />
       </svg>
     </div>
