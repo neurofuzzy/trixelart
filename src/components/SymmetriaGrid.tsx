@@ -11,9 +11,9 @@ interface SymmetriaGridProps {
 }
 
 /**
- * SymmetriaGrid renders a single side-6 isotropic triangular grid.
- * Total cells: 1+3+5+7+9+11 = 36 triangles.
- * Centered at the centroid of the large equilateral triangle.
+ * SymmetriaGrid renders a 36-triangle isotropic grid.
+ * It is constructed of 3 rhombi (each 2x3 units) meeting at a central vertex.
+ * This ensures perfect 3-fold symmetry and a clean, paintable center.
  */
 export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridProps) {
   const isDragging = useRef(false);
@@ -24,65 +24,52 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     setMounted(true);
   }, []);
 
-  const SIDE = 60;
-  const HEIGHT = SIDE * (Math.sqrt(3) / 2);
+  const SIDE = 45;
   const SVG_SIZE = 500;
   const CENTER_X = SVG_SIZE / 2;
   const CENTER_Y = SVG_SIZE / 2;
 
   const triangles = useMemo(() => {
-    const list = [];
-    // We render the side-6 triangle row by row
-    // For 3-fold symmetry consistency, we map them into 3 logical sectors.
-    for (let sector = 0; sector < 3; sector++) {
-      const rotation = sector * 120;
-      const rad = (rotation * Math.PI) / 180;
+    const list: string[] = [];
+    const H = SIDE * (Math.sqrt(3) / 2);
 
-      const sectorTriangles = [
-        { r: 0, c: 0, up: true }, // Tip
-        { r: 1, c: 0, up: true }, { r: 1, c: 1, up: true }, { r: 1, c: 0, up: false },
-        { r: 2, c: 0, up: true }, { r: 2, c: 1, up: true }, { r: 2, c: 2, up: true }, { r: 2, c: 0, up: false }, { r: 2, c: 1, up: false },
-        { r: 3, c: 0, up: false }, { r: 3, c: 1, up: false }, { r: 3, c: 2, up: false }
-      ];
+    // Vector basis for a rhombus with 120 degree interior angle at origin
+    const u = { x: SIDE, y: 0 };
+    const v = { 
+      x: SIDE * Math.cos((2 * Math.PI) / 3), 
+      y: SIDE * Math.sin((2 * Math.PI) / 3) 
+    };
 
-      sectorTriangles.forEach((t) => {
-        const pivotX = CENTER_X;
-        const pivotY = CENTER_Y;
+    // 3 sectors (rhombi)
+    for (let s = 0; s < 3; s++) {
+      const rotationAngle = (s * 120 * Math.PI) / 180;
 
-        const rotateAroundPivot = (relX: number, relY: number) => {
-          // Tip position relative to Pivot is (0, -4H)
-          let finalRelX = relX;
-          let finalRelY = relY - 4 * HEIGHT;
+      // Each sector is a 2x3 rhombus (6 unit rhombi = 12 triangles)
+      for (let a = 0; a < 2; a++) {
+        for (let b = 0; b < 3; b++) {
+          const p1 = { x: a * u.x + b * v.x, y: a * u.y + b * v.y };
+          const p2 = { x: (a + 1) * u.x + b * v.x, y: (a + 1) * u.y + b * v.y };
+          const p3 = { x: (a + 1) * u.x + (b + 1) * v.x, y: (a + 1) * u.y + (b + 1) * v.y };
+          const p4 = { x: a * u.x + (b + 1) * v.x, y: a * u.y + (b + 1) * v.y };
 
-          // Rotate relative point
-          const rx = finalRelX * Math.cos(rad) - finalRelY * Math.sin(rad);
-          const ry = finalRelX * Math.sin(rad) + finalRelY * Math.cos(rad);
+          const rotate = (p: { x: number; y: number }) => {
+            const nx = p.x * Math.cos(rotationAngle) - p.y * Math.sin(rotationAngle);
+            const ny = p.x * Math.sin(rotationAngle) + p.y * Math.cos(rotationAngle);
+            // Use fixed precision to prevent hydration mismatches
+            return [(nx + CENTER_X).toFixed(3), (ny + CENTER_Y).toFixed(3)];
+          };
 
-          // Use toFixed to prevent hydration mismatches from floating point drift
-          return [(rx + pivotX).toFixed(3), (ry + pivotY).toFixed(3)];
-        };
+          const pts1 = [rotate(p1), rotate(p2), rotate(p3)];
+          const pts2 = [rotate(p1), rotate(p3), rotate(p4)];
 
-        let p1, p2, p3;
-        const rX = (t.c - t.r / 2) * SIDE;
-        const rY = t.r * HEIGHT;
-
-        if (t.up) {
-          p1 = rotateAroundPivot(rX, rY);
-          p2 = rotateAroundPivot(rX + SIDE / 2, rY + HEIGHT);
-          p3 = rotateAroundPivot(rX - SIDE / 2, rY + HEIGHT);
-        } else {
-          p1 = rotateAroundPivot(rX, rY + HEIGHT);
-          p2 = rotateAroundPivot(rX + SIDE / 2, rY);
-          p3 = rotateAroundPivot(rX - SIDE / 2, rY);
+          list.push(pts1.map(p => p.join(',')).join(' '));
+          list.push(pts2.map(p => p.join(',')).join(' '));
         }
-
-        list.push(`${p1[0]},${p1[1]} ${p2[0]},${p2[1]} ${p3[0]},${p3[1]}`);
-      });
+      }
     }
     return list;
-  }, [CENTER_X, CENTER_Y, HEIGHT]);
+  }, [SIDE, CENTER_X, CENTER_Y]);
 
-  // Prevent hydration mismatch by only rendering after component mounts
   if (!mounted) {
     return (
       <div className="relative aspect-square w-full max-w-[500px] mx-auto bg-card/10 animate-pulse rounded-full" />
@@ -95,6 +82,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         viewBox="0 0 500 500"
         className="w-full h-full drop-shadow-2xl"
         onMouseLeave={() => (isDragging.current = false)}
+        onMouseUp={() => (isDragging.current = false)}
       >
         <circle cx="250" cy="250" r="240" className="fill-card/30 stroke-border/10" strokeWidth="1" />
         
@@ -109,7 +97,8 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
               "cursor-pointer transition-all duration-300 hover:opacity-80",
               color ? "stroke-black/10 dark:stroke-white/10" : "text-muted-foreground/20 hover:text-muted-foreground/40"
             )}
-            onMouseDown={() => {
+            onMouseDown={(e) => {
+              e.preventDefault();
               isDragging.current = true;
               onCellClick(i);
               lastInteraction.current = i;
@@ -120,14 +109,11 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
                 lastInteraction.current = i;
               }
             }}
-            onMouseUp={() => {
-              isDragging.current = false;
-            }}
           />
         ))}
         
-        {/* Center of rotation indicator */}
-        <circle cx="250" cy="250" r="4" className="fill-accent shadow-sm animate-pulse" />
+        {/* Center vertex indicator */}
+        <circle cx="250" cy="250" r="4" className="fill-accent shadow-sm animate-pulse pointer-events-none" />
       </svg>
     </div>
   );
