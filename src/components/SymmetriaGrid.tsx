@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download } from 'lucide-react';
+import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useCanvasSize } from '@/hooks/use-canvas-size';
@@ -91,21 +91,36 @@ export default function SymmetriaGrid() {
 
   // 3. Coordinate Translation
   const screenToWorld = useCallback((sx: number, sy: number) => {
+    // Correctly translate screen-relative coordinates to the infinite world space
     return {
       x: (sx - size.width / 2) / view.zoom - view.x,
       y: (sy - size.height / 2) / view.zoom - view.y
     };
   }, [size, view]);
 
+  const getRelativePointer = (e: React.PointerEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  };
+
   // 4. Interaction Handlers
   const onPointerDown = (e: React.PointerEvent) => {
-    const isRightClick = e.button === 2;
+    const isRightClick = e.button === 2 || e.ctrlKey;
+    const pos = getRelativePointer(e);
     
     if (isRightClick || tool === 'pan') {
-      interaction.current = { isPainting: false, isPanning: true, lastPos: { x: e.clientX, y: e.clientY } };
+      interaction.current = { 
+        isPainting: false, 
+        isPanning: true, 
+        lastPos: { x: e.clientX, y: e.clientY } 
+      };
     } else {
       interaction.current = { isPainting: true, isPanning: false, lastPos: null };
-      const world = screenToWorld(e.clientX, e.clientY);
+      const world = screenToWorld(pos.x, pos.y);
       const key = triToString(worldToTri(world.x, world.y));
       
       setPainted(prev => {
@@ -125,7 +140,8 @@ export default function SymmetriaGrid() {
       setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
     } else if (interaction.current.isPainting) {
-      const world = screenToWorld(e.clientX, e.clientY);
+      const pos = getRelativePointer(e);
+      const world = screenToWorld(pos.x, pos.y);
       const key = triToString(worldToTri(world.x, world.y));
       
       setPainted(prev => {
@@ -142,11 +158,12 @@ export default function SymmetriaGrid() {
     }
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     if (interaction.current.isPainting) {
       pushHistory(painted);
     }
     interaction.current = { isPainting: false, isPanning: false, lastPos: null };
+    e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -182,7 +199,7 @@ export default function SymmetriaGrid() {
             key={upKey} 
             d={getTriPath(q, r, 'up')} 
             fill={painted[upKey] || 'transparent'} 
-            stroke="rgba(255,255,255,0.08)" 
+            stroke="rgba(255,255,255,0.06)" 
             strokeWidth={0.5 / view.zoom}
           />
         );
@@ -191,7 +208,7 @@ export default function SymmetriaGrid() {
             key={dnKey} 
             d={getTriPath(q, r, 'down')} 
             fill={painted[dnKey] || 'transparent'} 
-            stroke="rgba(255,255,255,0.08)" 
+            stroke="rgba(255,255,255,0.06)" 
             strokeWidth={0.5 / view.zoom}
           />
         );
@@ -204,11 +221,11 @@ export default function SymmetriaGrid() {
   const guides = useMemo(() => (
     <g pointerEvents="none">
       {/* Three Primary Axes */}
-      <line x1={-10000} y1={0} x2={10000} y2={0} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
-      <line x1={-5000} y1={-8660} x2={5000} y2={8660} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
-      <line x1={5000} y1={-8660} x2={-5000} y2={8660} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
+      <line x1={-10000} y1={0} x2={10000} y2={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
+      <line x1={-5000} y1={-8660} x2={5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
+      <line x1={5000} y1={-8660} x2={-5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
       {/* Origin Dot */}
-      <circle cx={0} cy={0} r={4 / view.zoom} fill="white" />
+      <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
     </g>
   ), [view.zoom]);
 
