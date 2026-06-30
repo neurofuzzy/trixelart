@@ -1,205 +1,298 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-
-// Math Constants
-const SIDE = 50;
-const H = SIDE * Math.sqrt(3) / 2;
-
-type TriType = 'up' | 'down';
-interface TriKey { q: number; r: number; type: TriType; }
-
-const toStr = (k: TriKey) => `${k.q},${k.r},${k.type}`;
+import { useCanvasSize } from '@/hooks/use-canvas-size';
+import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
 
 export default function SymmetriaGrid() {
   const [mounted, setMounted] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ w: 0, h: 0 });
+  const { size, containerRef } = useCanvasSize();
   
-  // View State
+  // View State (Pan and Zoom)
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   
-  // Drawing State
+  // Tool State
   const [tool, setTool] = useState<'paint' | 'erase' | 'pan'>('paint');
   const [color, setColor] = useState('hsl(var(--primary))');
-  const [painted, setPainted] = useState<Record<string, string>>({});
   
-  // History
+  // Drawing Data
+  const [painted, setPainted] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
-  const interaction = useRef<{ type: 'painting' | 'panning' | null, lastPos: { x: number, y: number } | null }>({ type: null, lastPos: null });
+  // Interaction Ref to avoid re-renders during drag
+  const interaction = useRef<{
+    isPainting: boolean;
+    isPanning: boolean;
+    lastPos: { x: number; y: number } | null;
+  }>({ isPainting: false, isPanning: false, lastPos: null });
 
-  // Init & Resize
+  // 1. Initialization and Persistence
   useEffect(() => {
     setMounted(true);
-    const stored = localStorage.getItem('symmetria-save');
-    if (stored) {
+    const saved = localStorage.getItem('symmetria-save');
+    if (saved) {
       try {
-        const p = JSON.parse(stored);
-        setPainted(p);
-        setHistory([p]);
+        const data = JSON.parse(saved);
+        setPainted(data);
+        setHistory([data]);
         setHistoryIdx(0);
-      } catch (e) {}
-    }
-
-    const obs = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        setDims({ w: e.contentRect.width, h: e.contentRect.height });
+      } catch (e) {
+        console.error("Failed to load save", e);
       }
-    });
-
-    if (containerRef.current) {
-      obs.observe(containerRef.current);
-      const r = containerRef.current.getBoundingClientRect();
-      setDims({ w: r.width, h: r.height });
     }
-    return () => obs.disconnect();
   }, []);
 
   useEffect(() => {
     if (mounted) localStorage.setItem('symmetria-save', JSON.stringify(painted));
   }, [painted, mounted]);
 
-  // Actions
-  const pushHistory = useCallback((state: Record<string, string>) => {
-    const next = history.slice(0, historyIdx + 1);
-    next.push(state);
-    if (next.length > 50) next.shift();
-    setHistory(next);
-    setHistoryIdx(next.length - 1);
+  // 2. Actions (Undo/Redo)
+  const pushHistory = useCallback((newState: Record<string, string>) => {
+    setHistory(prev => {
+      const next = prev.slice(0, historyIdx + 1);
+      next.push({ ...newState });
+      if (next.length > 50) next.shift();
+      return next;
+    });
+    setHistoryIdx(prev => Math.min(prev + 1, 49));
+  }, [historyIdx]);
+
+  const handleUndo = useCallback(() => {
+    if (historyIdx > 0) {
+      const prevState = history[historyIdx - 1];
+      setPainted(prevState);
+      setHistoryIdx(historyIdx - 1);
+    }
   }, [history, historyIdx]);
 
-  const undo = () => { if (historyIdx > 0) { setPainted(history[historyIdx - 1]); setHistoryIdx(historyIdx - 1); } };
-  const redo = () => { if (historyIdx < history.length - 1) { setPainted(history[historyIdx + 1]); setHistoryIdx(historyIdx + 1); } };
+  const handleRedo = useCallback(() => {
+    if (historyIdx < history.length - 1) {
+      const nextState = history[historyIdx + 1];
+      setPainted(nextState);
+      setHistoryIdx(historyIdx + 1);
+    }
+  }, [history, historyIdx]);
 
-  // Coord Math
-  const s2w = useCallback((sx: number, sy: number) => {
-    return {
-      x: (sx - dims.w / 2) / view.zoom - view.x,
-      y: (sy - dims.h / 2) / view.zoom - view.y
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeys = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo(); else handleUndo();
+      }
     };
-  }, [dims, view]);
+    window.addEventListener('keydown', handleKeys);
+    return () => window.removeEventListener('keydown', handleKeys);
+  }, [handleUndo, handleRedo]);
 
-  const w2t = useCallback((wx: number, wy: number): TriKey => {
-    const r = wy / H;
-    const q = (wx / SIDE) - (r * 0.5);
-    const fq = Math.floor(q);
-    const fr = Math.floor(r);
-    const lq = q - fq;
-    const lr = r - fr;
-    return { q: fq, r: fr, type: (lq + lr < 1) ? 'up' : 'down' };
-  }, []);
+  // 3. Coordinate Translation
+  const screenToWorld = useCallback((sx: number, sy: number) => {
+    return {
+      x: (sx - size.width / 2) / view.zoom - view.x,
+      y: (sy - size.height / 2) / view.zoom - view.y
+    };
+  }, [size, view]);
 
-  // Handlers
-  const onDown = (e: React.PointerEvent) => {
-    const isRight = e.button === 2 || e.altKey;
-    if (isRight || tool === 'pan') {
-      interaction.current = { type: 'panning', lastPos: { x: e.clientX, y: e.clientY } };
+  // 4. Interaction Handlers
+  const onPointerDown = (e: React.PointerEvent) => {
+    const isRightClick = e.button === 2;
+    
+    if (isRightClick || tool === 'pan') {
+      interaction.current = { isPainting: false, isPanning: true, lastPos: { x: e.clientX, y: e.clientY } };
     } else {
-      interaction.current = { type: 'painting', lastPos: null };
-      const w = s2w(e.clientX, e.clientY);
-      const k = toStr(w2t(w.x, w.y));
-      const next = { ...painted };
-      if (tool === 'paint') next[k] = color; else delete next[k];
-      setPainted(next);
+      interaction.current = { isPainting: true, isPanning: false, lastPos: null };
+      const world = screenToWorld(e.clientX, e.clientY);
+      const key = triToString(worldToTri(world.x, world.y));
+      
+      setPainted(prev => {
+        const next = { ...prev };
+        if (tool === 'paint') next[key] = color;
+        else delete next[key];
+        return next;
+      });
     }
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const onMove = (e: React.PointerEvent) => {
-    if (!interaction.current.type) return;
-    if (interaction.current.type === 'panning' && interaction.current.lastPos) {
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (interaction.current.isPanning && interaction.current.lastPos) {
       const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
       const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
       setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
-    } else if (interaction.current.type === 'painting') {
-      const w = s2w(e.clientX, e.clientY);
-      const k = toStr(w2t(w.x, w.y));
-      if (tool === 'paint') setPainted(p => ({ ...p, [k]: color }));
-      else setPainted(p => { const n = { ...p }; delete n[k]; return n; });
+    } else if (interaction.current.isPainting) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const key = triToString(worldToTri(world.x, world.y));
+      
+      setPainted(prev => {
+        if (tool === 'paint') {
+          if (prev[key] === color) return prev;
+          return { ...prev, [key]: color };
+        } else {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }
+      });
     }
   };
 
-  const onUp = () => {
-    if (interaction.current.type === 'painting') pushHistory(painted);
-    interaction.current = { type: null, lastPos: null };
+  const onPointerUp = () => {
+    if (interaction.current.isPainting) {
+      pushHistory(painted);
+    }
+    interaction.current = { isPainting: false, isPanning: false, lastPos: null };
   };
 
   const onWheel = (e: React.WheelEvent) => {
-    const factor = Math.pow(1.1, -e.deltaY / 150);
-    setView(v => ({ ...v, zoom: Math.min(Math.max(v.zoom * factor, 0.05), 20) }));
+    const zoomFactor = Math.pow(1.1, -e.deltaY / 200);
+    setView(v => ({
+      ...v,
+      zoom: Math.min(Math.max(v.zoom * zoomFactor, 0.1), 15)
+    }));
   };
 
-  // Rendering
+  // 5. Grid Rendering
   const gridContent = useMemo(() => {
-    if (dims.w === 0) return null;
-    const tris: JSX.Element[] = [];
-    const buf = 2;
-    const left = s2w(0, 0);
-    const right = s2w(dims.w, dims.h);
-    const minR = Math.floor(left.y / H) - buf;
-    const maxR = Math.ceil(right.y / H) + buf;
-    const minQ = Math.floor(Math.min(left.x, right.x) / SIDE - (maxR * 0.5)) - buf;
-    const maxQ = Math.ceil(Math.max(left.x, right.x) / SIDE - (minR * 0.5)) + buf;
+    if (size.width === 0 || !mounted) return null;
+
+    const triangles: JSX.Element[] = [];
+    const buffer = 3;
+    
+    const worldTopLeft = screenToWorld(0, 0);
+    const worldBottomRight = screenToWorld(size.width, size.height);
+    
+    const minR = Math.floor(worldTopLeft.y / H) - buffer;
+    const maxR = Math.ceil(worldBottomRight.y / H) + buffer;
+    const minQ = Math.floor(Math.min(worldTopLeft.x, worldBottomRight.x) / SIDE - (maxR * 0.5)) - buffer;
+    const maxQ = Math.ceil(Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - (minR * 0.5)) + buffer;
 
     for (let r = minR; r <= maxR; r++) {
       for (let q = minQ; q <= maxQ; q++) {
-        const bx = q * SIDE + r * (SIDE / 2);
-        const by = r * H;
-        const kUp = toStr({ q, r, type: 'up' });
-        tris.push(<path key={kUp} d={`M ${bx} ${by} L ${bx + SIDE} ${by} L ${bx + SIDE/2} ${by + H} Z`} fill={painted[kUp] || 'transparent'} stroke="rgba(255,255,255,0.05)" strokeWidth={0.5} />);
-        const kDn = toStr({ q, r, type: 'down' });
-        tris.push(<path key={kDn} d={`M ${bx + SIDE/2} ${by + H} L ${bx + SIDE*1.5} ${by + H} L ${bx + SIDE} ${by} Z`} fill={painted[kDn] || 'transparent'} stroke="rgba(255,255,255,0.05)" strokeWidth={0.5} />);
+        const upKey = `${q},${r},up`;
+        const dnKey = `${q},${r},down`;
+
+        triangles.push(
+          <path 
+            key={upKey} 
+            d={getTriPath(q, r, 'up')} 
+            fill={painted[upKey] || 'transparent'} 
+            stroke="rgba(255,255,255,0.08)" 
+            strokeWidth={0.5 / view.zoom}
+          />
+        );
+        triangles.push(
+          <path 
+            key={dnKey} 
+            d={getTriPath(q, r, 'down')} 
+            fill={painted[dnKey] || 'transparent'} 
+            stroke="rgba(255,255,255,0.08)" 
+            strokeWidth={0.5 / view.zoom}
+          />
+        );
       }
     }
-    return tris;
-  }, [dims, view, painted, s2w]);
+    return triangles;
+  }, [size, view, painted, mounted, screenToWorld]);
 
+  // Visual Guides (Origin and Axes)
   const guides = useMemo(() => (
-    <g stroke="rgba(255,255,255,0.15)" strokeWidth={1} pointerEvents="none">
-      <line x1={-10000} y1={0} x2={10000} y2={0} />
-      <line x1={-5000} y1={-8660} x2={5000} y2={8660} />
-      <line x1={5000} y1={-8660} x2={-5000} y2={8660} />
-      <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
+    <g pointerEvents="none">
+      {/* Three Primary Axes */}
+      <line x1={-10000} y1={0} x2={10000} y2={0} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
+      <line x1={-5000} y1={-8660} x2={5000} y2={8660} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
+      <line x1={5000} y1={-8660} x2={-5000} y2={8660} stroke="rgba(255,255,255,0.2)" strokeWidth={1/view.zoom} />
+      {/* Origin Dot */}
+      <circle cx={0} cy={0} r={4 / view.zoom} fill="white" />
     </g>
   ), [view.zoom]);
 
-  if (!mounted) return null;
+  if (!mounted) return <div className="h-full w-full bg-background" />;
 
   return (
     <div className="flex flex-col h-full w-full bg-background select-none">
-      <div className="flex items-center justify-between p-2 border-b bg-card/80 backdrop-blur z-20">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
         <div className="flex items-center gap-1">
-          <Button variant={tool === 'paint' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('paint')}><MousePointer2 className="w-4 h-4" /></Button>
-          <Button variant={tool === 'erase' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('erase')}><Eraser className="w-4 h-4" /></Button>
-          <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')}><Move className="w-4 h-4" /></Button>
+          <Button variant={tool === 'paint' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('paint')} title="Paint (Left Click)">
+            <MousePointer2 className="w-4 h-4" />
+          </Button>
+          <Button variant={tool === 'erase' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('erase')} title="Erase">
+            <Eraser className="w-4 h-4" />
+          </Button>
+          <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')} title="Pan (Right Click)">
+            <Move className="w-4 h-4" />
+          </Button>
           <div className="w-px h-6 bg-border mx-1" />
-          <Button variant="ghost" size="icon" onClick={undo} disabled={historyIdx <= 0}><Undo2 className="w-4 h-4" /></Button>
-          <Button variant="ghost" size="icon" onClick={redo} disabled={historyIdx >= history.length - 1}><Redo2 className="w-4 h-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIdx <= 0} title="Undo (Ctrl+Z)">
+            <Undo2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleRedo} disabled={historyIdx >= history.length - 1} title="Redo (Ctrl+Shift+Z)">
+            <Redo2 className="w-4 h-4" />
+          </Button>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => { if(confirm('Clear?')) { setPainted({}); pushHistory({}); } }}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+
+        <div className="flex items-center gap-4">
           <div className="flex gap-1">
             {['hsl(var(--primary))', '#3b82f6', '#10b981', '#f59e0b', '#ffffff'].map(c => (
-              <button key={c} onClick={() => setColor(c)} className={cn("w-6 h-6 rounded-full border-2", color === c ? "border-white" : "border-transparent")} style={{ backgroundColor: c }} />
+              <button 
+                key={c} 
+                onClick={() => setColor(c)} 
+                className={cn(
+                  "w-6 h-6 rounded-full border-2 transition-all", 
+                  color === c ? "border-white scale-110" : "border-transparent opacity-70 hover:opacity-100"
+                )} 
+                style={{ backgroundColor: c }} 
+              />
             ))}
           </div>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => { if(confirm('Clear entire canvas?')) { setPainted({}); pushHistory({}); } }}
+            className="hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 relative overflow-hidden cursor-crosshair touch-none" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={e => e.preventDefault()}>
-        <svg width="100%" height="100%" className="absolute inset-0">
-          <g transform={`translate(${dims.w/2}, ${dims.h/2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}>
+
+      {/* Grid Canvas */}
+      <div 
+        ref={containerRef} 
+        className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none" 
+        onPointerDown={onPointerDown} 
+        onPointerMove={onPointerMove} 
+        onPointerUp={onPointerUp} 
+        onPointerLeave={onPointerUp}
+        onWheel={onWheel} 
+        onContextMenu={e => e.preventDefault()}
+        tabIndex={0}
+      >
+        <svg width="100%" height="100%" className="absolute inset-0 pointer-events-none">
+          <g transform={`translate(${size.width/2}, ${size.height/2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}>
             {gridContent}
             {guides}
           </g>
         </svg>
-        <div className="absolute bottom-4 left-4 p-2 bg-black/50 rounded text-[10px] text-muted-foreground border border-white/10 uppercase">
-          {Math.round(view.zoom * 100)}% • {Object.keys(painted).length} items
+
+        {/* Viewport Info Overlay */}
+        <div className="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none">
+          <div className="px-2 py-1 bg-black/40 backdrop-blur-sm rounded text-[10px] text-muted-foreground font-mono uppercase border border-white/5">
+            {Math.round(view.zoom * 100)}% ZOOM • {Object.keys(painted).length} TRIANGLES
+          </div>
+          <div className="px-2 py-1 bg-black/40 backdrop-blur-sm rounded text-[10px] text-muted-foreground font-mono uppercase border border-white/5">
+            POS: {Math.round(view.x)}, {Math.round(view.y)}
+          </div>
+        </div>
+        
+        <div className="absolute bottom-4 right-4 text-[10px] text-muted-foreground/50 pointer-events-none hidden md:block">
+          LEFT: PAINT • RIGHT: PAN • SCROLL: ZOOM
         </div>
       </div>
     </div>
