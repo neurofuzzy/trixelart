@@ -17,7 +17,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useCanvasSize } from '@/hooks/use-canvas-size';
 import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
-import { useToast } from '@/hooks/use-toast';
 
 const GRAYSCALE_PALETTE = ['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'];
 
@@ -151,7 +150,6 @@ export default function SymmetriaGrid() {
       }
     };
     reader.readAsText(file);
-    // Reset input so the same file can be selected again
     e.target.value = '';
   };
 
@@ -227,7 +225,6 @@ export default function SymmetriaGrid() {
       setPainted(prev => {
         const next = { ...prev };
         if (tool === 'paint') {
-          // Toggle off if same color, otherwise paint
           if (prev[key] === color) {
             delete next[key];
           } else {
@@ -247,7 +244,6 @@ export default function SymmetriaGrid() {
       const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
       const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
       
-      // Update hasMoved for color picker logic
       const totalDist = Math.hypot(
         e.clientX - (interaction.current.startPos?.x || 0), 
         e.clientY - (interaction.current.startPos?.y || 0)
@@ -263,7 +259,6 @@ export default function SymmetriaGrid() {
       
       setPainted(prev => {
         if (tool === 'paint') {
-          // During drag, we ONLY paint. We don't toggle.
           if (prev[key] === color) return prev;
           return { ...prev, [key]: color };
         } else {
@@ -277,7 +272,6 @@ export default function SymmetriaGrid() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    // Right-click color picker logic
     if (interaction.current.isPanning && !interaction.current.hasMoved) {
       const pos = getRelativePointer(e);
       const world = screenToWorld(pos.x, pos.y);
@@ -366,7 +360,6 @@ export default function SymmetriaGrid() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background select-none">
-      {/* Hidden File Input for Import */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -403,52 +396,32 @@ export default function SymmetriaGrid() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex gap-1">
-            {GRAYSCALE_PALETTE.map((c, i) => (
-              <button 
-                key={c} 
-                onClick={() => {
-                  setColor(c);
-                  setTool('paint');
-                }} 
-                title={`Color ${i + 1} (${i + 1})`}
-                className={cn(
-                  "w-6 h-6 rounded-full border-2 transition-all", 
-                  color === c ? "border-white scale-110" : "border-transparent opacity-70 hover:opacity-100"
-                )} 
-                style={{ backgroundColor: c }} 
-              />
-            ))}
-          </div>
-          
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="hover:bg-destructive/10 hover:text-destructive"
-                title="Clear Everything"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete all your drawing data from the infinite grid. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={clearCanvas} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                  Clear Everything
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="hover:bg-destructive/10 hover:text-destructive"
+              title="Clear Everything"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete all your drawing data from the infinite grid. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={clearCanvas} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                Clear Everything
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Grid Canvas */}
@@ -469,6 +442,25 @@ export default function SymmetriaGrid() {
             {guides}
           </g>
         </svg>
+
+        {/* Floating Bottom Palette */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40">
+          {GRAYSCALE_PALETTE.map((c, i) => (
+            <button 
+              key={c} 
+              onClick={() => {
+                setColor(c);
+                setTool('paint');
+              }} 
+              title={`Color ${i + 1} (${i + 1})`}
+              className={cn(
+                "w-8 h-8 rounded-full border-2 transition-all hover:scale-110", 
+                color === c ? "border-white scale-125 shadow-lg" : "border-white/10 opacity-70"
+              )} 
+              style={{ backgroundColor: c }} 
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
