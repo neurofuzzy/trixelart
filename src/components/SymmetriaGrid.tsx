@@ -16,6 +16,7 @@ const HEIGHT = (Math.sqrt(3) / 2) * SIDE;
 export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
+  const [hasAutoCentered, setHasAutoCentered] = useState(false);
   
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [isPanning, setIsPanning] = useState(false);
@@ -25,26 +26,40 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
 
   useEffect(() => {
     setMounted(true);
-    if (!containerRef.current) return;
+    const el = containerRef.current;
+    if (!el) return;
 
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        setDimensions({ width, height });
+      const entry = entries[0];
+      if (entry) {
+        setDimensions({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
       }
     });
 
-    observer.observe(containerRef.current);
+    observer.observe(el);
+    
+    // Immediate measurement
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setDimensions({ width: rect.width, height: rect.height });
+    }
+
     return () => observer.disconnect();
   }, []);
 
+  // Auto-center once we have dimensions
   useEffect(() => {
-    if (mounted && dimensions.width > 0 && dimensions.height > 0 && view.x === 0 && view.y === 0) {
+    if (mounted && dimensions.width > 0 && dimensions.height > 0 && !hasAutoCentered) {
       setView({ x: dimensions.width / 2, y: dimensions.height / 2, zoom: 1 });
+      setHasAutoCentered(true);
     }
-  }, [mounted, dimensions, view.x, view.y]);
+  }, [mounted, dimensions, hasAutoCentered]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Right click (2), middle click (1), or alt+left click
     if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
@@ -110,6 +125,8 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     const s = SIDE * zoom;
     const h = HEIGHT * zoom;
 
+    // Calculate range of rows/cols that are visible
+    // We add buffer to avoid pop-in
     const minRow = Math.floor((-offsetY) / h) - 2;
     const maxRow = Math.ceil((dimensions.height - offsetY) / h) + 2;
     const minCol = Math.floor((-offsetX) / (s / 2)) - 2;
@@ -123,6 +140,8 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         const x = c * (s / 2) + offsetX;
         const yBase = r * h + offsetY;
 
+        // Points for equilateral triangle
+        // Format to fixed string precision to avoid hydration mismatch
         const xF = x.toFixed(2);
         const yF = yBase.toFixed(2);
         const sF = (x + s).toFixed(2);
@@ -160,6 +179,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
       onWheel={handleWheel}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* HUD overlays */}
       <div className="absolute top-8 left-8 flex flex-col gap-2 pointer-events-none z-10">
         <div className="flex items-center gap-3 bg-white/5 backdrop-blur-xl px-5 py-3 rounded-2xl border border-white/10 shadow-2xl">
           <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -180,7 +200,9 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         </button>
       </div>
 
+      {/* Grid SVG */}
       <svg width="100%" height="100%" className="block">
+        {/* Origin Marker */}
         <circle cx={view.x} cy={view.y} r={4 / view.zoom} fill="var(--primary)" opacity={0.2} />
         
         {visibleTriangles.map((tri) => (
@@ -209,6 +231,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         ))}
       </svg>
       
+      {/* Interaction Help */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-6 px-8 py-3 bg-black/80 backdrop-blur-2xl rounded-full border border-white/5 shadow-2xl pointer-events-none whitespace-nowrap">
         <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium uppercase">
           <MousePointer2 className="h-3 w-3" />
