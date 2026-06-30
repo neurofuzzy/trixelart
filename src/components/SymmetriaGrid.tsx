@@ -40,8 +40,16 @@ export default function SymmetriaGrid() {
   const interaction = useRef<{
     isPainting: boolean;
     isPanning: boolean;
+    hasMoved: boolean;
+    startPos: { x: number; y: number } | null;
     lastPos: { x: number; y: number } | null;
-  }>({ isPainting: false, isPanning: false, lastPos: null });
+  }>({ 
+    isPainting: false, 
+    isPanning: false, 
+    hasMoved: false,
+    startPos: null,
+    lastPos: null 
+  });
 
   // 1. Initialization and Persistence
   useEffect(() => {
@@ -155,10 +163,19 @@ export default function SymmetriaGrid() {
       interaction.current = { 
         isPainting: false, 
         isPanning: true, 
+        hasMoved: false,
+        startPos: { x: e.clientX, y: e.clientY },
         lastPos: { x: e.clientX, y: e.clientY } 
       };
     } else {
-      interaction.current = { isPainting: true, isPanning: false, lastPos: null };
+      interaction.current = { 
+        isPainting: true, 
+        isPanning: false, 
+        hasMoved: false,
+        startPos: { x: e.clientX, y: e.clientY },
+        lastPos: null 
+      };
+      
       const world = screenToWorld(pos.x, pos.y);
       const key = triToString(worldToTri(world.x, world.y));
       
@@ -184,6 +201,14 @@ export default function SymmetriaGrid() {
     if (interaction.current.isPanning && interaction.current.lastPos) {
       const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
       const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
+      
+      // Update hasMoved for color picker logic
+      const totalDist = Math.hypot(
+        e.clientX - (interaction.current.startPos?.x || 0), 
+        e.clientY - (interaction.current.startPos?.y || 0)
+      );
+      if (totalDist > 3) interaction.current.hasMoved = true;
+
       setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
     } else if (interaction.current.isPainting) {
@@ -207,10 +232,29 @@ export default function SymmetriaGrid() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    // Right-click color picker logic
+    if (interaction.current.isPanning && !interaction.current.hasMoved) {
+      const pos = getRelativePointer(e);
+      const world = screenToWorld(pos.x, pos.y);
+      const key = triToString(worldToTri(world.x, world.y));
+      const pickedColor = painted[key];
+      if (pickedColor) {
+        setColor(pickedColor);
+        setTool('paint');
+      }
+    }
+
     if (interaction.current.isPainting) {
       pushHistory(painted);
     }
-    interaction.current = { isPainting: false, isPanning: false, lastPos: null };
+    
+    interaction.current = { 
+      isPainting: false, 
+      isPanning: false, 
+      hasMoved: false, 
+      startPos: null, 
+      lastPos: null 
+    };
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
