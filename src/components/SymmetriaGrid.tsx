@@ -297,20 +297,6 @@ export default function SymmetriaGrid() {
             {guides}
           </g>
         </svg>
-
-        {/* Viewport Info Overlay */}
-        <div className="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none">
-          <div className="px-2 py-1 bg-black/40 backdrop-blur-sm rounded text-[10px] text-muted-foreground font-mono uppercase border border-white/5">
-            {Math.round(view.zoom * 100)}% ZOOM • {Object.keys(painted).length} TRIANGLES
-          </div>
-          <div className="px-2 py-1 bg-black/40 backdrop-blur-sm rounded text-[10px] text-muted-foreground font-mono uppercase border border-white/5">
-            POS: {Math.round(view.x)}, {Math.round(view.y)}
-          </div>
-        </div>
-        
-        <div className="absolute bottom-4 right-4 text-[10px] text-muted-foreground/50 pointer-events-none hidden md:block">
-          LEFT: PAINT • RIGHT: PAN • SCROLL: ZOOM
-        </div>
       </div>
     </div>
   );
