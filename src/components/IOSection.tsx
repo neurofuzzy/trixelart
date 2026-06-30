@@ -1,3 +1,4 @@
+
 "use client";
 
 import React from "react";
@@ -11,20 +12,20 @@ interface IOSectionProps {
 
 export function IOSection({ jsonValue, setJsonValue }: IOSectionProps) {
   return (
-    <div className="mt-8 p-6 bg-card rounded-2xl border shadow-sm">
+    <div className="p-6 bg-card rounded-3xl border shadow-xl">
       <div className="flex flex-col gap-4">
-        <Label htmlFor="grid-json" className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Grid JSON Data
+        <Label htmlFor="grid-json" className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          Spatial Data
         </Label>
         <Textarea
           id="grid-json"
-          placeholder="Paste or copy grid JSON here..."
-          className="font-mono text-xs min-h-[120px] bg-muted/50 focus:bg-background transition-colors"
+          placeholder="Sparse coordinate JSON..."
+          className="font-mono text-[10px] min-h-[140px] bg-muted/20 border-none focus:ring-1 focus:ring-primary rounded-xl resize-none"
           value={jsonValue}
           onChange={(e) => setJsonValue(e.target.value)}
         />
-        <p className="text-[10px] text-muted-foreground italic">
-          Tip: You can manually edit the array indices to precise values. The grid supports 36 positions (0-35).
+        <p className="text-[9px] text-muted-foreground italic leading-relaxed">
+          The canvas is stored as a spatial map. You can paste coordinates from other sessions here.
         </p>
       </div>
     </div>
