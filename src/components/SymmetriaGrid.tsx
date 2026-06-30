@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useRef, useMemo, useState, useEffect } from "react";
@@ -12,7 +11,7 @@ interface SymmetriaGridProps {
 
 /**
  * SymmetriaGrid renders a unified 36-triangle side-6 equilateral grid.
- * The construction is centered on its centroid for balanced interaction.
+ * Centered on its centroid for a balanced drawing experience.
  */
 export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridProps) {
   const isDragging = useRef(false);
@@ -32,17 +31,14 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     const list: string[] = [];
     const H = (Math.sqrt(3) / 2) * SIDE_UNIT;
     
-    // Large triangle side length 6
     const totalHeight = 6 * H;
     const totalWidth = 6 * SIDE_UNIT;
     
-    // Centroid of the large triangle
     const centroidOffset = {
       x: totalWidth / 2,
-      y: totalHeight / 3 // Distance from bottom to centroid
+      y: totalHeight / 3 
     };
 
-    // Calculate row by row (6 rows, total 36 triangles)
     for (let r = 0; r < 6; r++) {
       const rowY = (6 - r) * H;
       const startX = (6 - r - 1) * (SIDE_UNIT / 2);
@@ -62,8 +58,8 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         }
 
         const format = (p: { x: number; y: number }) => {
-          const finalX = (p.x - centroidOffset.x + CENTER_X).toFixed(3);
-          const finalY = (p.y - (totalHeight - centroidOffset.y) + CENTER_Y).toFixed(3);
+          const finalX = (p.x - centroidOffset.x + CENTER_X).toFixed(6);
+          const finalY = (p.y - (totalHeight - centroidOffset.y) + CENTER_Y).toFixed(6);
           return `${finalX},${finalY}`;
         };
 
@@ -74,9 +70,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   }, [SIDE_UNIT, CENTER_X, CENTER_Y]);
 
   if (!mounted) {
-    return (
-      <div className="relative aspect-square w-full max-w-[500px] mx-auto bg-card/10 animate-pulse rounded-full" />
-    );
+    return <div className="aspect-square w-full max-w-[500px] mx-auto bg-card/10 animate-pulse rounded-full" />;
   }
 
   const handleInteraction = (i: number) => {
@@ -94,8 +88,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         onMouseLeave={() => (isDragging.current = false)}
         onMouseUp={() => (isDragging.current = false)}
       >
-        <circle cx="250" cy="250" r="240" className="fill-card/30 stroke-border/10" strokeWidth="1" />
-        
         {grid.map((color, i) => (
           <polygon
             key={i}
@@ -104,8 +96,10 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             stroke="currentColor"
             strokeWidth="0.5"
             className={cn(
-              "cursor-pointer transition-all duration-300 hover:opacity-80",
-              color ? "stroke-black/10 dark:stroke-white/10" : "text-muted-foreground/20 hover:text-muted-foreground/40"
+              "cursor-pointer transition-colors duration-200",
+              color 
+                ? "stroke-white/10" 
+                : "text-muted-foreground/10 hover:text-muted-foreground/30"
             )}
             onMouseDown={(e) => {
               e.preventDefault();
@@ -120,9 +114,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             }}
           />
         ))}
-        
-        {/* Centroid indicator - where 6 triangles meet */}
-        <circle cx="250" cy="250" r="4" className="fill-accent shadow-sm animate-pulse pointer-events-none" />
       </svg>
     </div>
   );
