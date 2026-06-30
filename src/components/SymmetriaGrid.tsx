@@ -151,24 +151,24 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return ${formula}; } catch(e) { return false; }`);
       
-      const range = Math.ceil(extent);
+      const range = Math.ceil(extent * 1.5);
       
       for (let q = -range; q <= range; q++) {
         for (let r = -range; r <= range; r++) {
-          // Axial mapping for 'up' triangle (sum 0)
-          const aUp = 2 * q + r;
-          const bUp = r - q;
-          const cUp = -q - 2 * r;
+          // Up triangle: a=q, b=r, c=-q-r
+          const aUp = q;
+          const bUp = r;
+          const cUp = -q - r;
           if (Math.abs(aUp) <= extent && Math.abs(bUp) <= extent && Math.abs(cUp) <= extent) {
             if (check(aUp, bUp, cUp)) {
               newPainted[`${q},${r},up`] = color;
             }
           }
 
-          // Axial mapping for 'down' triangle (sum 1)
-          const aDn = 2 * q + r + 1;
-          const bDn = r - q + 1;
-          const cDn = -q - 2 * r - 1;
+          // Down triangle: a=q, b=r, c=-q-r+1
+          const aDn = q;
+          const bDn = r;
+          const cDn = -q - r + 1;
           if (Math.abs(aDn) <= extent && Math.abs(bDn) <= extent && Math.abs(cDn) <= extent) {
             if (check(aDn, bDn, cDn)) {
               newPainted[`${q},${r},down`] = color;
