@@ -17,7 +17,7 @@ export default function TriStudioPage() {
   useEffect(() => {
     const timeout = setTimeout(() => {
       setJsonValue(JSON.stringify(grid));
-    }, 100);
+    }, 200);
     return () => clearTimeout(timeout);
   }, [grid]);
 

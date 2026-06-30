@@ -47,13 +47,13 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   }, [mounted, dimensions]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Left click with Alt OR Middle click (button 1) pans
+    // Middle click OR Alt + Left click pans
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
       containerRef.current?.setPointerCapture(e.pointerId);
     } else if (e.button === 0) {
-      // Normal left click paints
+      // Normal left click starts painting
       setIsPainting(true);
     }
   };
@@ -70,7 +70,9 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   const handlePointerUp = (e: React.PointerEvent) => {
     setIsPanning(false);
     setIsPainting(false);
-    containerRef.current?.releasePointerCapture(e.pointerId);
+    if (containerRef.current) {
+      containerRef.current.releasePointerCapture(e.pointerId);
+    }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -121,27 +123,22 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     for (let r = minRow; r <= maxRow; r++) {
       for (let c = minCol; c <= maxCol; c++) {
         const id = `${r},${c}`;
-        // Parity-based upward check that handles negative indices
+        // Consistent parity check for negative indices
         const isUpward = (Math.abs(r + c) % 2) === 1;
 
-        let points = "";
         const x = c * (s / 2) + offsetX;
         const yBase = r * h + offsetY;
 
-        // Use fixed precision to avoid hydration mismatches
+        // Fixed precision for hydration
         const xF = x.toFixed(2);
         const yF = yBase.toFixed(2);
         const sF = (x + s).toFixed(2);
         const shF = (x + s / 2).toFixed(2);
         const hF = (yBase + h).toFixed(2);
 
-        if (isUpward) {
-          // Pointing UP: bottom-left, bottom-right, top-center
-          points = `${xF},${hF} ${sF},${hF} ${shF},${yF}`;
-        } else {
-          // Pointing DOWN: top-left, top-right, bottom-center
-          points = `${xF},${yF} ${sF},${yF} ${shF},${hF}`;
-        }
+        const points = isUpward 
+          ? `${xF},${hF} ${sF},${hF} ${shF},${yF}`
+          : `${xF},${yF} ${sF},${yF} ${shF},${hF}`;
 
         triangles.push({ id, points, color: grid[id] });
       }
@@ -150,16 +147,15 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   }, [dimensions, view, grid]);
 
   const handleCellAction = useCallback((id: string, currentColor: string | null) => {
-    if (isPainting && !isPanning) {
-      onCellClick(id, currentColor === activeColor ? null : activeColor);
-    }
-  }, [isPainting, isPanning, activeColor, onCellClick]);
+    const nextColor = currentColor === activeColor ? null : activeColor;
+    onCellClick(id, nextColor);
+  }, [activeColor, onCellClick]);
 
   const resetView = () => {
     setView({ x: dimensions.width / 2, y: dimensions.height / 2, zoom: 1 });
   };
 
-  if (!mounted) return <div className="w-full h-full bg-black rounded-[2.5rem] animate-pulse" />;
+  if (!mounted) return <div className="w-full h-full bg-[#050505] rounded-[2.5rem] animate-pulse" />;
 
   return (
     <div 
@@ -171,7 +167,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
       onWheel={handleWheel}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* Viewport UI Overlay */}
       <div className="absolute top-8 left-8 flex flex-col gap-2 pointer-events-none z-10">
         <div className="flex items-center gap-3 bg-white/5 backdrop-blur-xl px-5 py-3 rounded-2xl border border-white/10 shadow-2xl">
           <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -182,7 +177,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         </div>
       </div>
 
-      {/* Floating Controls */}
       <div className="absolute top-8 right-8 flex flex-col gap-2 z-20">
         <button 
           onClick={resetView}
@@ -194,7 +188,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
       </div>
 
       <svg width="100%" height="100%" className="block">
-        {/* Origin Marker */}
         <circle cx={view.x} cy={view.y} r={4 / view.zoom} fill="var(--primary)" opacity={0.2} />
         
         {visibleTriangles.map((tri) => (
@@ -202,7 +195,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             key={tri.id}
             points={tri.points}
             fill={tri.color || "transparent"}
-            stroke="rgba(255, 255, 255, 0.04)"
+            stroke="rgba(255, 255, 255, 0.05)"
             strokeWidth={0.5}
             className={cn(
               "transition-colors duration-150",
@@ -210,12 +203,13 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             )}
             onPointerDown={(e) => {
               if (e.button === 0 && !e.altKey) {
-                e.stopPropagation();
+                // Ensure painting state is set even if propagation was stopped
+                setIsPainting(true);
                 handleCellAction(tri.id, tri.color || null);
               }
             }}
             onPointerEnter={() => {
-              if (isPainting) {
+              if (isPainting && !isPanning) {
                 handleCellAction(tri.id, tri.color || null);
               }
             }}
@@ -223,16 +217,15 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         ))}
       </svg>
       
-      {/* Help Bar */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-6 px-8 py-3 bg-black/80 backdrop-blur-2xl rounded-full border border-white/5 shadow-2xl pointer-events-none whitespace-nowrap">
-        <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium">
+        <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium uppercase">
           <MousePointer2 className="h-3 w-3" />
-          <span>PAINT</span>
+          <span>Click/Drag to Paint</span>
         </div>
         <div className="w-px h-3 bg-white/10" />
-        <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium">
+        <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium uppercase">
           <Move className="h-3 w-3" />
-          <span className="uppercase">Alt + Drag to Pan</span>
+          <span>Alt + Drag to Pan</span>
         </div>
         <div className="w-px h-3 bg-white/10" />
         <div className="text-[10px] text-white/40 font-medium uppercase tracking-tighter">
