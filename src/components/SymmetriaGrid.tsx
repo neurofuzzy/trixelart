@@ -36,7 +36,7 @@ export default function SymmetriaGrid() {
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
-  // Interaction Ref to avoid re-renders during drag
+  // Interaction Ref
   const interaction = useRef<{
     isPainting: boolean;
     isPanning: boolean;
@@ -105,28 +105,24 @@ export default function SymmetriaGrid() {
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
-      // Undo/Redo (Meta/Ctrl + Z)
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) handleRedo(); else handleUndo();
         return;
       }
 
-      // Ignore shortcuts if an input or dialog is active
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      // Tool selection
       if (e.key.toLowerCase() === 'p') {
         setTool('paint');
       } else if (e.key.toLowerCase() === 'e') {
         setTool('erase');
       }
 
-      // Color selection (1-5)
       const colorIdx = parseInt(e.key) - 1;
       if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
         setColor(GRAYSCALE_PALETTE[colorIdx]);
-        setTool('paint'); // Auto-switch to paint when choosing a color
+        setTool('paint');
       }
     };
     window.addEventListener('keydown', handleKeys);
@@ -168,8 +164,16 @@ export default function SymmetriaGrid() {
       
       setPainted(prev => {
         const next = { ...prev };
-        if (tool === 'paint') next[key] = color;
-        else delete next[key];
+        if (tool === 'paint') {
+          // Toggle off if same color, otherwise paint
+          if (prev[key] === color) {
+            delete next[key];
+          } else {
+            next[key] = color;
+          }
+        } else {
+          delete next[key];
+        }
         return next;
       });
     }
@@ -189,6 +193,7 @@ export default function SymmetriaGrid() {
       
       setPainted(prev => {
         if (tool === 'paint') {
+          // During drag, we ONLY paint. We don't toggle.
           if (prev[key] === color) return prev;
           return { ...prev, [key]: color };
         } else {
@@ -223,7 +228,6 @@ export default function SymmetriaGrid() {
 
     const triangles: JSX.Element[] = [];
     const buffer = 3;
-    
     const worldTopLeft = screenToWorld(0, 0);
     const worldBottomRight = screenToWorld(size.width, size.height);
     
