@@ -5,6 +5,13 @@
  * - SIDE is the length of a triangle edge.
  * - H is the height of an equilateral triangle (SIDE * sqrt(3) / 2).
  * - Each "cell" is a rhombus containing one 'up' and one 'down' triangle.
+ * 
+ * Analytical Coordinates (a, b, c):
+ * - a = horizontal row index (0 deg)
+ * - b = diagonal strip index (60 deg)
+ * - c = diagonal strip index (120 deg)
+ * - Up triangles: a + b + c = -1
+ * - Down triangles: a + b + c = -2
  */
 
 export const SIDE = 50;
@@ -43,6 +50,17 @@ export const worldToTri = (wx: number, wy: number): TriKey => {
   
   return { q: fq, r: fr, type };
 };
+
+/** 
+ * Returns the analytical coordinates for a triangle.
+ * Useful for math-based symmetry rules.
+ */
+export function getTriABC(q: number, r: number, type: TriType) {
+  const a = r;
+  const b = q;
+  const c = type === 'up' ? -1 - a - b : -2 - a - b;
+  return { a, b, c };
+}
 
 /** Generates the SVG path string for a specific triangle */
 export const getTriPath = (q: number, r: number, type: TriType) => {

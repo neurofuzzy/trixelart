@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -151,37 +150,24 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return !!(${formula}); } catch(e) { return false; }`);
       
-      const range = Math.ceil(extent * 2);
-      const SQRT3_2 = Math.sqrt(3) / 2;
-      
-      for (let r = -range; r <= range; r++) {
-        for (let q = -range; q <= range; q++) {
-          const bx = q * SIDE + r * (SIDE / 2);
-          const by = r * H;
-
-          // Up Triangle Centroid
-          const ux = bx + SIDE / 2;
-          const uy = by + H / 3;
-          const ua = Math.floor(uy / H);
-          const ub = Math.floor((SQRT3_2 * ux - 0.5 * uy) / H);
-          const uc = Math.floor((-SQRT3_2 * ux - 0.5 * uy) / H);
+      // We iterate using analytical coordinates (a, b) and solve for c.
+      // a = r, b = q.
+      for (let a = -extent; a <= extent; a++) {
+        for (let b = -extent; b <= extent; b++) {
           
-          if (Math.abs(ua) <= extent && Math.abs(ub) <= extent && Math.abs(uc) <= extent) {
-            if (check(ua, ub, uc)) {
-              newPainted[`${q},${r},up`] = color;
+          // Up triangle check: a + b + c = -1
+          const cUp = -1 - a - b;
+          if (Math.abs(cUp) <= extent) {
+            if (check(a, b, cUp)) {
+              newPainted[`${b},${a},up`] = color;
             }
           }
 
-          // Down Triangle Centroid
-          const dx = bx + SIDE;
-          const dy = by + 2 * H / 3;
-          const da = Math.floor(dy / H);
-          const db = Math.floor((SQRT3_2 * dx - 0.5 * dy) / H);
-          const dc = Math.floor((-SQRT3_2 * dx - 0.5 * dy) / H);
-
-          if (Math.abs(da) <= extent && Math.abs(db) <= extent && Math.abs(dc) <= extent) {
-            if (check(da, db, dc)) {
-              newPainted[`${q},${r},down`] = color;
+          // Down triangle check: a + b + c = -2
+          const cDown = -2 - a - b;
+          if (Math.abs(cDown) <= extent) {
+            if (check(a, b, cDown)) {
+              newPainted[`${b},${a},down`] = color;
             }
           }
         }
