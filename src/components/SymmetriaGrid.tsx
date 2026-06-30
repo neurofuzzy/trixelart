@@ -28,11 +28,11 @@ export default function SymmetriaGrid() {
   const isPanningRef = useRef(false);
   const lastPointerPos = useRef({ x: 0, y: 0 });
 
-  // Measure container and initialize
+  // 1. Initial Measurement & Persistence Restoration
   useEffect(() => {
     setMounted(true);
     
-    const saved = localStorage.getItem('symmetria-save-v10');
+    const saved = localStorage.getItem('symmetria-save-v12');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -68,16 +68,17 @@ export default function SymmetriaGrid() {
     };
   }, []);
 
+  // 2. History Persistence
   const saveToHistory = useCallback((newState: TriangleState) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push({ ...newState });
     if (newHistory.length > 50) newHistory.shift();
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-    localStorage.setItem('symmetria-save-v10', JSON.stringify(newState));
+    localStorage.setItem('symmetria-save-v12', JSON.stringify(newState));
   }, [history, historyIndex]);
 
-  // Keyboard Shortcuts
+  // 3. Keyboard Shortcuts (Undo/Redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
@@ -107,11 +108,12 @@ export default function SymmetriaGrid() {
     }
   };
 
+  // 4. World Coordinate Conversion
   const screenToWorld = (sx: number, sy: number) => {
     if (!containerRef.current || dimensions.width === 0) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
-    const relX = sx - rect.left - dimensions.width / 2;
-    const relY = sy - rect.top - dimensions.height / 2;
+    const relX = (sx - rect.left) - dimensions.width / 2;
+    const relY = (sy - rect.top) - dimensions.height / 2;
     return {
       x: (relX - viewport.x) / viewport.zoom,
       y: (relY - viewport.y) / viewport.zoom,
@@ -128,6 +130,7 @@ export default function SymmetriaGrid() {
     return `${q},${r},${isUp ? 0 : 1}`;
   };
 
+  // 5. Interaction Handlers
   const paintAt = (sx: number, sy: number) => {
     const world = screenToWorld(sx, sy);
     const key = getTriangleAt(world.x, world.y);
@@ -143,10 +146,10 @@ export default function SymmetriaGrid() {
 
   const handlePointerDown = (e: React.PointerEvent) => {
     lastPointerPos.current = { x: e.clientX, y: e.clientY };
-    if (e.button === 0 && !e.altKey) {
+    if (e.button === 0) {
       isPaintingRef.current = true;
       paintAt(e.clientX, e.clientY);
-    } else {
+    } else if (e.button === 2) {
       isPanningRef.current = true;
     }
     containerRef.current?.setPointerCapture(e.pointerId);
@@ -171,11 +174,12 @@ export default function SymmetriaGrid() {
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    const factor = Math.pow(1.1, -e.deltaY / 150);
+    const factor = Math.pow(1.1, -e.deltaY / 200);
     const newZoom = Math.max(0.1, Math.min(20, viewport.zoom * factor));
     setViewport(prev => ({ ...prev, zoom: newZoom }));
   };
 
+  // 6. SVG Render Content
   const gridContent = useMemo(() => {
     if (!mounted || dimensions.width === 0) return null;
     const elements: React.ReactNode[] = [];
@@ -237,6 +241,7 @@ export default function SymmetriaGrid() {
 
   return (
     <div className="relative w-full h-full flex flex-col bg-[#050505] select-none overflow-hidden touch-none">
+      {/* HUD Toolbar */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2 bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl">
         <Button variant={tool === 'pen' ? 'secondary' : 'ghost'} size="icon" onClick={() => setTool('pen')} className="rounded-xl h-10 w-10">
           <MousePointer2 className="w-5 h-5" />
@@ -267,8 +272,17 @@ export default function SymmetriaGrid() {
         </Button>
       </div>
 
-      <div ref={containerRef} className="w-full h-full cursor-crosshair" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onWheel={handleWheel} onContextMenu={e => e.preventDefault()}>
-        <svg className="w-full h-full">
+      {/* Main Canvas Area */}
+      <div 
+        ref={containerRef} 
+        className="w-full h-full cursor-crosshair" 
+        onPointerDown={handlePointerDown} 
+        onPointerMove={handlePointerMove} 
+        onPointerUp={handlePointerUp} 
+        onWheel={handleWheel} 
+        onContextMenu={e => e.preventDefault()}
+      >
+        <svg className="w-full h-full block">
           <g transform={`translate(${dimensions.width/2 + viewport.x}, ${dimensions.height/2 + viewport.y}) scale(${viewport.zoom})`}>
             {guides}
             {gridContent}
@@ -276,6 +290,7 @@ export default function SymmetriaGrid() {
         </svg>
       </div>
 
+      {/* Telemetry Footer */}
       <div className="absolute bottom-6 left-8 z-50 flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-white/30 pointer-events-none">
         <div className="flex gap-4">
           <span>X: {Math.round(-viewport.x)} Y: {Math.round(-viewport.y)}</span>
