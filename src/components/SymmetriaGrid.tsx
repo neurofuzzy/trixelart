@@ -17,7 +17,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   const containerRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   
-  // Navigation State
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const [isPainting, setIsPainting] = useState(false);
@@ -26,35 +25,31 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
 
   useEffect(() => {
     setMounted(true);
-    const updateSize = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({ width, height });
       }
-    };
-    updateSize();
-    window.addEventListener("resize", updateSize);
-    return () => window.removeEventListener("resize", updateSize);
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, []);
 
-  // Center the grid on mount
   useEffect(() => {
-    if (mounted && dimensions.width && dimensions.height && view.x === 0 && view.y === 0) {
+    if (mounted && dimensions.width > 0 && dimensions.height > 0 && view.x === 0 && view.y === 0) {
       setView({ x: dimensions.width / 2, y: dimensions.height / 2, zoom: 1 });
     }
-  }, [mounted, dimensions]);
+  }, [mounted, dimensions, view.x, view.y]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // 0: Left, 1: Middle, 2: Right
-    // Pan on Right-click (2), Middle-click (1), or Alt+Left-click
     if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
       containerRef.current?.setPointerCapture(e.pointerId);
     } else if (e.button === 0) {
-      // Normal left click starts painting
       setIsPainting(true);
     }
   };
@@ -115,7 +110,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     const s = SIDE * zoom;
     const h = HEIGHT * zoom;
 
-    // Bounds in grid space
     const minRow = Math.floor((-offsetY) / h) - 2;
     const maxRow = Math.ceil((dimensions.height - offsetY) / h) + 2;
     const minCol = Math.floor((-offsetX) / (s / 2)) - 2;
@@ -124,13 +118,11 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     for (let r = minRow; r <= maxRow; r++) {
       for (let c = minCol; c <= maxCol; c++) {
         const id = `${r},${c}`;
-        // Consistent parity check for negative indices
         const isUpward = (Math.abs(r + c) % 2) === 1;
 
         const x = c * (s / 2) + offsetX;
         const yBase = r * h + offsetY;
 
-        // Fixed precision for hydration
         const xF = x.toFixed(2);
         const yF = yBase.toFixed(2);
         const sF = (x + s).toFixed(2);
@@ -204,7 +196,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             )}
             onPointerDown={(e) => {
               if (e.button === 0 && !e.altKey) {
-                // Ensure painting state is set even if propagation was stopped
                 setIsPainting(true);
                 handleCellAction(tri.id, tri.color || null);
               }
@@ -226,7 +217,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         <div className="w-px h-3 bg-white/10" />
         <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium uppercase">
           <Move className="h-3 w-3" />
-          <span>Right-Click / Alt to Pan</span>
+          <span>Right-Click to Pan</span>
         </div>
         <div className="w-px h-3 bg-white/10" />
         <div className="text-[10px] text-white/40 font-medium uppercase tracking-tighter">
