@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -16,7 +15,11 @@ export default function TriStudioPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    setJsonValue(JSON.stringify(grid));
+    // Sync JSON display but debounce it slightly if needed for performance
+    const timeout = setTimeout(() => {
+      setJsonValue(JSON.stringify(grid));
+    }, 100);
+    return () => clearTimeout(timeout);
   }, [grid]);
 
   const handleExport = () => {
@@ -24,8 +27,8 @@ export default function TriStudioPage() {
     setJsonValue(data);
     navigator.clipboard.writeText(data);
     toast({
-      title: "Exported!",
-      description: "Grid state copied to clipboard.",
+      title: "Snapshot Saved",
+      description: "Geometric data copied to clipboard.",
     });
   };
 
@@ -35,47 +38,52 @@ export default function TriStudioPage() {
       if (typeof parsed === 'object' && parsed !== null) {
         importGrid(parsed);
         toast({
-          title: "Import Success",
-          description: "Infinite grid restored.",
+          title: "Session Restored",
+          description: "Canvas state loaded from data.",
         });
       }
     } catch (err) {
       toast({
         variant: "destructive",
-        title: "Import Failed",
-        description: "Invalid JSON grid data.",
+        title: "Input Error",
+        description: "Invalid JSON coordinates provided.",
       });
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center p-4 md:p-8 overflow-hidden dark">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center p-6 md:p-10 overflow-hidden dark">
       <Toaster />
       
-      <header className="w-full max-w-7xl flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 px-4">
+      <header className="w-full max-w-screen-2xl flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4 px-2">
         <div>
-          <h1 className="text-3xl font-bold tracking-tighter text-primary">
-            InfiniteTri
+          <h1 className="text-4xl font-black tracking-tight text-white mb-1">
+            TriStudio<span className="text-primary">.</span>
           </h1>
-          <p className="text-muted-foreground text-sm font-medium">Pan, zoom, and draw across an endless canvas.</p>
+          <p className="text-muted-foreground/60 text-xs font-semibold tracking-widest uppercase">Endless Isotropic Canvas</p>
         </div>
-        <div className="flex items-center gap-4 text-[10px] text-muted-foreground bg-card border rounded-full px-4 py-2 font-mono">
-          <span>DRAG/MIDDLE-CLICK: PAN</span>
-          <span className="opacity-30">|</span>
-          <span>CTRL+WHEEL: ZOOM</span>
+        <div className="hidden lg:flex items-center gap-6 text-[10px] text-muted-foreground/40 font-mono tracking-tighter">
+          <div className="flex gap-2 items-center">
+            <kbd className="bg-white/5 px-2 py-1 rounded border border-white/5">SPACE + DRAG</kbd>
+            <span>PAN</span>
+          </div>
+          <div className="flex gap-2 items-center">
+            <kbd className="bg-white/5 px-2 py-1 rounded border border-white/5">CTRL + SCROLL</kbd>
+            <span>ZOOM</span>
+          </div>
         </div>
       </header>
 
-      <main className="w-full max-w-7xl flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
-        <section className="lg:col-span-9 h-[calc(100vh-280px)] lg:h-[calc(100vh-200px)]">
+      <main className="w-full max-w-screen-2xl flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
+        <section className="lg:col-span-8 xl:col-span-9 h-[500px] lg:h-auto">
           <SymmetriaGrid 
             grid={grid} 
-            onCellClick={(id, current) => updateCell(id, current === activeColor ? null : activeColor)} 
+            onCellClick={updateCell} 
             activeColor={activeColor}
           />
         </section>
 
-        <section className="lg:col-span-3 flex flex-col gap-6 overflow-y-auto pr-2">
+        <section className="lg:col-span-4 xl:col-span-3 flex flex-col gap-8 h-full overflow-y-auto pr-2 custom-scrollbar">
           <Toolbar
             activeColor={activeColor}
             setActiveColor={setActiveColor}
@@ -86,8 +94,6 @@ export default function TriStudioPage() {
             canRedo={canRedo}
             onExport={handleExport}
             onImport={handleImport}
-            onGenerate={() => {}}
-            isGenerating={false}
           />
           
           <IOSection 
@@ -97,8 +103,8 @@ export default function TriStudioPage() {
         </section>
       </main>
 
-      <footer className="mt-8 text-center text-[10px] text-muted-foreground uppercase tracking-[0.2em] w-full max-w-7xl pb-4">
-        TriStudio © 2024 • Endless Isotropic Surface
+      <footer className="mt-12 text-center text-[9px] text-muted-foreground/20 uppercase tracking-[0.4em] w-full pb-6">
+        Precise Vertex Tiling • Sparse Coordinate Storage • Alpha 1.0.2
       </footer>
     </div>
   );

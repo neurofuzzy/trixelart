@@ -1,11 +1,10 @@
-
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 
 /**
- * useGridState manages a sparse infinite grid of triangular cells.
- * Uses a coordinate string key "row,col" to store colors.
+ * useGridState manages an infinite sparse grid of triangular cells.
+ * Coordinates are stored as "row,col" strings.
  */
 export function useGridState() {
   const [grid, setGrid] = useState<Record<string, string>>({});
@@ -13,12 +12,14 @@ export function useGridState() {
   const [redoStack, setRedoStack] = useState<Record<string, string>[]>([]);
 
   const addToHistory = useCallback((newGrid: Record<string, string>) => {
-    setHistory((prev) => [...prev, grid]);
+    setHistory((prev) => [...prev.slice(-49), grid]); // Limit history to 50 steps
     setRedoStack([]);
     setGrid(newGrid);
   }, [grid]);
 
   const updateCell = useCallback((id: string, color: string | null) => {
+    if (grid[id] === color) return;
+    
     const newGrid = { ...grid };
     if (color) {
       newGrid[id] = color;
@@ -45,8 +46,9 @@ export function useGridState() {
   }, [grid, redoStack]);
 
   const clear = useCallback(() => {
+    if (Object.keys(grid).length === 0) return;
     addToHistory({});
-  }, [addToHistory]);
+  }, [grid, addToHistory]);
 
   const importGrid = useCallback((newGrid: Record<string, string>) => {
     addToHistory(newGrid);
