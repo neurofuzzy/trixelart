@@ -47,8 +47,9 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   }, [mounted, dimensions]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Middle click OR Alt + Left click pans
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    // 0: Left, 1: Middle, 2: Right
+    // Pan on Right-click (2), Middle-click (1), or Alt+Left-click
+    if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
       containerRef.current?.setPointerCapture(e.pointerId);
@@ -225,7 +226,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         <div className="w-px h-3 bg-white/10" />
         <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium uppercase">
           <Move className="h-3 w-3" />
-          <span>Alt + Drag to Pan</span>
+          <span>Right-Click / Alt to Pan</span>
         </div>
         <div className="w-px h-3 bg-white/10" />
         <div className="text-[10px] text-white/40 font-medium uppercase tracking-tighter">

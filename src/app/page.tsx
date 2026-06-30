@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { SymmetriaGrid } from "@/components/SymmetriaGrid";
 import { Toolbar } from "@/components/Toolbar";
 import { IOSection } from "@/components/IOSection";
@@ -21,7 +21,27 @@ export default function TriStudioPage() {
     return () => clearTimeout(timeout);
   }, [grid]);
 
-  const handleExport = () => {
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isZ = e.key.toLowerCase() === 'z';
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+
+      if (isCmdOrCtrl && isZ) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (canRedo) redo();
+        } else {
+          if (canUndo) undo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo, canUndo, canRedo]);
+
+  const handleExport = useCallback(() => {
     const data = JSON.stringify(grid, null, 2);
     setJsonValue(data);
     navigator.clipboard.writeText(data);
@@ -29,9 +49,9 @@ export default function TriStudioPage() {
       title: "Data Exported",
       description: "Sparse coordinate map copied to clipboard.",
     });
-  };
+  }, [grid, toast]);
 
-  const handleImport = () => {
+  const handleImport = useCallback(() => {
     try {
       const parsed = JSON.parse(jsonValue);
       if (typeof parsed === 'object' && parsed !== null) {
@@ -48,7 +68,7 @@ export default function TriStudioPage() {
         description: "Invalid grid manifest provided.",
       });
     }
-  };
+  }, [jsonValue, importGrid, toast]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex flex-col p-6 md:p-10 overflow-hidden dark">

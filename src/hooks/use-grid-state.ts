@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+
+const STORAGE_KEY = "tri-studio-grid-manifest";
 
 /**
  * useGridState manages an infinite sparse grid of triangular cells.
@@ -10,6 +12,30 @@ export function useGridState() {
   const [grid, setGrid] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [redoStack, setRedoStack] = useState<Record<string, string>[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Load from local storage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed === 'object' && parsed !== null) {
+          setGrid(parsed);
+        }
+      } catch (e) {
+        console.error("Failed to load grid from local storage", e);
+      }
+    }
+    setIsInitialized(true);
+  }, []);
+
+  // Save to local storage whenever grid changes
+  useEffect(() => {
+    if (isInitialized) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(grid));
+    }
+  }, [grid, isInitialized]);
 
   const addToHistory = useCallback((newGrid: Record<string, string>) => {
     // Optimization: avoid storing duplicates in history
