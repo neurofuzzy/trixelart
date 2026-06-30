@@ -149,21 +149,22 @@ export default function SymmetriaGrid() {
   const runSymmetryFunction = () => {
     const newPainted = { ...painted };
     try {
-      const check = new Function('a', 'b', 'c', `try { return ${formula}; } catch(e) { return false; }`);
+      const check = new Function('a', 'b', 'c', `try { return !!(${formula}); } catch(e) { return false; }`);
       
       const range = Math.ceil(extent * 2);
+      const SQRT3_2 = Math.sqrt(3) / 2;
       
       for (let r = -range; r <= range; r++) {
         for (let q = -range; q <= range; q++) {
           const bx = q * SIDE + r * (SIDE / 2);
           const by = r * H;
 
-          // Up Triangle (pointing down visually)
+          // Up Triangle Centroid
           const ux = bx + SIDE / 2;
           const uy = by + H / 3;
           const ua = Math.floor(uy / H);
-          const ub = Math.floor(-ux / SIDE - uy / (2 * H));
-          const uc = Math.floor(ux / SIDE - uy / (2 * H));
+          const ub = Math.floor((SQRT3_2 * ux - 0.5 * uy) / H);
+          const uc = Math.floor((-SQRT3_2 * ux - 0.5 * uy) / H);
           
           if (Math.abs(ua) <= extent && Math.abs(ub) <= extent && Math.abs(uc) <= extent) {
             if (check(ua, ub, uc)) {
@@ -171,12 +172,12 @@ export default function SymmetriaGrid() {
             }
           }
 
-          // Down Triangle (pointing up visually)
+          // Down Triangle Centroid
           const dx = bx + SIDE;
           const dy = by + 2 * H / 3;
           const da = Math.floor(dy / H);
-          const db = Math.floor(-dx / SIDE - dy / (2 * H));
-          const dc = Math.floor(dx / SIDE - dy / (2 * H));
+          const db = Math.floor((SQRT3_2 * dx - 0.5 * dy) / H);
+          const dc = Math.floor((-SQRT3_2 * dx - 0.5 * dy) / H);
 
           if (Math.abs(da) <= extent && Math.abs(db) <= extent && Math.abs(dc) <= extent) {
             if (check(da, db, dc)) {
