@@ -9,14 +9,14 @@ import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
 
 export default function SymmetriaGrid() {
   const [mounted, setMounted] = useState(false);
-  const { size, containerRef } = useCanvasSize();
+  const { size, containerRef, updateSize } = useCanvasSize();
   
   // View State (Pan and Zoom)
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   
   // Tool State
   const [tool, setTool] = useState<'paint' | 'erase' | 'pan'>('paint');
-  const [color, setColor] = useState('hsl(var(--primary))');
+  const [color, setColor] = useState('#ffffff');
   
   // Drawing Data
   const [painted, setPainted] = useState<Record<string, string>>({});
@@ -44,7 +44,13 @@ export default function SymmetriaGrid() {
         console.error("Failed to load save", e);
       }
     }
-  }, []);
+
+    // Call resize handler 0.5s after init to ensure layout has settled
+    const timer = setTimeout(() => {
+      updateSize();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [updateSize]);
 
   useEffect(() => {
     if (mounted) localStorage.setItem('symmetria-save', JSON.stringify(painted));
@@ -91,7 +97,6 @@ export default function SymmetriaGrid() {
 
   // 3. Coordinate Translation
   const screenToWorld = useCallback((sx: number, sy: number) => {
-    // Correctly translate screen-relative coordinates to the infinite world space
     return {
       x: (sx - size.width / 2) / view.zoom - view.x,
       y: (sy - size.height / 2) / view.zoom - view.y
@@ -217,14 +222,11 @@ export default function SymmetriaGrid() {
     return triangles;
   }, [size, view, painted, mounted, screenToWorld]);
 
-  // Visual Guides (Origin and Axes)
   const guides = useMemo(() => (
     <g pointerEvents="none">
-      {/* Three Primary Axes */}
       <line x1={-10000} y1={0} x2={10000} y2={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
       <line x1={-5000} y1={-8660} x2={5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
       <line x1={5000} y1={-8660} x2={-5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
-      {/* Origin Dot */}
       <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
     </g>
   ), [view.zoom]);
@@ -256,7 +258,7 @@ export default function SymmetriaGrid() {
 
         <div className="flex items-center gap-4">
           <div className="flex gap-1">
-            {['hsl(var(--primary))', '#3b82f6', '#10b981', '#f59e0b', '#ffffff'].map(c => (
+            {['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'].map(c => (
               <button 
                 key={c} 
                 onClick={() => setColor(c)} 

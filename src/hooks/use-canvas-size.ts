@@ -32,5 +32,5 @@ export function useCanvasSize() {
     };
   }, [updateSize]);
 
-  return { size, containerRef };
+  return { size, containerRef, updateSize };
 }
