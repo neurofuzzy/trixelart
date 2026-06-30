@@ -24,33 +24,32 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const lastPointer = useRef({ x: 0, y: 0 });
 
+  // Handle initialization and resizing
   useEffect(() => {
     setMounted(true);
     const el = containerRef.current;
     if (!el) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
         setDimensions({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
+          width: rect.width,
+          height: rect.height,
         });
       }
-    });
+    };
 
+    const observer = new ResizeObserver(() => measure());
     observer.observe(el);
     
-    // Immediate measurement
-    const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      setDimensions({ width: rect.width, height: rect.height });
-    }
+    // Initial measurement
+    measure();
 
     return () => observer.disconnect();
   }, []);
 
-  // Auto-center once we have dimensions
+  // Auto-center once we have valid dimensions
   useEffect(() => {
     if (mounted && dimensions.width > 0 && dimensions.height > 0 && !hasAutoCentered) {
       setView({ x: dimensions.width / 2, y: dimensions.height / 2, zoom: 1 });
@@ -59,7 +58,7 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   }, [mounted, dimensions, hasAutoCentered]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Right click (2), middle click (1), or alt+left click
+    // Right click (button 2) or Middle click (button 1) or Alt+Left click
     if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
@@ -125,8 +124,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     const s = SIDE * zoom;
     const h = HEIGHT * zoom;
 
-    // Calculate range of rows/cols that are visible
-    // We add buffer to avoid pop-in
     const minRow = Math.floor((-offsetY) / h) - 2;
     const maxRow = Math.ceil((dimensions.height - offsetY) / h) + 2;
     const minCol = Math.floor((-offsetX) / (s / 2)) - 2;
@@ -140,8 +137,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         const x = c * (s / 2) + offsetX;
         const yBase = r * h + offsetY;
 
-        // Points for equilateral triangle
-        // Format to fixed string precision to avoid hydration mismatch
         const xF = x.toFixed(2);
         const yF = yBase.toFixed(2);
         const sF = (x + s).toFixed(2);
@@ -202,8 +197,28 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
 
       {/* Grid SVG */}
       <svg width="100%" height="100%" className="block">
+        {/* Axial Guide Lines */}
+        <g stroke="rgba(255, 255, 255, 0.15)" strokeWidth="1">
+          {/* Horizontal Axis */}
+          <line x1="0" y1={view.y} x2={dimensions.width} y2={view.y} />
+          {/* Diagonal 60 deg */}
+          <line 
+            x1={view.x - dimensions.width} 
+            y1={view.y - dimensions.width * Math.tan(Math.PI/3)} 
+            x2={view.x + dimensions.width} 
+            y2={view.y + dimensions.width * Math.tan(Math.PI/3)} 
+          />
+          {/* Diagonal 120 deg */}
+          <line 
+            x1={view.x - dimensions.width} 
+            y1={view.y + dimensions.width * Math.tan(Math.PI/3)} 
+            x2={view.x + dimensions.width} 
+            y2={view.y - dimensions.width * Math.tan(Math.PI/3)} 
+          />
+        </g>
+
         {/* Origin Marker */}
-        <circle cx={view.x} cy={view.y} r={4 / view.zoom} fill="var(--primary)" opacity={0.2} />
+        <circle cx={view.x} cy={view.y} r={6} fill="var(--primary)" opacity={0.6} />
         
         {visibleTriangles.map((tri) => (
           <polygon
