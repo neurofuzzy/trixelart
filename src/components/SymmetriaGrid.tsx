@@ -4,6 +4,17 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from '@/components/ui/alert-dialog';
 import { useCanvasSize } from '@/hooks/use-canvas-size';
 import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
 
@@ -82,6 +93,12 @@ export default function SymmetriaGrid() {
       setHistoryIdx(historyIdx + 1);
     }
   }, [history, historyIdx]);
+
+  const clearCanvas = () => {
+    const empty = {};
+    setPainted(empty);
+    pushHistory(empty);
+  };
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -270,14 +287,32 @@ export default function SymmetriaGrid() {
               />
             ))}
           </div>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => { if(confirm('Clear entire canvas?')) { setPainted({}); pushHistory({}); } }}
-            className="hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
+          
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete all your drawing data from the infinite grid. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={clearCanvas} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                  Clear Everything
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
