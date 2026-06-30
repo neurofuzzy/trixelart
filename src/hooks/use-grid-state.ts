@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 
 /**
  * useGridState manages an infinite sparse grid of triangular cells.
- * Coordinates are stored as "row,col" strings.
+ * Coordinates are stored as "row,col" strings for sparse spatial indexing.
  */
 export function useGridState() {
   const [grid, setGrid] = useState<Record<string, string>>({});
@@ -12,7 +12,13 @@ export function useGridState() {
   const [redoStack, setRedoStack] = useState<Record<string, string>[]>([]);
 
   const addToHistory = useCallback((newGrid: Record<string, string>) => {
-    setHistory((prev) => [...prev.slice(-49), grid]); // Limit history to 50 steps
+    // Optimization: avoid storing duplicates in history
+    if (JSON.stringify(newGrid) === JSON.stringify(grid)) return;
+    
+    setHistory((prev) => {
+      const next = [...prev, grid];
+      return next.slice(-100); // Limit history to 100 steps
+    });
     setRedoStack([]);
     setGrid(newGrid);
   }, [grid]);
@@ -51,8 +57,10 @@ export function useGridState() {
   }, [grid, addToHistory]);
 
   const importGrid = useCallback((newGrid: Record<string, string>) => {
-    addToHistory(newGrid);
-  }, [addToHistory]);
+    setGrid(newGrid);
+    setHistory([]);
+    setRedoStack([]);
+  }, []);
 
   return {
     grid,

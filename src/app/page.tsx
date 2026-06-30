@@ -15,7 +15,6 @@ export default function TriStudioPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Sync JSON display but debounce it slightly if needed for performance
     const timeout = setTimeout(() => {
       setJsonValue(JSON.stringify(grid));
     }, 100);
@@ -27,8 +26,8 @@ export default function TriStudioPage() {
     setJsonValue(data);
     navigator.clipboard.writeText(data);
     toast({
-      title: "Snapshot Saved",
-      description: "Geometric data copied to clipboard.",
+      title: "Data Exported",
+      description: "Sparse coordinate map copied to clipboard.",
     });
   };
 
@@ -45,37 +44,32 @@ export default function TriStudioPage() {
     } catch (err) {
       toast({
         variant: "destructive",
-        title: "Input Error",
-        description: "Invalid JSON coordinates provided.",
+        title: "Import Failed",
+        description: "Invalid grid manifest provided.",
       });
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center p-6 md:p-10 overflow-hidden dark">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col p-6 md:p-10 overflow-hidden dark">
       <Toaster />
       
-      <header className="w-full max-w-screen-2xl flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4 px-2">
+      <header className="w-full max-w-screen-2xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4 px-2">
         <div>
           <h1 className="text-4xl font-black tracking-tight text-white mb-1">
             TriStudio<span className="text-primary">.</span>
           </h1>
-          <p className="text-muted-foreground/60 text-xs font-semibold tracking-widest uppercase">Endless Isotropic Canvas</p>
+          <p className="text-white/20 text-[10px] font-bold tracking-[0.4em] uppercase">Infinite Isotropic Environment</p>
         </div>
-        <div className="hidden lg:flex items-center gap-6 text-[10px] text-muted-foreground/40 font-mono tracking-tighter">
-          <div className="flex gap-2 items-center">
-            <kbd className="bg-white/5 px-2 py-1 rounded border border-white/5">SPACE + DRAG</kbd>
-            <span>PAN</span>
-          </div>
-          <div className="flex gap-2 items-center">
-            <kbd className="bg-white/5 px-2 py-1 rounded border border-white/5">CTRL + SCROLL</kbd>
-            <span>ZOOM</span>
-          </div>
+        <div className="hidden lg:flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/10 text-[9px] text-white/40 font-mono tracking-tighter">
+          <span>ALPHA VERSION 1.2.0</span>
+          <span className="opacity-20">•</span>
+          <span>SPARSE STORAGE ACTIVE</span>
         </div>
       </header>
 
-      <main className="w-full max-w-screen-2xl flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
-        <section className="lg:col-span-8 xl:col-span-9 h-[500px] lg:h-auto">
+      <main className="w-full max-w-screen-2xl mx-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
+        <section className="lg:col-span-8 xl:col-span-9 h-[550px] lg:h-auto">
           <SymmetriaGrid 
             grid={grid} 
             onCellClick={updateCell} 
@@ -103,8 +97,8 @@ export default function TriStudioPage() {
         </section>
       </main>
 
-      <footer className="mt-12 text-center text-[9px] text-muted-foreground/20 uppercase tracking-[0.4em] w-full pb-6">
-        Precise Vertex Tiling • Sparse Coordinate Storage • Alpha 1.0.2
+      <footer className="mt-8 text-center text-[9px] text-white/10 uppercase tracking-[0.5em] w-full pb-6">
+        Precise Vertex Tiling • Zero-Latency Render
       </footer>
     </div>
   );
