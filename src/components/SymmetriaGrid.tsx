@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2 } from 'lucide-react';
+import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { 
@@ -17,12 +17,14 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useCanvasSize } from '@/hooks/use-canvas-size';
 import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
+import { useToast } from '@/hooks/use-toast';
 
 const GRAYSCALE_PALETTE = ['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'];
 
 export default function SymmetriaGrid() {
   const [mounted, setMounted] = useState(false);
   const { size, containerRef, updateSize } = useCanvasSize();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // View State (Pan and Zoom)
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
@@ -110,6 +112,49 @@ export default function SymmetriaGrid() {
     pushHistory(empty);
   };
 
+  // 3. Export/Import
+  const handleExport = () => {
+    const dataStr = JSON.stringify(painted, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `symmetria-grid-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const importedData = JSON.parse(content);
+        if (typeof importedData === 'object' && importedData !== null) {
+          setPainted(importedData);
+          pushHistory(importedData);
+        } else {
+          throw new Error('Invalid JSON format');
+        }
+      } catch (err) {
+        console.error("Failed to import file", err);
+        alert("Failed to import file. Please ensure it is a valid Symmetria JSON export.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be selected again
+    e.target.value = '';
+  };
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -137,7 +182,7 @@ export default function SymmetriaGrid() {
     return () => window.removeEventListener('keydown', handleKeys);
   }, [handleUndo, handleRedo]);
 
-  // 3. Coordinate Translation
+  // 4. Coordinate Translation
   const screenToWorld = useCallback((sx: number, sy: number) => {
     return {
       x: (sx - size.width / 2) / view.zoom - view.x,
@@ -154,7 +199,7 @@ export default function SymmetriaGrid() {
     };
   };
 
-  // 4. Interaction Handlers
+  // 5. Interaction Handlers
   const onPointerDown = (e: React.PointerEvent) => {
     const isRightClick = e.button === 2 || e.ctrlKey;
     const pos = getRelativePointer(e);
@@ -266,7 +311,7 @@ export default function SymmetriaGrid() {
     }));
   };
 
-  // 5. Grid Rendering
+  // 6. Grid Rendering
   const gridContent = useMemo(() => {
     if (size.width === 0 || !mounted) return null;
 
@@ -321,6 +366,15 @@ export default function SymmetriaGrid() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background select-none">
+      {/* Hidden File Input for Import */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileChange} 
+        accept=".json" 
+        className="hidden" 
+      />
+
       {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
         <div className="flex items-center gap-1">
@@ -339,6 +393,13 @@ export default function SymmetriaGrid() {
           </Button>
           <Button variant="ghost" size="icon" onClick={handleRedo} disabled={historyIdx >= history.length - 1} title="Redo (Ctrl+Shift+Z)">
             <Redo2 className="w-4 h-4" />
+          </Button>
+          <div className="w-px h-6 bg-border mx-1" />
+          <Button variant="ghost" size="icon" onClick={handleExport} title="Export JSON">
+            <Download className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleImportClick} title="Import JSON">
+            <Upload className="w-4 h-4" />
           </Button>
         </div>
 
