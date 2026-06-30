@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload, FunctionSquare, X } from 'lucide-react';
+import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { 
@@ -25,24 +25,18 @@ export default function SymmetriaGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // View State (Pan and Zoom)
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-  
-  // Tool State
   const [tool, setTool] = useState<'paint' | 'erase' | 'pan'>('paint');
-  const [color, setColor] = useState(GRAYSCALE_PALETTE[4]); // Start with white
+  const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
   
-  // Drawing Data
   const [painted, setPainted] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
-  // Function Panel State
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState('a % 5 === 0 || b % 5 === 0 || c % 5 === 0');
   const [extent, setExtent] = useState(50);
 
-  // Interaction Ref
   const interaction = useRef<{
     isPainting: boolean;
     isPanning: boolean;
@@ -57,7 +51,6 @@ export default function SymmetriaGrid() {
     lastPos: null 
   });
 
-  // 1. Initialization and Persistence
   useEffect(() => {
     setMounted(true);
     const saved = localStorage.getItem('symmetria-save');
@@ -82,7 +75,6 @@ export default function SymmetriaGrid() {
     if (mounted) localStorage.setItem('symmetria-save', JSON.stringify(painted));
   }, [painted, mounted]);
 
-  // 2. Actions (Undo/Redo)
   const pushHistory = useCallback((newState: Record<string, string>) => {
     setHistory(prev => {
       const next = prev.slice(0, historyIdx + 1);
@@ -115,7 +107,6 @@ export default function SymmetriaGrid() {
     pushHistory(empty);
   };
 
-  // 3. Export/Import
   const handleExport = () => {
     const dataStr = JSON.stringify(painted, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -154,18 +145,16 @@ export default function SymmetriaGrid() {
     e.target.value = '';
   };
 
-  // 4. Function Logic
   const runSymmetryFunction = () => {
     const newPainted = { ...painted };
     try {
-      // Use Function constructor for safe dynamic execution with local scope variables
-      const check = new Function('a', 'b', 'c', `return ${formula}`);
+      const check = new Function('a', 'b', 'c', `try { return ${formula}; } catch(e) { return false; }`);
       
       for (let q = -extent; q <= extent; q++) {
         for (let r = -extent; r <= extent; r++) {
           const a = q;
           const b = r;
-          const c = -(q + r); // Third cubic axis
+          const c = -(q + r);
 
           if (check(a, b, c)) {
             newPainted[`${q},${r},up`] = color;
@@ -181,7 +170,6 @@ export default function SymmetriaGrid() {
     }
   };
 
-  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
@@ -208,7 +196,6 @@ export default function SymmetriaGrid() {
     return () => window.removeEventListener('keydown', handleKeys);
   }, [handleUndo, handleRedo]);
 
-  // 5. Coordinate Translation
   const screenToWorld = useCallback((sx: number, sy: number) => {
     return {
       x: (sx - size.width / 2) / view.zoom - view.x,
@@ -225,7 +212,6 @@ export default function SymmetriaGrid() {
     };
   };
 
-  // 6. Interaction Handlers
   const onPointerDown = (e: React.PointerEvent) => {
     const isRightClick = e.button === 2 || e.ctrlKey;
     const pos = getRelativePointer(e);
@@ -333,7 +319,6 @@ export default function SymmetriaGrid() {
     }));
   };
 
-  // 7. Grid Rendering
   const gridContent = useMemo(() => {
     if (size.width === 0 || !mounted) return null;
 
@@ -468,7 +453,6 @@ export default function SymmetriaGrid() {
         </AlertDialog>
       </div>
 
-      {/* Grid Canvas */}
       <div 
         ref={containerRef} 
         className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none" 
@@ -487,9 +471,11 @@ export default function SymmetriaGrid() {
           </g>
         </svg>
 
-        {/* Function Panel Overlay */}
         {isFunctionOpen && (
-          <div className="absolute top-4 left-4 w-80 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl z-50 space-y-4">
+          <div 
+            className="absolute top-4 left-4 w-80 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl z-50 space-y-4"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
               <h3 className="font-semibold flex items-center gap-2">
                 <span className="text-xl font-serif">ƒ</span> Symmetry Function
@@ -532,8 +518,10 @@ export default function SymmetriaGrid() {
           </div>
         )}
 
-        {/* Floating Bottom Palette */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40">
+        <div 
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           {GRAYSCALE_PALETTE.map((c, i) => (
             <button 
               key={c} 
