@@ -151,29 +151,28 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return ${formula}; } catch(e) { return false; }`);
       
-      for (let q = -extent; q <= extent; q++) {
-        for (let r = -extent; r <= extent; r++) {
-          const s = -(q + r);
-
-          // Calculate "Triangle Centroid" coordinates (multiplied by 2 for integer resolution)
-          // a, b, c represent the three diagonal strips.
-          // In this system: a+b+c = 0 for UP triangles, and a+b+c = 1 for DOWN triangles.
-          
-          // Evaluation for 'up' triangle
-          const aUp = 2 * q;
-          const bUp = 2 * r;
-          const cUp = 2 * s;
-          if (check(aUp, bUp, cUp)) {
-            newPainted[`${q},${r},up`] = color;
+      const range = Math.ceil(extent);
+      
+      for (let q = -range; q <= range; q++) {
+        for (let r = -range; r <= range; r++) {
+          // Axial mapping for 'up' triangle (sum 0)
+          const aUp = 2 * q + r;
+          const bUp = r - q;
+          const cUp = -q - 2 * r;
+          if (Math.abs(aUp) <= extent && Math.abs(bUp) <= extent && Math.abs(cUp) <= extent) {
+            if (check(aUp, bUp, cUp)) {
+              newPainted[`${q},${r},up`] = color;
+            }
           }
 
-          // Evaluation for 'down' triangle
-          // The down triangle is nestled between the up triangles, logically shifted by 0.5 units in each axis.
-          const aDn = 2 * q + 1;
-          const bDn = 2 * r + 1;
-          const cDn = 2 * s - 1; // Kept consistent so a+b+c = 1
-          if (check(aDn, bDn, cDn)) {
-            newPainted[`${q},${r},down`] = color;
+          // Axial mapping for 'down' triangle (sum 1)
+          const aDn = 2 * q + r + 1;
+          const bDn = r - q + 1;
+          const cDn = -q - 2 * r - 1;
+          if (Math.abs(aDn) <= extent && Math.abs(bDn) <= extent && Math.abs(cDn) <= extent) {
+            if (check(aDn, bDn, cDn)) {
+              newPainted[`${q},${r},down`] = color;
+            }
           }
         }
       }
@@ -527,7 +526,7 @@ export default function SymmetriaGrid() {
             </Button>
             
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Variables <b>a, b, c</b> represent the three directions at triangle resolution. 
+              Variables <b>a, b, c</b> represent triangle-width strips. 
               Sum <b>a+b+c</b> is 0 for 'up' triangles and 1 for 'down' triangles.
             </p>
           </div>
