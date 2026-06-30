@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -36,7 +35,7 @@ export default function SymmetriaGrid() {
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState('a % 5 === 0 || b % 5 === 0 || c % 5 === 0');
-  const [extent, setExtent] = useState(50);
+  const [extent, setExtent] = useState(10);
 
   const interaction = useRef<{
     isPainting: boolean;
