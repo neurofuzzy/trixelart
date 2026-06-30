@@ -10,8 +10,8 @@
  * - a = horizontal row index (0 deg)
  * - b = diagonal strip index (60 deg)
  * - c = diagonal strip index (120 deg)
- * - Up triangles: a + b + c = -1
- * - Down triangles: a + b + c = -2
+ * - Up triangles: a + b + c = 0
+ * - Down triangles: a + b + c = -1
  */
 
 export const SIDE = 50;
@@ -54,11 +54,12 @@ export const worldToTri = (wx: number, wy: number): TriKey => {
 /** 
  * Returns the analytical coordinates for a triangle.
  * Useful for math-based symmetry rules.
+ * Redefined so Up(0,0) = (0,0,0)
  */
 export function getTriABC(q: number, r: number, type: TriType) {
   const a = r;
   const b = q;
-  const c = type === 'up' ? -1 - a - b : -2 - a - b;
+  const c = type === 'up' ? -a - b : -1 - a - b;
   return { a, b, c };
 }
 

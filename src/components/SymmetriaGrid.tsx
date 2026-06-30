@@ -152,20 +152,19 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return !!(${formula}); } catch(e) { return false; }`);
       
-      // We iterate analytically.
       for (let a = -extent; a <= extent; a++) {
         for (let b = -extent; b <= extent; b++) {
           
-          // Up triangle check: a + b + c = -1
-          const cUp = -1 - a - b;
+          // Up triangle check: a + b + c = 0
+          const cUp = -a - b;
           if (Math.abs(cUp) <= extent) {
             if (check(a, b, cUp)) {
               newPainted[`${b},${a},up`] = color;
             }
           }
 
-          // Down triangle check: a + b + c = -2
-          const cDown = -2 - a - b;
+          // Down triangle check: a + b + c = -1
+          const cDown = -1 - a - b;
           if (Math.abs(cDown) <= extent) {
             if (check(a, b, cDown)) {
               newPainted[`${b},${a},down`] = color;
@@ -558,7 +557,7 @@ export default function SymmetriaGrid() {
             
             <p className="text-[10px] text-muted-foreground leading-relaxed">
               Variables <b>a, b, c</b> represent triangle-width strips. 
-              Sum <b>a+b+c</b> is -1 for 'up' triangles and -2 for 'down' triangles.
+              Sum <b>a+b+c</b> is 0 for 'up' triangles and -1 for 'down' triangles.
             </p>
           </div>
         )}
