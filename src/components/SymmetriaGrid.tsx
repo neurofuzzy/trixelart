@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2 } from 'lucide-react';
+import { Undo2, Redo2, MousePointer2, Eraser, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -12,7 +12,6 @@ const TRI_HEIGHT = (TRI_SIDE * Math.sqrt(3)) / 2;
 type TriangleState = Record<string, string>; // "q,r,t" -> color
 
 export default function SymmetriaGrid() {
-  // --- States ---
   const [mounted, setMounted] = useState(false);
   const [triangles, setTriangles] = useState<TriangleState>({});
   const [history, setHistory] = useState<TriangleState[]>([]);
@@ -21,18 +20,21 @@ export default function SymmetriaGrid() {
   const [activeColor, setActiveColor] = useState('#ffffff');
   const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
   
+  // Viewport state: x/y is the world-space center offset
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   
   const containerRef = useRef<HTMLDivElement>(null);
   const isPaintingRef = useRef(false);
   const isPanningRef = useRef(false);
   const lastPointerPos = useRef({ x: 0, y: 0 });
 
-  // --- Initialization & Persistence ---
+  // --- Initialize & Measure ---
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem('symmetria-save-v2');
+    
+    // Load from Local Storage
+    const saved = localStorage.getItem('symmetria-canvas-save');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -41,22 +43,33 @@ export default function SymmetriaGrid() {
         setHistoryIndex(0);
       } catch (e) {
         console.error("Failed to load save", e);
+        setHistory([{}]);
+        setHistoryIndex(0);
       }
     } else {
       setHistory([{}]);
       setHistoryIndex(0);
     }
 
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerSize({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
+    // Measure container
+    const updateSize = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
         });
       }
-    });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
+    
+    window.addEventListener('resize', updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
   }, []);
 
   const saveToHistory = useCallback((newState: TriangleState) => {
@@ -65,13 +78,15 @@ export default function SymmetriaGrid() {
     if (newHistory.length > 50) newHistory.shift();
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-    localStorage.setItem('symmetria-save-v2', JSON.stringify(newState));
+    localStorage.setItem('symmetria-canvas-save', JSON.stringify(newState));
   }, [history, historyIndex]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
       }
@@ -85,7 +100,7 @@ export default function SymmetriaGrid() {
       const prev = history[historyIndex - 1];
       setTriangles(prev);
       setHistoryIndex(historyIndex - 1);
-      localStorage.setItem('symmetria-save-v2', JSON.stringify(prev));
+      localStorage.setItem('symmetria-canvas-save', JSON.stringify(prev));
     }
   };
 
@@ -94,35 +109,42 @@ export default function SymmetriaGrid() {
       const next = history[historyIndex + 1];
       setTriangles(next);
       setHistoryIndex(historyIndex + 1);
-      localStorage.setItem('symmetria-save-v2', JSON.stringify(next));
+      localStorage.setItem('symmetria-canvas-save', JSON.stringify(next));
     }
   };
 
-  // --- Grid Math ---
+  // --- Coordinate Mapping ---
   const screenToWorld = (sx: number, sy: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    
+    // Relative to container center
     return {
-      x: (sx - containerSize.width / 2 - viewport.x) / viewport.zoom,
-      y: (sy - containerSize.height / 2 - viewport.y) / viewport.zoom,
+      x: (sx - rect.left - dimensions.width / 2 - viewport.x) / viewport.zoom,
+      y: (sy - rect.top - dimensions.height / 2 - viewport.y) / viewport.zoom,
     };
   };
 
-  const getTriangleAt = (worldX: number, worldY: number) => {
-    // Transform to rhombus coordinates
-    const r = Math.floor(worldY / TRI_HEIGHT);
-    const q = Math.floor((worldX - (r % 2 !== 0 ? TRI_SIDE / 2 : 0)) / TRI_SIDE);
+  const getTriangleAt = (wx: number, wy: number) => {
+    // Determine row 'r' based on triangle height
+    const r = Math.floor(wy / TRI_HEIGHT);
+    // Offset every other row
+    const rowOffset = (r % 2 !== 0) ? TRI_SIDE / 2 : 0;
+    // Determine column 'q'
+    const q = Math.floor((wx - rowOffset) / TRI_SIDE);
     
-    // Relative position within rhombus cell
-    const rx = (worldX - (q * TRI_SIDE + (r % 2 !== 0 ? TRI_SIDE / 2 : 0))) / TRI_SIDE;
-    const ry = (worldY - r * TRI_HEIGHT) / TRI_HEIGHT;
+    // Position within the rhombus-like cell
+    const cellX = wx - (q * TRI_SIDE + rowOffset);
+    const cellY = wy - (r * TRI_HEIGHT);
 
-    // Determine which half of the rectangle (rhombus-ish) we are in
-    // A simplified way to check the diagonal of the unit square
-    const t = rx + ry > 1 ? 1 : 0; // 0 for top-left-ish, 1 for bottom-right-ish
-    // Note: This is an approximation of the dual-triangle tiling
-    // For equilateral triangles specifically, we check the diagonal:
-    const tActual = (ry < 1 - 2 * Math.abs(rx - 0.5)) ? 0 : 1; 
+    // Determine if we are in the 'up' or 'down' triangle of this cell
+    // Standard equilateral tiling: 
+    // Top-left to bottom-right diagonal check
+    // The diagonal is: y = (h/s) * 2 * |x - s/2|
+    const isUp = cellY < (TRI_HEIGHT - (TRI_HEIGHT / (TRI_SIDE / 2)) * Math.abs(cellX - TRI_SIDE / 2));
+    const t = isUp ? 0 : 1;
 
-    return `${q},${r},${tActual}`;
+    return `${q},${r},${t}`;
   };
 
   const paintAt = (sx: number, sy: number) => {
@@ -130,22 +152,31 @@ export default function SymmetriaGrid() {
     const key = getTriangleAt(world.x, world.y);
     
     setTriangles(prev => {
+      const currentVal = prev[key];
+      const newVal = tool === 'pen' ? activeColor : undefined;
+      
+      if (currentVal === newVal) return prev;
+      
       const next = { ...prev };
-      if (tool === 'pen') next[key] = activeColor;
+      if (newVal) next[key] = newVal;
       else delete next[key];
       return next;
     });
   };
 
-  // --- Interaction Handlers ---
+  // --- Interaction ---
   const handlePointerDown = (e: React.PointerEvent) => {
     lastPointerPos.current = { x: e.clientX, y: e.clientY };
+    
+    // Left click or Alt+Click for painting vs panning
+    // Right click (button 2) for panning
     if (e.button === 0 && !e.altKey) {
       isPaintingRef.current = true;
       paintAt(e.clientX, e.clientY);
     } else {
       isPanningRef.current = true;
     }
+    
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
@@ -171,98 +202,98 @@ export default function SymmetriaGrid() {
 
   const handleWheel = (e: React.WheelEvent) => {
     const zoomSpeed = 0.001;
-    const delta = -e.deltaY;
-    const factor = Math.pow(1.1, delta / 100);
+    const factor = Math.pow(1.1, -e.deltaY / 100);
     const newZoom = Math.max(0.1, Math.min(20, viewport.zoom * factor));
     
+    // Zooming towards mouse cursor can be complex, let's keep it centered for now
     setViewport(prev => ({ ...prev, zoom: newZoom }));
   };
 
-  // --- Rendering Calculations ---
-  const visibleGrid = useMemo(() => {
-    if (!mounted || containerSize.width === 0) return null;
+  // --- Render Loops ---
+  const gridContent = useMemo(() => {
+    if (!mounted || dimensions.width === 0) return null;
 
-    const trianglesToRender: React.ReactNode[] = [];
-    const buffer = 3;
-    const cols = Math.ceil(containerSize.width / (TRI_SIDE * viewport.zoom)) + buffer;
-    const rows = Math.ceil(containerSize.height / (TRI_HEIGHT * viewport.zoom)) + buffer;
+    const visibleTriangles: React.ReactNode[] = [];
+    
+    // Calculate visible range of q and r
+    const buffer = 2;
+    const viewWidth = dimensions.width / viewport.zoom;
+    const viewHeight = dimensions.height / viewport.zoom;
+    
+    const startR = Math.floor((-viewport.y - viewHeight/2) / TRI_HEIGHT) - buffer;
+    const endR = Math.ceil((-viewport.y + viewHeight/2) / TRI_HEIGHT) + buffer;
+    
+    const startQ = Math.floor((-viewport.x - viewWidth/2) / TRI_SIDE) - buffer;
+    const endQ = Math.ceil((-viewport.x + viewWidth/2) / TRI_SIDE) + buffer;
 
-    const centerCol = Math.round(-viewport.x / (TRI_SIDE * viewport.zoom));
-    const centerRow = Math.round(-viewport.y / (TRI_HEIGHT * viewport.zoom));
-
-    for (let r = centerRow - Math.ceil(rows / 2); r <= centerRow + Math.ceil(rows / 2); r++) {
-      for (let q = centerCol - Math.ceil(cols / 2); q <= centerCol + Math.ceil(cols / 2); q++) {
-        // Offset rows
-        const offsetX = r % 2 !== 0 ? TRI_SIDE / 2 : 0;
-        const x = q * TRI_SIDE + offsetX;
+    for (let r = startR; r <= endR; r++) {
+      const rowOffset = (r % 2 !== 0) ? TRI_SIDE / 2 : 0;
+      for (let q = startQ; q <= endQ; q++) {
+        const x = q * TRI_SIDE + rowOffset;
         const y = r * TRI_HEIGHT;
 
-        // Triangles at this cell
-        // 0: Pointing Up
-        // 1: Pointing Down
-        [0, 1].forEach(t => {
-          const key = `${q},${r},${t}`;
-          const color = triangles[key] || 'transparent';
-          
-          let points = "";
-          if (t === 0) { // Up
-            points = `${x + TRI_SIDE/2},${y} ${x},${y + TRI_HEIGHT} ${x + TRI_SIDE},${y + TRI_HEIGHT}`;
-          } else { // Down (offset logic for tiling)
-            // The down triangle shares space differently in our grid
-            // Let's use a simpler tiling: 
-            // In row r, we have alternating up/down
-            // But we already have Q/R/T. 
-            // Let's refine the points for a perfect grid:
-          }
+        // Up triangle (t=0)
+        const keyUp = `${q},${r},0`;
+        const colorUp = triangles[keyUp] || 'transparent';
+        const pointsUp = `${x + TRI_SIDE/2},${y} ${x},${y + TRI_HEIGHT} ${x + TRI_SIDE},${y + TRI_HEIGHT}`;
 
-          // Stable equilateral points based on (q,r,t)
-          const pUp = `${x + TRI_SIDE/2},${y} ${x},${y + TRI_HEIGHT} ${x + TRI_SIDE},${y + TRI_HEIGHT}`;
-          const pDown = `${x},${y} ${x + TRI_SIDE},${y} ${x + TRI_SIDE/2},${y + TRI_HEIGHT}`;
-          
-          // Re-map to ensure they interlock perfectly
-          // Every q,r rhombus has an UP and a DOWN triangle that offset
-          const finalPoints = t === 0 ? pUp : `${x - TRI_SIDE/2},${y} ${x + TRI_SIDE/2},${y} ${x},${y + TRI_HEIGHT}`;
+        visibleTriangles.push(
+          <polygon
+            key={keyUp}
+            points={pointsUp}
+            fill={colorUp}
+            stroke="rgba(255,255,255,0.05)"
+            strokeWidth={1 / viewport.zoom}
+            className="transition-colors duration-150 pointer-events-none"
+          />
+        );
 
-          trianglesToRender.push(
-            <polygon
-              key={key}
-              points={finalPoints}
-              fill={color}
-              stroke="rgba(255,255,255,0.05)"
-              strokeWidth={1 / viewport.zoom}
-              className="transition-colors duration-150"
-            />
-          );
-        });
+        // Down triangle (t=1)
+        // A down triangle fills the gap between the up triangles
+        // Its top vertices match the bottom vertices of the up triangle above it (sort of)
+        // Simplified tiling: Up and Down in every cell
+        const keyDown = `${q},${r},1`;
+        const colorDown = triangles[keyDown] || 'transparent';
+        const pointsDown = `${x},${y} ${x + TRI_SIDE},${y} ${x + TRI_SIDE/2},${y + TRI_HEIGHT}`;
+
+        visibleTriangles.push(
+          <polygon
+            key={keyDown}
+            points={pointsDown}
+            fill={colorDown}
+            stroke="rgba(255,255,255,0.05)"
+            strokeWidth={1 / viewport.zoom}
+            className="transition-colors duration-150 pointer-events-none"
+          />
+        );
       }
     }
 
-    return trianglesToRender;
-  }, [mounted, viewport, containerSize, triangles]);
+    return visibleTriangles;
+  }, [mounted, viewport, dimensions, triangles]);
 
-  // --- Origin & Axis Guides ---
+  // Origin & Axis Guides
   const guides = useMemo(() => {
-    if (!mounted) return null;
-    const size = 10000;
-    const s = 1 / viewport.zoom;
+    const s = 10000;
+    const sw = 1 / viewport.zoom;
     return (
-      <g stroke="rgba(255,255,255,0.15)" strokeWidth={s}>
+      <g stroke="rgba(255,255,255,0.15)" strokeWidth={sw}>
+        {/* Origin Dot */}
+        <circle cx={0} cy={0} r={4 * sw} fill="hsl(var(--primary))" stroke="none" />
         {/* Horizontal */}
-        <line x1={-size} y1={0} x2={size} y2={0} />
+        <line x1={-s} y1={0} x2={s} y2={0} stroke="rgba(255,255,255,0.25)" />
         {/* 60 deg */}
-        <line x1={-size * 0.5} y1={-size * 0.866} x2={size * 0.5} y2={size * 0.866} />
+        <line x1={-s * 0.5} y1={-s * 0.866} x2={s * 0.5} y2={s * 0.866} stroke="rgba(255,255,255,0.25)" />
         {/* 120 deg */}
-        <line x1={size * 0.5} y1={-size * 0.866} x2={-size * 0.5} y2={size * 0.866} />
-        {/* Origin */}
-        <circle cx={0} cy={0} r={4 * s} fill="hsl(var(--primary))" />
+        <line x1={s * 0.5} y1={-s * 0.866} x2={-s * 0.5} y2={s * 0.866} stroke="rgba(255,255,255,0.25)" />
       </g>
     );
-  }, [mounted, viewport.zoom]);
+  }, [viewport.zoom]);
 
   if (!mounted) return null;
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-background select-none overflow-hidden">
+    <div className="relative w-full h-full flex flex-col bg-background select-none overflow-hidden touch-none">
       {/* HUD - TOP */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 p-1 bg-black/50 backdrop-blur-md border border-white/10 rounded-full shadow-2xl">
         <Button
@@ -309,24 +340,24 @@ export default function SymmetriaGrid() {
       {/* CANVAS */}
       <div 
         ref={containerRef}
-        className="w-full h-full cursor-crosshair touch-none"
+        className="w-full h-full cursor-crosshair overflow-hidden"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <svg className="w-full h-full">
-          <g transform={`translate(${containerSize.width / 2 + viewport.x}, ${containerSize.height / 2 + viewport.y}) scale(${viewport.zoom})`}>
+        <svg className="w-full h-full pointer-events-none">
+          <g transform={`translate(${dimensions.width / 2 + viewport.x}, ${dimensions.height / 2 + viewport.y}) scale(${viewport.zoom})`}>
             {guides}
-            {visibleGrid}
+            {gridContent}
           </g>
         </svg>
       </div>
 
-      {/* FOOTER - INFO */}
+      {/* FOOTER */}
       <div className="absolute bottom-6 left-6 z-50 flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-white/40">
-        <div>POS: {Math.round(viewport.x)},{Math.round(viewport.y)} | ZOOM: {viewport.zoom.toFixed(2)}X</div>
+        <div>POS: {Math.round(-viewport.x)},{Math.round(-viewport.y)} | ZOOM: {viewport.zoom.toFixed(2)}X</div>
         <div>LEFT CLICK: PAINT | RIGHT CLICK: PAN | SCROLL: ZOOM</div>
       </div>
     </div>
