@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload } from 'lucide-react';
+import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload, FunctionSquare, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { 
@@ -37,6 +37,11 @@ export default function SymmetriaGrid() {
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
+  // Function Panel State
+  const [isFunctionOpen, setIsFunctionOpen] = useState(false);
+  const [formula, setFormula] = useState('a % 5 === 0 || b % 5 === 0 || c % 5 === 0');
+  const [extent, setExtent] = useState(50);
+
   // Interaction Ref
   const interaction = useRef<{
     isPainting: boolean;
@@ -67,7 +72,6 @@ export default function SymmetriaGrid() {
       }
     }
 
-    // Call resize handler 0.5s after init to ensure layout has settled
     const timer = setTimeout(() => {
       updateSize();
     }, 500);
@@ -141,16 +145,40 @@ export default function SymmetriaGrid() {
         if (typeof importedData === 'object' && importedData !== null) {
           setPainted(importedData);
           pushHistory(importedData);
-        } else {
-          throw new Error('Invalid JSON format');
         }
       } catch (err) {
-        console.error("Failed to import file", err);
-        alert("Failed to import file. Please ensure it is a valid Symmetria JSON export.");
+        console.error("Failed to import", err);
       }
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  // 4. Function Logic
+  const runSymmetryFunction = () => {
+    const newPainted = { ...painted };
+    try {
+      // Use Function constructor for safe dynamic execution with local scope variables
+      const check = new Function('a', 'b', 'c', `return ${formula}`);
+      
+      for (let q = -extent; q <= extent; q++) {
+        for (let r = -extent; r <= extent; r++) {
+          const a = q;
+          const b = r;
+          const c = -(q + r); // Third cubic axis
+
+          if (check(a, b, c)) {
+            newPainted[`${q},${r},up`] = color;
+            newPainted[`${q},${r},down`] = color;
+          }
+        }
+      }
+      setPainted(newPainted);
+      pushHistory(newPainted);
+      setIsFunctionOpen(false);
+    } catch (e) {
+      alert("Invalid mathematical expression. Use JavaScript syntax, e.g. a % 5 === 0");
+    }
   };
 
   // Keyboard Shortcuts
@@ -180,7 +208,7 @@ export default function SymmetriaGrid() {
     return () => window.removeEventListener('keydown', handleKeys);
   }, [handleUndo, handleRedo]);
 
-  // 4. Coordinate Translation
+  // 5. Coordinate Translation
   const screenToWorld = useCallback((sx: number, sy: number) => {
     return {
       x: (sx - size.width / 2) / view.zoom - view.x,
@@ -197,7 +225,7 @@ export default function SymmetriaGrid() {
     };
   };
 
-  // 5. Interaction Handlers
+  // 6. Interaction Handlers
   const onPointerDown = (e: React.PointerEvent) => {
     const isRightClick = e.button === 2 || e.ctrlKey;
     const pos = getRelativePointer(e);
@@ -305,7 +333,7 @@ export default function SymmetriaGrid() {
     }));
   };
 
-  // 6. Grid Rendering
+  // 7. Grid Rendering
   const gridContent = useMemo(() => {
     if (size.width === 0 || !mounted) return null;
 
@@ -380,14 +408,30 @@ export default function SymmetriaGrid() {
           <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')} title="Pan">
             <Move className="w-4 h-4" />
           </Button>
+          
           <div className="w-px h-6 bg-border mx-1" />
+          
+          <Button 
+            variant={isFunctionOpen ? 'default' : 'ghost'} 
+            size="icon" 
+            onClick={() => setIsFunctionOpen(!isFunctionOpen)} 
+            title="Symmetry Function (ƒ)"
+            className="text-lg font-serif"
+          >
+            ƒ
+          </Button>
+
+          <div className="w-px h-6 bg-border mx-1" />
+          
           <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIdx <= 0} title="Undo (Ctrl+Z)">
             <Undo2 className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="icon" onClick={handleRedo} disabled={historyIdx >= history.length - 1} title="Redo (Ctrl+Shift+Z)">
             <Redo2 className="w-4 h-4" />
           </Button>
+          
           <div className="w-px h-6 bg-border mx-1" />
+          
           <Button variant="ghost" size="icon" onClick={handleExport} title="Export JSON">
             <Download className="w-4 h-4" />
           </Button>
@@ -442,6 +486,51 @@ export default function SymmetriaGrid() {
             {guides}
           </g>
         </svg>
+
+        {/* Function Panel Overlay */}
+        {isFunctionOpen && (
+          <div className="absolute top-4 left-4 w-80 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl z-50 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2">
+                <span className="text-xl font-serif">ƒ</span> Symmetry Function
+              </h3>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsFunctionOpen(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Condition (a, b, c axes)</label>
+              <textarea 
+                className="w-full h-20 p-2 text-sm bg-background border rounded-md font-mono resize-none focus:ring-2 focus:ring-primary outline-none"
+                placeholder="e.g. a % 5 === 0"
+                value={formula}
+                onChange={(e) => setFormula(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Extent (Range: {extent})</label>
+              <input 
+                type="range" 
+                min="10" 
+                max="200" 
+                value={extent} 
+                onChange={(e) => setExtent(parseInt(e.target.value))}
+                className="w-full accent-primary"
+              />
+            </div>
+
+            <Button className="w-full" onClick={runSymmetryFunction}>
+              Apply Rule to Grid
+            </Button>
+            
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Variables <b>a, b, c</b> represent the three directions. 
+              Use JavaScript logic like <code>a % 5 === 0 || b % 5 === 0</code>.
+            </p>
+          </div>
+        )}
 
         {/* Floating Bottom Palette */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40">
