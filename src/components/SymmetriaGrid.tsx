@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -152,12 +153,26 @@ export default function SymmetriaGrid() {
       
       for (let q = -extent; q <= extent; q++) {
         for (let r = -extent; r <= extent; r++) {
-          const a = q;
-          const b = r;
-          const c = -(q + r);
+          const s = -(q + r);
 
-          if (check(a, b, c)) {
+          // Calculate "Triangle Centroid" coordinates (multiplied by 2 for integer resolution)
+          // a, b, c represent the three diagonal strips.
+          // In this system: a+b+c = 0 for UP triangles, and a+b+c = 1 for DOWN triangles.
+          
+          // Evaluation for 'up' triangle
+          const aUp = 2 * q;
+          const bUp = 2 * r;
+          const cUp = 2 * s;
+          if (check(aUp, bUp, cUp)) {
             newPainted[`${q},${r},up`] = color;
+          }
+
+          // Evaluation for 'down' triangle
+          // The down triangle is nestled between the up triangles, logically shifted by 0.5 units in each axis.
+          const aDn = 2 * q + 1;
+          const bDn = 2 * r + 1;
+          const cDn = 2 * s - 1; // Kept consistent so a+b+c = 1
+          if (check(aDn, bDn, cDn)) {
             newPainted[`${q},${r},down`] = color;
           }
         }
@@ -512,8 +527,8 @@ export default function SymmetriaGrid() {
             </Button>
             
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Variables <b>a, b, c</b> represent the three directions. 
-              Use JavaScript logic like <code>a % 5 === 0 || b % 5 === 0</code>.
+              Variables <b>a, b, c</b> represent the three directions at triangle resolution. 
+              Sum <b>a+b+c</b> is 0 for 'up' triangles and 1 for 'down' triangles.
             </p>
           </div>
         )}
