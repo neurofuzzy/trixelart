@@ -18,6 +18,8 @@ import {
 import { useCanvasSize } from '@/hooks/use-canvas-size';
 import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
 
+const GRAYSCALE_PALETTE = ['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'];
+
 export default function SymmetriaGrid() {
   const [mounted, setMounted] = useState(false);
   const { size, containerRef, updateSize } = useCanvasSize();
@@ -27,7 +29,7 @@ export default function SymmetriaGrid() {
   
   // Tool State
   const [tool, setTool] = useState<'paint' | 'erase' | 'pan'>('paint');
-  const [color, setColor] = useState('#ffffff');
+  const [color, setColor] = useState(GRAYSCALE_PALETTE[4]); // Start with white
   
   // Drawing Data
   const [painted, setPainted] = useState<Record<string, string>>({});
@@ -103,9 +105,28 @@ export default function SymmetriaGrid() {
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+      // Undo/Redo (Meta/Ctrl + Z)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) handleRedo(); else handleUndo();
+        return;
+      }
+
+      // Ignore shortcuts if an input or dialog is active
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      // Tool selection
+      if (e.key.toLowerCase() === 'p') {
+        setTool('paint');
+      } else if (e.key.toLowerCase() === 'e') {
+        setTool('erase');
+      }
+
+      // Color selection (1-5)
+      const colorIdx = parseInt(e.key) - 1;
+      if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
+        setColor(GRAYSCALE_PALETTE[colorIdx]);
+        setTool('paint'); // Auto-switch to paint when choosing a color
       }
     };
     window.addEventListener('keydown', handleKeys);
@@ -255,13 +276,13 @@ export default function SymmetriaGrid() {
       {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
         <div className="flex items-center gap-1">
-          <Button variant={tool === 'paint' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('paint')} title="Paint (Left Click)">
+          <Button variant={tool === 'paint' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('paint')} title="Paint (P)">
             <MousePointer2 className="w-4 h-4" />
           </Button>
-          <Button variant={tool === 'erase' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('erase')} title="Erase">
+          <Button variant={tool === 'erase' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('erase')} title="Erase (E)">
             <Eraser className="w-4 h-4" />
           </Button>
-          <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')} title="Pan (Right Click)">
+          <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')} title="Pan">
             <Move className="w-4 h-4" />
           </Button>
           <div className="w-px h-6 bg-border mx-1" />
@@ -275,10 +296,14 @@ export default function SymmetriaGrid() {
 
         <div className="flex items-center gap-4">
           <div className="flex gap-1">
-            {['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'].map(c => (
+            {GRAYSCALE_PALETTE.map((c, i) => (
               <button 
                 key={c} 
-                onClick={() => setColor(c)} 
+                onClick={() => {
+                  setColor(c);
+                  setTool('paint');
+                }} 
+                title={`Color ${i + 1} (${i + 1})`}
                 className={cn(
                   "w-6 h-6 rounded-full border-2 transition-all", 
                   color === c ? "border-white scale-110" : "border-transparent opacity-70 hover:opacity-100"
@@ -294,6 +319,7 @@ export default function SymmetriaGrid() {
                 variant="ghost" 
                 size="icon" 
                 className="hover:bg-destructive/10 hover:text-destructive"
+                title="Clear Everything"
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
