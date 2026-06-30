@@ -38,8 +38,15 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     return () => window.removeEventListener("resize", updateSize);
   }, []);
 
+  // Center initial view once dimensions are known
+  useEffect(() => {
+    if (dimensions.width && dimensions.height && view.x === 0 && view.y === 0) {
+      setView({ x: dimensions.width / 2, y: dimensions.height / 2, zoom: 1 });
+    }
+  }, [dimensions]);
+
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Middle click or Space/Alt could be used, but here we use simple drag if not clicking a cell
+    // Middle click or Alt + Left Click to pan
     if (e.button === 1 || e.altKey) {
       setIsPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
@@ -64,11 +71,10 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      const zoomSpeed = 0.001;
+      const zoomSpeed = 0.0015;
       const factor = 1 - e.deltaY * zoomSpeed;
-      const newZoom = Math.max(0.1, Math.min(10, view.zoom * factor));
+      const newZoom = Math.max(0.05, Math.min(10, view.zoom * factor));
       
-      // Zoom toward mouse position
       const rect = containerRef.current!.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -82,7 +88,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
         zoom: newZoom,
       }));
     } else {
-      // Normal pan with wheel
       setView(v => ({
         ...v,
         x: v.x - e.deltaX,
@@ -91,7 +96,6 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     }
   };
 
-  // Determine which triangles are visible
   const visibleTriangles = useMemo(() => {
     if (!dimensions.width || !dimensions.height) return [];
 
@@ -100,34 +104,34 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
     const offsetX = view.x;
     const offsetY = view.y;
 
-    // Calculate grid range based on viewport
-    const minRow = Math.floor((-offsetY) / (H * zoom)) - 1;
-    const maxRow = Math.ceil((dimensions.height - offsetY) / (H * zoom)) + 1;
+    // Calculate grid range based on viewport bounds
+    const minRow = Math.floor((-offsetY) / (H * zoom)) - 2;
+    const maxRow = Math.ceil((dimensions.height - offsetY) / (H * zoom)) + 2;
     
-    const minCol = Math.floor((-offsetX) / (SIDE_UNIT / 2 * zoom)) - 2;
-    const maxCol = Math.ceil((dimensions.width - offsetX) / (SIDE_UNIT / 2 * zoom)) + 2;
+    const minCol = Math.floor((-offsetX) / (SIDE_UNIT / 2 * zoom)) - 4;
+    const maxCol = Math.ceil((dimensions.width - offsetX) / (SIDE_UNIT / 2 * zoom)) + 4;
 
     for (let r = minRow; r <= maxRow; r++) {
       for (let c = minCol; c <= maxCol; c++) {
+        // Robust modulo for negative grid coordinates
+        const isUpward = ((r + c) % 2 + 2) % 2 === 0;
         const id = `${r},${c}`;
-        const isUpward = (r + c) % 2 === 0;
         
-        // Base coordinates in grid space
         const x = c * (SIDE_UNIT / 2);
         const y = r * H;
 
         let points;
         if (isUpward) {
           points = [
-            `${(x * zoom) + offsetX},${(y * zoom) + offsetY}`,
-            `${((x + SIDE_UNIT) * zoom) + offsetX},${(y * zoom) + offsetY}`,
-            `${((x + SIDE_UNIT / 2) * zoom) + offsetX},${((y - H) * zoom) + offsetY}`
+            `${((x * zoom) + offsetX).toFixed(2)},${((y * zoom) + offsetY).toFixed(2)}`,
+            `${(((x + SIDE_UNIT) * zoom) + offsetX).toFixed(2)},${((y * zoom) + offsetY).toFixed(2)}`,
+            `${(((x + SIDE_UNIT / 2) * zoom) + offsetX).toFixed(2)},${(((y - H) * zoom) + offsetY).toFixed(2)}`
           ].join(" ");
         } else {
           points = [
-            `${(x * zoom) + offsetX},${(y * zoom) + offsetY}`,
-            `${((x + SIDE_UNIT / 2) * zoom) + offsetX},${((y + H) * zoom) + offsetY}`,
-            `${((x + SIDE_UNIT) * zoom) + offsetX},${(y * zoom) + offsetY}`
+            `${((x * zoom) + offsetX).toFixed(2)},${((y * zoom) + offsetY).toFixed(2)}`,
+            `${(((x + SIDE_UNIT / 2) * zoom) + offsetX).toFixed(2)},${(((y + H) * zoom) + offsetY).toFixed(2)}`,
+            `${(((x + SIDE_UNIT) * zoom) + offsetX).toFixed(2)},${((y * zoom) + offsetY).toFixed(2)}`
           ].join(" ");
         }
 
@@ -142,16 +146,28 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
   return (
     <div 
       ref={containerRef}
-      className="w-full h-full relative overflow-hidden bg-card/20 rounded-[32px] border cursor-crosshair select-none touch-none"
+      className="w-full h-full relative overflow-hidden bg-[#080808] rounded-[32px] border border-white/5 cursor-crosshair select-none touch-none shadow-2xl"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onWheel={handleWheel}
     >
-      <div className="absolute top-4 right-4 bg-background/80 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-mono border text-muted-foreground z-10 pointer-events-none">
-        POS: {Math.round(view.x)},{Math.round(view.y)} | ZOOM: {view.zoom.toFixed(2)}x
+      {/* Viewport Debug/Status Overlay */}
+      <div className="absolute top-6 left-6 flex flex-col gap-1 pointer-events-none z-10">
+        <div className="text-[10px] font-bold text-primary/40 uppercase tracking-[0.2em] mb-1">Canvas Environment</div>
+        <div className="flex items-center gap-3 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-2xl border border-white/5 text-[9px] font-mono text-muted-foreground/80">
+          <div className="flex items-center gap-1.5">
+            <span className="text-primary opacity-50">POS</span>
+            <span>{Math.round(view.x)}, {Math.round(view.y)}</span>
+          </div>
+          <div className="w-px h-3 bg-white/10" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-primary opacity-50">ZOOM</span>
+            <span>{view.zoom.toFixed(2)}x</span>
+          </div>
+        </div>
       </div>
-      
+
       <svg className="w-full h-full pointer-events-none">
         {visibleTriangles.map((tri) => (
           <polygon
@@ -161,10 +177,13 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
             stroke="currentColor"
             strokeWidth={0.5 / view.zoom}
             className={cn(
-              "pointer-events-auto transition-colors duration-200 cursor-pointer",
-              tri.color ? "stroke-white/10" : "text-muted-foreground/5 hover:text-muted-foreground/20"
+              "pointer-events-auto transition-all duration-300 cursor-pointer",
+              tri.color 
+                ? "text-white/70" 
+                : "text-white/5 hover:text-white/20"
             )}
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
+              // Only trigger drawing on direct left click
               if (e.button === 0 && !e.altKey) {
                 e.stopPropagation();
                 onCellClick(tri.id, tri.color || null);
@@ -173,6 +192,11 @@ export function SymmetriaGrid({ grid, onCellClick, activeColor }: SymmetriaGridP
           />
         ))}
       </svg>
+      
+      {/* Bottom hint overlay */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/5 text-[8px] text-muted-foreground/40 uppercase tracking-[0.3em] pointer-events-none whitespace-nowrap">
+        Alt+Drag / Middle-Click to Pan • Ctrl+Scroll to Zoom
+      </div>
     </div>
   );
 }
