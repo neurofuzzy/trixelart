@@ -16,7 +16,7 @@ import {
   AlertDialogTrigger 
 } from '@/components/ui/alert-dialog';
 import { useCanvasSize } from '@/hooks/use-canvas-size';
-import { SIDE, H, worldToTri, triToString, getTriPath } from '@/lib/grid-math';
+import { SIDE, H, worldToTri, triToString, getTriPath, getTriABC, type TriKey } from '@/lib/grid-math';
 
 const GRAYSCALE_PALETTE = ['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'];
 
@@ -36,6 +36,8 @@ export default function SymmetriaGrid() {
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState('a % 5 === 0 || b % 5 === 0 || c % 5 === 0');
   const [extent, setExtent] = useState(10);
+
+  const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
 
   const interaction = useRef<{
     isPainting: boolean;
@@ -150,8 +152,7 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return !!(${formula}); } catch(e) { return false; }`);
       
-      // We iterate using analytical coordinates (a, b) and solve for c.
-      // a = r, b = q.
+      // We iterate analytically.
       for (let a = -extent; a <= extent; a++) {
         for (let b = -extent; b <= extent; b++) {
           
@@ -213,7 +214,7 @@ export default function SymmetriaGrid() {
     };
   }, [size, view]);
 
-  const getRelativePointer = (e: React.PointerEvent) => {
+  const getRelativePointer = (e: React.PointerEvent | React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return {
@@ -264,6 +265,11 @@ export default function SymmetriaGrid() {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const pos = getRelativePointer(e);
+    const world = screenToWorld(pos.x, pos.y);
+    const tri = worldToTri(world.x, world.y);
+    setHoveredTri(tri);
+
     if (interaction.current.isPanning && interaction.current.lastPos) {
       const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
       const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
@@ -277,9 +283,7 @@ export default function SymmetriaGrid() {
       setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
     } else if (interaction.current.isPainting) {
-      const pos = getRelativePointer(e);
-      const world = screenToWorld(pos.x, pos.y);
-      const key = triToString(worldToTri(world.x, world.y));
+      const key = triToString(tri);
       
       setPainted(prev => {
         if (tool === 'paint') {
@@ -379,6 +383,33 @@ export default function SymmetriaGrid() {
     </g>
   ), [view.zoom]);
 
+  const hoverOutline = useMemo(() => {
+    if (!hoveredTri) return null;
+    return (
+      <path 
+        d={getTriPath(hoveredTri.q, hoveredTri.r, hoveredTri.type)}
+        fill="none"
+        stroke="white"
+        strokeWidth={2 / view.zoom}
+        pointerEvents="none"
+        className="opacity-50"
+      />
+    );
+  }, [hoveredTri, view.zoom]);
+
+  const abcDisplay = useMemo(() => {
+    if (!hoveredTri) return null;
+    const { a, b, c } = getTriABC(hoveredTri.q, hoveredTri.r, hoveredTri.type);
+    return (
+      <div className="absolute bottom-4 right-4 px-3 py-1 bg-card/90 backdrop-blur-md border rounded-full text-[10px] font-mono shadow-xl z-50 flex gap-3">
+        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">a</span> {a}</span>
+        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">b</span> {b}</span>
+        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">c</span> {c}</span>
+        <span className="text-muted-foreground uppercase">{hoveredTri.type}</span>
+      </div>
+    );
+  }, [hoveredTri]);
+
   if (!mounted) return <div className="h-full w-full bg-background" />;
 
   return (
@@ -469,7 +500,10 @@ export default function SymmetriaGrid() {
         onPointerDown={onPointerDown} 
         onPointerMove={onPointerMove} 
         onPointerUp={onPointerUp} 
-        onPointerLeave={onPointerUp}
+        onPointerLeave={() => {
+          onPointerUp;
+          setHoveredTri(null);
+        }}
         onWheel={onWheel} 
         onContextMenu={e => e.preventDefault()}
         tabIndex={0}
@@ -477,6 +511,7 @@ export default function SymmetriaGrid() {
         <svg width="100%" height="100%" className="absolute inset-0 pointer-events-none">
           <g transform={`translate(${size.width/2}, ${size.height/2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}>
             {gridContent}
+            {hoverOutline}
             {guides}
           </g>
         </svg>
@@ -548,6 +583,8 @@ export default function SymmetriaGrid() {
             />
           ))}
         </div>
+
+        {abcDisplay}
       </div>
     </div>
   );
