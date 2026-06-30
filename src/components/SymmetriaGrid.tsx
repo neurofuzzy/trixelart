@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -150,26 +151,35 @@ export default function SymmetriaGrid() {
     try {
       const check = new Function('a', 'b', 'c', `try { return ${formula}; } catch(e) { return false; }`);
       
-      const range = Math.ceil(extent * 1.5);
+      const range = Math.ceil(extent * 2);
       
-      for (let q = -range; q <= range; q++) {
-        for (let r = -range; r <= range; r++) {
-          // Up triangle: a=q, b=r, c=-q-r
-          const aUp = q;
-          const bUp = r;
-          const cUp = -q - r;
-          if (Math.abs(aUp) <= extent && Math.abs(bUp) <= extent && Math.abs(cUp) <= extent) {
-            if (check(aUp, bUp, cUp)) {
+      for (let r = -range; r <= range; r++) {
+        for (let q = -range; q <= range; q++) {
+          const bx = q * SIDE + r * (SIDE / 2);
+          const by = r * H;
+
+          // Up Triangle (pointing down visually)
+          const ux = bx + SIDE / 2;
+          const uy = by + H / 3;
+          const ua = Math.floor(uy / H);
+          const ub = Math.floor(-ux / SIDE - uy / (2 * H));
+          const uc = Math.floor(ux / SIDE - uy / (2 * H));
+          
+          if (Math.abs(ua) <= extent && Math.abs(ub) <= extent && Math.abs(uc) <= extent) {
+            if (check(ua, ub, uc)) {
               newPainted[`${q},${r},up`] = color;
             }
           }
 
-          // Down triangle: a=q, b=r, c=-q-r+1
-          const aDn = q;
-          const bDn = r;
-          const cDn = -q - r + 1;
-          if (Math.abs(aDn) <= extent && Math.abs(bDn) <= extent && Math.abs(cDn) <= extent) {
-            if (check(aDn, bDn, cDn)) {
+          // Down Triangle (pointing up visually)
+          const dx = bx + SIDE;
+          const dy = by + 2 * H / 3;
+          const da = Math.floor(dy / H);
+          const db = Math.floor(-dx / SIDE - dy / (2 * H));
+          const dc = Math.floor(dx / SIDE - dy / (2 * H));
+
+          if (Math.abs(da) <= extent && Math.abs(db) <= extent && Math.abs(dc) <= extent) {
+            if (check(da, db, dc)) {
               newPainted[`${q},${r},down`] = color;
             }
           }
@@ -526,7 +536,7 @@ export default function SymmetriaGrid() {
             
             <p className="text-[10px] text-muted-foreground leading-relaxed">
               Variables <b>a, b, c</b> represent triangle-width strips. 
-              Sum <b>a+b+c</b> is 0 for 'up' triangles and 1 for 'down' triangles.
+              Sum <b>a+b+c</b> is -1 for 'up' triangles and -2 for 'down' triangles.
             </p>
           </div>
         )}
