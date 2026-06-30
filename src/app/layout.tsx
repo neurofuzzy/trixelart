@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Symmetria | Infinite Triangle Canvas",
-  description: "An infinite triangular grid drawing application",
+  title: "Symmetria | Infinite Canvas",
+  description: "An infinite triangular grid drawing application built for precision and creativity.",
 };
 
 export default function RootLayout({
@@ -16,7 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={inter.className}>{children}</body>
+      <body className={`${inter.className} bg-black antialiased`}>{children}</body>
     </html>
   );
 }

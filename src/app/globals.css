@@ -22,7 +22,7 @@
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
   --ring: 240 4.9% 83.9%;
-  --radius: 0.5rem;
+  --radius: 0.75rem;
 }
 
 body {
@@ -30,6 +30,7 @@ body {
   color: hsl(var(--foreground));
   overflow: hidden;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 
 * {
