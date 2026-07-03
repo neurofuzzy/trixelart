@@ -100,14 +100,30 @@ export function getTrianglesOnLine(
   return result;
 }
 
-/** Generates the SVG path string for a specific triangle */
-export const getTriPath = (q: number, r: number, type: TriType) => {
+/** Returns the three vertex coordinates for a triangle */
+export function getTriVertices(
+  q: number, r: number, type: TriType
+): [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }] {
   const bx = q * SIDE + r * (SIDE / 2);
   const by = r * H;
-  
+
   if (type === 'up') {
-    return `M ${bx} ${by} L ${bx + SIDE} ${by} L ${bx + SIDE / 2} ${by + H} Z`;
+    return [
+      { x: bx, y: by },
+      { x: bx + SIDE, y: by },
+      { x: bx + SIDE / 2, y: by + H },
+    ];
   } else {
-    return `M ${bx + SIDE / 2} ${by + H} L ${bx + SIDE * 1.5} ${by + H} L ${bx + SIDE} ${by} Z`;
+    return [
+      { x: bx + SIDE / 2, y: by + H },
+      { x: bx + SIDE * 1.5, y: by + H },
+      { x: bx + SIDE, y: by },
+    ];
   }
+}
+
+/** Generates the SVG path string for a specific triangle */
+export const getTriPath = (q: number, r: number, type: TriType) => {
+  const [a, b, c] = getTriVertices(q, r, type);
+  return `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${c.x} ${c.y} Z`;
 };

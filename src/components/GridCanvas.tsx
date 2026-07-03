@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { SIDE, H, getTriPath, type TriKey } from "@/lib/grid-math";
+import { useRef, useEffect } from "react";
+import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
 
 export function GridCanvas({
   size,
@@ -18,10 +18,27 @@ export function GridCanvas({
   hoveredTri: TriKey | null;
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
 }) {
-  const gridContent = useMemo(() => {
-    if (size.width === 0 || !mounted) return null;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-    const triangles: React.ReactElement[] = [];
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || size.width === 0 || !mounted) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size.width * dpr;
+    canvas.height = size.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, size.width, size.height);
+    ctx.save();
+
+    ctx.translate(size.width / 2, size.height / 2);
+    ctx.scale(view.zoom, view.zoom);
+    ctx.translate(view.x, view.y);
+
     const buffer = 3;
     const worldTopLeft = screenToWorld(0, 0);
     const worldBottomRight = screenToWorld(size.width, size.height);
@@ -37,94 +54,122 @@ export function GridCanvas({
         Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - minR * 0.5,
       ) + buffer;
 
+    // Filled triangles — group by color for fewer fillStyle changes
+    const colorGroups = new Map<string, TriKey[]>();
     for (let r = minR; r <= maxR; r++) {
       for (let q = minQ; q <= maxQ; q++) {
-        const upKey = `${q},${r},up`;
-        const dnKey = `${q},${r},down`;
-
-        triangles.push(
-          <path
-            key={upKey}
-            d={getTriPath(q, r, "up")}
-            fill={painted[upKey] || "transparent"}
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={0.5 / view.zoom}
-          />,
-        );
-        triangles.push(
-          <path
-            key={dnKey}
-            d={getTriPath(q, r, "down")}
-            fill={painted[dnKey] || "transparent"}
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={0.5 / view.zoom}
-          />,
-        );
+        for (const type of ["up", "down"] as const) {
+          const key = `${q},${r},${type}`;
+          const fill = painted[key];
+          if (fill) {
+            const list = colorGroups.get(fill);
+            if (list) list.push({ q, r, type });
+            else colorGroups.set(fill, [{ q, r, type }]);
+          }
+        }
       }
     }
-    return triangles;
-  }, [size, view, painted, mounted, screenToWorld]);
 
-  const guides = useMemo(
-    () => (
-      <g pointerEvents="none">
-        <line
-          x1={-10000}
-          y1={0}
-          x2={10000}
-          y2={0}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <line
-          x1={-5000}
-          y1={-8660}
-          x2={5000}
-          y2={8660}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <line
-          x1={5000}
-          y1={-8660}
-          x2={-5000}
-          y2={8660}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
-      </g>
-    ),
-    [view.zoom],
-  );
+    for (const [fillColor, tris] of colorGroups) {
+      ctx.fillStyle = fillColor;
+      ctx.beginPath();
+      for (const tri of tris) {
+        const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
 
-  const hoverOutline = useMemo(() => {
-    if (!hoveredTri) return null;
-    return (
-      <path
-        d={getTriPath(hoveredTri.q, hoveredTri.r, hoveredTri.type)}
-        fill="none"
-        stroke="white"
-        strokeWidth={2 / view.zoom}
-        pointerEvents="none"
-        className="opacity-50"
-      />
-    );
-  }, [hoveredTri, view.zoom]);
+    // Grid outlines — 3 families of parallel lines
+    const gridWidth = Math.max(1.0 / view.zoom, 0.2);
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = gridWidth;
+
+    ctx.beginPath();
+
+    // Family 1: horizontal lines at y = r*H
+    for (let r = minR; r <= maxR + 1; r++) {
+      const y = r * H;
+      const x0 = minQ * SIDE + r * SIDE / 2;
+      const x1 = (maxQ + 1) * SIDE + r * SIDE / 2;
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+    }
+
+    // Family 2: / diagonals (slope sqrt(3)) — lines through A(q, r) for fixed q
+    for (let q = minQ; q <= maxQ + 1; q++) {
+      const x0 = q * SIDE + minR * SIDE / 2;
+      const y0 = minR * H;
+      const x1 = q * SIDE + (maxR + 1) * SIDE / 2;
+      const y1 = (maxR + 1) * H;
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+    }
+
+    // Family 3: \ diagonals (slope -sqrt(3)) — lines through B(q, r) for fixed q+r
+    const sumMin = minQ + minR;
+    const sumMax = maxQ + maxR + 1;
+    for (let S = sumMin; S <= sumMax; S++) {
+      const qStart = Math.max(minQ, S - (maxR + 1));
+      const qEnd = Math.min(maxQ, S - minR);
+      if (qStart > qEnd) continue;
+
+      const x0 = qStart * SIDE + (S - qStart) * SIDE / 2 + SIDE;
+      const y0 = (S - qStart) * H;
+      const x1 = qEnd * SIDE + (S - qEnd) * SIDE / 2 + SIDE;
+      const y1 = (S - qEnd) * H;
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+    }
+
+    ctx.stroke();
+
+    // Guide lines
+    const guideWidth = Math.max(1 / view.zoom, 1);
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = guideWidth;
+
+    ctx.beginPath();
+    ctx.moveTo(-10000, 0);
+    ctx.lineTo(10000, 0);
+    ctx.moveTo(-5000, -8660);
+    ctx.lineTo(5000, 8660);
+    ctx.moveTo(5000, -8660);
+    ctx.lineTo(-5000, 8660);
+    ctx.stroke();
+
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hover outline
+    if (hoveredTri) {
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = Math.max(2 / view.zoom, 1);
+      ctx.globalAlpha = 0.5;
+
+      const [a, b, c] = getTriVertices(hoveredTri.q, hoveredTri.r, hoveredTri.type);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }, [size, view, painted, hoveredTri, mounted, screenToWorld]);
 
   return (
-    <svg
-      width="100%"
-      height="100%"
+    <canvas
+      ref={canvasRef}
       className="absolute inset-0 pointer-events-none"
-    >
-      <g
-        transform={`translate(${size.width / 2}, ${size.height / 2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}
-      >
-        {gridContent}
-        {hoverOutline}
-        {guides}
-      </g>
-    </svg>
+    />
   );
 }

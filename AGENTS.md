@@ -12,6 +12,8 @@ Validate order: `typecheck` → `lint`. `npm run build` ignores TS/ESLint errors
 
 No tests configured.
 
+** DO NOT COMMIT CHANGES TO GIT! USER WILL DO SO MANUALLY **
+
 ## Architecture
 
 - **Next.js 15** App Router, React 19, TypeScript, Tailwind CSS v3, shadcn/ui (button, alert-dialog)
