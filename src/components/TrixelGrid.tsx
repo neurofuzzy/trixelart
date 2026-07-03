@@ -9,8 +9,10 @@ import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
 import { SymmetryPanel } from "@/components/SymmetryPanel";
 import { ColorPalette } from "@/components/ColorPalette";
+import { SelectionPalette } from "@/components/SelectionPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE } from "@/lib/constants";
+import type { SelectionSnapshot } from "@/lib/hex-flower";
 
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
@@ -27,6 +29,8 @@ export default function TrixelGrid() {
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [selectedHex, setSelectedHex] = useState<{ c: number; k: number } | null>(null);
+  const [selections, setSelections] = useState<SelectionSnapshot[]>([]);
+  const [activeSelection, setActiveSelection] = useState<SelectionSnapshot | null>(null);
   const hexEnabled = gridDivisions > 0 && hexMode !== "off";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
   const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
@@ -61,6 +65,30 @@ export default function TrixelGrid() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry }));
   }, [gridDivisions, hexMode, flowerRadius, symmetry]);
+
+  // Selection snapshots persist with the project (separate key so existing
+  // `symmetria-save` imports/exports stay backward-compatible).
+  const SELECTIONS_KEY = "symmetria-selections";
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SELECTIONS_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (Array.isArray(data)) {
+          setSelections(data);
+          // Restore the most recently captured snapshot as the active stamp so
+          // the stamp tool has something to fire with immediately after load.
+          const ok = data[0] && Array.isArray(data[0].trixels) && typeof data[0].N === "number";
+          if (ok) setActiveSelection(data[0]);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SELECTIONS_KEY, JSON.stringify(selections));
+    } catch { /* ignore */ }
+  }, [selections]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -107,6 +135,9 @@ export default function TrixelGrid() {
     symmetry: effectiveSymmetry,
     selectedHex,
     setSelectedHex,
+    activeSelection,
+    setActiveSelection,
+    setSelections,
   });
 
   const handleExport = useCallback(() => {
@@ -241,7 +272,7 @@ export default function TrixelGrid() {
         onCenterView={onCenterView}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
-        hasSelection={selectedHex !== null}
+        hasSelection={selections.length > 0}
       />
 
       <div
@@ -269,6 +300,7 @@ export default function TrixelGrid() {
           hexMode={hexMode}
           selectedHex={selectedHex}
           tool={tool}
+          activeSelection={activeSelection}
         />
 
         <SymmetryPanel
@@ -281,10 +313,18 @@ export default function TrixelGrid() {
           onClose={() => setIsFunctionOpen(false)}
         />
 
-        <ColorPalette
-          color={color}
-          onColorChange={onColorChange}
-        />
+        {tool === "select" || tool === "stamp" ? (
+          <SelectionPalette
+            selections={selections}
+            activeSelectionId={activeSelection?.id ?? null}
+            onSelect={(s) => setActiveSelection(s)}
+          />
+        ) : (
+          <ColorPalette
+            color={color}
+            onColorChange={onColorChange}
+          />
+        )}
       </div>
 
       <Footer

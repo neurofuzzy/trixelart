@@ -1,4 +1,4 @@
-import { SIDE, H, worldToTri, type TriKey, type TriType } from "./grid-math";
+import { SIDE, H, worldToTri, triToString, type TriKey, type TriType } from "./grid-math";
 
 /**
  * Hex coordinates of the home hex containing trixel (q, r, type).
@@ -82,6 +82,36 @@ export function rotateTrixelCCW(
 }
 
 export type Symmetry = "off" | "sym60" | "sym120";
+
+export interface SelectionSnapshot {
+  id: string;
+  N: number;
+  c: number;
+  k: number;
+  trixels: Array<{ dq: number; dr: number; type: TriType; color: string }>;
+}
+
+export function hexCenterTriAxial(c: number, k: number, N: number) {
+  return { qc: N * (c - k), rc: N * (c + 2 * k) };
+}
+
+export function captureHexSnapshot(
+  painted: Record<string, string>,
+  c: number,
+  k: number,
+  N: number,
+): SelectionSnapshot {
+  const { qc, rc } = hexCenterTriAxial(c, k, N);
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const trixels: SelectionSnapshot["trixels"] = [];
+  for (const t of enumerateHexTrixels(c, k, N)) {
+    const color = painted[triToString(t)];
+    if (color) {
+      trixels.push({ dq: t.q - qc, dr: t.r - rc, type: t.type, color });
+    }
+  }
+  return { id, N, c, k, trixels };
+}
 
 export interface HexCoord {
   c: number;

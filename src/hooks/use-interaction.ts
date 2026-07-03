@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
-import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, type Symmetry } from "@/lib/hex-flower";
+import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, hexCenterTriAxial, captureHexSnapshot, type Symmetry, type SelectionSnapshot } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
@@ -31,6 +31,9 @@ export function useInteraction({
   symmetry,
   selectedHex,
   setSelectedHex,
+  activeSelection,
+  setActiveSelection,
+  setSelections,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -48,6 +51,9 @@ export function useInteraction({
   symmetry: Symmetry;
   selectedHex: { c: number; k: number } | null;
   setSelectedHex: (h: { c: number; k: number } | null) => void;
+  activeSelection: SelectionSnapshot | null;
+  setActiveSelection: (s: SelectionSnapshot | null) => void;
+  setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -92,6 +98,12 @@ export function useInteraction({
   // Selected hex (for stamp tool) — mirrored so click callbacks stay stable.
   const selectedHexRef = useRef(selectedHex);
   selectedHexRef.current = selectedHex;
+
+  // Active stamp selection snapshot — mirrored for stable callbacks.
+  const activeSelectionRef = useRef(activeSelection);
+  activeSelectionRef.current = activeSelection;
+  const paintedRef = useRef(painted);
+  paintedRef.current = painted;
 
   // Ghost-preview targets: the hovered trixel + all its flower + symmetry
   // mirrors. Recomputed whenever the hover or any setting changes; rendered
@@ -240,12 +252,24 @@ export function useInteraction({
           lastPaintedWorld: null,
         };
       } else if (tool === "select") {
-        // Tap a trixel to select its enclosing hex.
+        // Tap a trixel to select its enclosing hex AND capture a snapshot of
+        // the hex's painted trixels for re-use via the stamp palette.
         const N = gridDivisionsRef.current;
         const world = screenToWorld(pos.x, pos.y);
         const tri = worldToTri(world.x, world.y);
         if (N > 0) {
-          setSelectedHex(triToHex(tri.q, tri.r, tri.type, N));
+          const hex = triToHex(tri.q, tri.r, tri.type, N);
+          setSelectedHex(hex);
+          // Snapshot the hex's currently-painted trixels. If the hex is
+          // empty, skip capturing (no point storing an empty stamp).
+          const snap = captureHexSnapshot(paintedRef.current, hex.c, hex.k, N);
+          if (snap.trixels.length > 0) {
+            setSelections((prev) => {
+              const next = [snap, ...prev.filter((s) => s.id !== snap.id)];
+              return next.slice(0, 5);
+            });
+            setActiveSelection(snap);
+          }
         } else {
           setSelectedHex(null);
         }
@@ -258,43 +282,33 @@ export function useInteraction({
           lastPaintedWorld: null,
         };
       } else if (tool === "stamp") {
-        // Paste the currently selected hex's trixels into the single hex under
-        // the cursor, aligned center-to-center. Right-click stamp erases the
-        // target hex's contents using the selection's footprint; left-click
-        // paints the selection into it.
+        // Stamp the active selection's trixels into the hex under the cursor,
+        // aligned center-to-center. Right-click / Ctrl-click erases the
+        // target hex's footprint using the snapshot's local trixel offsets.
         const N = gridDivisionsRef.current;
         const world = screenToWorld(pos.x, pos.y);
         const tri = worldToTri(world.x, world.y);
-        const sel = selectedHexRef.current;
+        const snap = activeSelectionRef.current;
 
-        if (N > 0 && sel) {
+        if (snap && N === snap.N) {
           const destHex = triToHex(tri.q, tri.r, tri.type, N);
-          // Source trixels — enumerated on each stamp so the selection is live.
-          const src = enumerateHexTrixels(sel.c, sel.k, N);
-          // The translation from source hex to destination hex:
-          const { dq, dr } = hexTranslation(
-            sel.c, sel.k, destHex.c, destHex.k, N,
-          );
-
+          const { qc, rc } = hexCenterTriAxial(destHex.c, destHex.k, N);
           const erase = e.button === 2 || e.ctrlKey;
+
           setPainted((prev) => {
             const next = { ...prev };
             let changed = false;
-            for (const t of src) {
+            for (const t of snap.trixels) {
               const key = triToString({
-                q: t.q + dq,
-                r: t.r + dr,
+                q: qc + t.dq,
+                r: rc + t.dr,
                 type: t.type,
               });
               if (erase) {
                 if (key in next) { delete next[key]; changed = true; }
-              } else {
-                const v = prev[triToString(t)];
-                if (v) {
-                  if (next[key] !== v) { next[key] = v; changed = true; }
-                } else if (key in next) {
-                  delete next[key]; changed = true;
-                }
+              } else if (next[key] !== t.color) {
+                next[key] = t.color;
+                changed = true;
               }
             }
             return changed ? next : prev;

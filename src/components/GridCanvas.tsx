@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { SIDE, H, getTriVertices, triToString, type TriKey } from "@/lib/grid-math";
-import { hexCenterWorld, enumerateHexTrixels, hexTranslation, triToHex } from "@/lib/hex-flower";
+import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
+import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, type SelectionSnapshot } from "@/lib/hex-flower";
 import type { HexMode } from "@/components/Footer";
 
 export function GridCanvas({
@@ -16,6 +16,7 @@ export function GridCanvas({
   hexMode,
   selectedHex,
   tool,
+  activeSelection,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -27,6 +28,7 @@ export function GridCanvas({
   hexMode: HexMode;
   selectedHex: { c: number; k: number } | null;
   tool: "paint" | "erase" | "pan" | "select" | "stamp";
+  activeSelection: SelectionSnapshot | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -322,30 +324,21 @@ export function GridCanvas({
       ctx.stroke();
       ctx.restore();
 
-      // Stamp preview: render the selection's actual painted trixels translated
-      // to the hovered hex, using their real colors so the user sees exactly
+      // Stamp preview: render the active selection's trixels translated to
+      // the hovered hex, using their real colors so the user sees exactly
       // what a stamp would land there.
-      if (tool === "stamp" && hoverTargets.length > 0) {
+      if (tool === "stamp" && hoverTargets.length > 0 && activeSelection && gridDivisions === activeSelection.N) {
         const N = gridDivisions;
         const hov = hoverTargets[0];
         const tgt = triToHex(hov.q, hov.r, hov.type, N);
+        const { qc, rc } = hexCenterTriAxial(tgt.c, tgt.k, N);
 
-        const off = hexTranslation(
-          selectedHex.c,
-          selectedHex.k,
-          tgt.c,
-          tgt.k,
-          N,
-        );
-
-        // Group source trixels by their painted color.
-        const previewGroups = new Map<string, TriKey[]>();
-        for (const t of tris) {
-          const v = painted[triToString(t)];
-          if (!v) continue;
-          const list = previewGroups.get(v);
+        // Group snapshot trixels by color so we batch fills.
+        const previewGroups = new Map<string, typeof activeSelection.trixels>();
+        for (const t of activeSelection.trixels) {
+          const list = previewGroups.get(t.color);
           if (list) list.push(t);
-          else previewGroups.set(v, [t]);
+          else previewGroups.set(t.color, [t]);
         }
 
         ctx.save();
@@ -355,8 +348,8 @@ export function GridCanvas({
           ctx.beginPath();
           for (const t of list) {
             const [a, b, c] = getTriVertices(
-              t.q + off.dq,
-              t.r + off.dr,
+              qc + t.dq,
+              rc + t.dr,
               t.type,
             );
             ctx.moveTo(a.x, a.y);
@@ -438,7 +431,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection]);
 
   return (
     <canvas
