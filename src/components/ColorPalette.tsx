@@ -12,7 +12,7 @@ export function ColorPalette({
 }) {
   return (
     <div
-      className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40"
+      className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40"
       onPointerDown={(e) => e.stopPropagation()}
     >
       {GRAYSCALE_PALETTE.map((c, i) => (

@@ -10,6 +10,7 @@ export function GridCanvas({
   painted,
   hoveredTri,
   screenToWorld,
+  gridDivisions,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -17,6 +18,7 @@ export function GridCanvas({
   painted: Record<string, string>;
   hoveredTri: TriKey | null;
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
+  gridDivisions: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -127,19 +129,62 @@ export function GridCanvas({
 
     ctx.stroke();
 
-    // Guide lines
-    const guideWidth = Math.max(1 / view.zoom, 1);
+    // Division / guide lines
+    const divWidth = Math.max(1 / view.zoom, 1);
     ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = guideWidth;
+    ctx.lineWidth = divWidth;
 
-    ctx.beginPath();
-    ctx.moveTo(-10000, 0);
-    ctx.lineTo(10000, 0);
-    ctx.moveTo(-5000, -8660);
-    ctx.lineTo(5000, 8660);
-    ctx.moveTo(5000, -8660);
-    ctx.lineTo(-5000, 8660);
-    ctx.stroke();
+    if (gridDivisions > 0) {
+      const N = gridDivisions;
+      ctx.beginPath();
+
+      // Family 1: horizontal lines at r % N === 0
+      for (let r = minR; r <= maxR + 1; r++) {
+        if (r % N !== 0) continue;
+        const y = r * H;
+        const x0 = minQ * SIDE + r * SIDE / 2;
+        const x1 = (maxQ + 1) * SIDE + r * SIDE / 2;
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+      }
+
+      // Family 2: / diagonals at q % N === 0
+      for (let q = minQ; q <= maxQ + 1; q++) {
+        if (q % N !== 0) continue;
+        const x0 = q * SIDE + minR * SIDE / 2;
+        const y0 = minR * H;
+        const x1 = q * SIDE + (maxR + 1) * SIDE / 2;
+        const y1 = (maxR + 1) * H;
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+      }
+
+      // Family 3: \ diagonals at S % N === 0
+      for (let S = sumMin; S <= sumMax; S++) {
+        if ((S + 1) % N !== 0) continue;
+        const qStart = Math.max(minQ, S - (maxR + 1));
+        const qEnd = Math.min(maxQ, S - minR);
+        if (qStart > qEnd) continue;
+
+        const x0 = qStart * SIDE + (S - qStart) * SIDE / 2 + SIDE;
+        const y0 = (S - qStart) * H;
+        const x1 = qEnd * SIDE + (S - qEnd) * SIDE / 2 + SIDE;
+        const y1 = (S - qEnd) * H;
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+      }
+
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(-10000, 0);
+      ctx.lineTo(10000, 0);
+      ctx.moveTo(-5000, -8660);
+      ctx.lineTo(5000, 8660);
+      ctx.moveTo(5000, -8660);
+      ctx.lineTo(-5000, 8660);
+      ctx.stroke();
+    }
 
     ctx.fillStyle = "white";
     ctx.beginPath();
@@ -164,7 +209,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoveredTri, mounted, screenToWorld]);
+  }, [size, view, painted, hoveredTri, mounted, screenToWorld, gridDivisions]);
 
   return (
     <canvas

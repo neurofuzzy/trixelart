@@ -9,7 +9,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
 import { SymmetryPanel } from "@/components/SymmetryPanel";
 import { ColorPalette } from "@/components/ColorPalette";
-import { AbcDisplay } from "@/components/AbcDisplay";
+import { Footer } from "@/components/Footer";
 import { GRAYSCALE_PALETTE } from "@/lib/constants";
 
 export default function TrixelGrid() {
@@ -20,6 +20,25 @@ export default function TrixelGrid() {
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
+  const [gridDivisions, setGridDivisions] = useState(0);
+
+  const SETTINGS_KEY = "symmetria-settings";
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SETTINGS_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (typeof data.gridDivisions === "number") {
+          setGridDivisions(data.gridDivisions);
+        }
+      }
+    } catch { /* ignore parse errors */ }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions }));
+  }, [gridDivisions]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -192,6 +211,7 @@ export default function TrixelGrid() {
           painted={painted}
           hoveredTri={hoveredTri}
           screenToWorld={screenToWorld}
+          gridDivisions={gridDivisions}
         />
 
         <SymmetryPanel
@@ -208,9 +228,13 @@ export default function TrixelGrid() {
           color={color}
           onColorChange={onColorChange}
         />
-
-        <AbcDisplay hoveredTri={hoveredTri} />
       </div>
+
+      <Footer
+        hoveredTri={hoveredTri}
+        gridDivisions={gridDivisions}
+        onGridDivisionsChange={setGridDivisions}
+      />
     </div>
   );
 }
