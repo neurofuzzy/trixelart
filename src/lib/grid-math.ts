@@ -63,6 +63,43 @@ export function getTriABC(q: number, r: number, type: TriType) {
   return { a, b, c };
 }
 
+/** Returns all triangles intersected by a line segment between two world points */
+export function getTrianglesOnLine(
+  wx1: number, wy1: number,
+  wx2: number, wy2: number
+): TriKey[] {
+  const visited = new Set<string>();
+  const result: TriKey[] = [];
+
+  const r1 = wy1 / H;
+  const q1 = wx1 / SIDE - r1 * 0.5;
+  const r2 = wy2 / H;
+  const q2 = wx2 / SIDE - r2 * 0.5;
+
+  const dq = q2 - q1;
+  const dr = r2 - r1;
+  const dist = Math.sqrt(dq * dq + dr * dr);
+
+  const maxStep = 0.1;
+  const steps = Math.max(Math.ceil(dist / maxStep), 1);
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const q = q1 + dq * t;
+    const r = r1 + dr * t;
+    const wx = (q + r * 0.5) * SIDE;
+    const wy = r * H;
+    const tri = worldToTri(wx, wy);
+    const key = triToString(tri);
+    if (!visited.has(key)) {
+      visited.add(key);
+      result.push(tri);
+    }
+  }
+
+  return result;
+}
+
 /** Generates the SVG path string for a specific triangle */
 export const getTriPath = (q: number, r: number, type: TriType) => {
   const bx = q * SIDE + r * (SIDE / 2);

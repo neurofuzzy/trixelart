@@ -39,6 +39,7 @@ import {
   triToString,
   getTriPath,
   getTriABC,
+  getTrianglesOnLine,
   type TriKey,
 } from "@/lib/grid-math";
 
@@ -77,12 +78,14 @@ export default function TrixelGrid() {
     hasMoved: boolean;
     startPos: { x: number; y: number } | null;
     lastPos: { x: number; y: number } | null;
+    lastPaintedWorld: { x: number; y: number } | null;
   }>({
     isPainting: false,
     isPanning: false,
     hasMoved: false,
     startPos: null,
     lastPos: null,
+    lastPaintedWorld: null,
   });
 
   useEffect(() => {
@@ -283,17 +286,20 @@ export default function TrixelGrid() {
         hasMoved: false,
         startPos: { x: e.clientX, y: e.clientY },
         lastPos: { x: e.clientX, y: e.clientY },
+        lastPaintedWorld: null,
       };
     } else {
+      const world = screenToWorld(pos.x, pos.y);
+
       interaction.current = {
         isPainting: true,
         isPanning: false,
         hasMoved: false,
         startPos: { x: e.clientX, y: e.clientY },
         lastPos: null,
+        lastPaintedWorld: { x: world.x, y: world.y },
       };
 
-      const world = screenToWorld(pos.x, pos.y);
       const key = triToString(worldToTri(world.x, world.y));
 
       setPainted((prev) => {
@@ -332,18 +338,30 @@ export default function TrixelGrid() {
       setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
     } else if (interaction.current.isPainting) {
-      const key = triToString(tri);
+      const lastWorld = interaction.current.lastPaintedWorld;
+      if (!lastWorld) return;
+
+      const tris = getTrianglesOnLine(lastWorld.x, lastWorld.y, world.x, world.y);
+      interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
 
       setPainted((prev) => {
-        if (tool === "paint") {
-          if (prev[key] === color) return prev;
-          return { ...prev, [key]: color };
-        } else {
-          if (!(key in prev)) return prev;
-          const next = { ...prev };
-          delete next[key];
-          return next;
+        const next = { ...prev };
+        let changed = false;
+        for (const tri of tris) {
+          const key = triToString(tri);
+          if (tool === "paint") {
+            if (next[key] !== color) {
+              next[key] = color;
+              changed = true;
+            }
+          } else {
+            if (key in next) {
+              delete next[key];
+              changed = true;
+            }
+          }
         }
+        return changed ? next : prev;
       });
     }
   };
@@ -370,6 +388,7 @@ export default function TrixelGrid() {
       hasMoved: false,
       startPos: null,
       lastPos: null,
+      lastPaintedWorld: null,
     };
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
