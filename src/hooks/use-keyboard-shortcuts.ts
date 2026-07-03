@@ -1,0 +1,43 @@
+"use client";
+
+import { useEffect } from "react";
+import { GRAYSCALE_PALETTE } from "@/lib/constants";
+
+export function useKeyboardShortcuts(
+  handleUndo: () => void,
+  handleRedo: () => void,
+  setTool: (tool: "paint" | "erase" | "pan") => void,
+  setColor: (color: string) => void,
+) {
+  useEffect(() => {
+    const handleKeys = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        return;
+      }
+
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      )
+        return;
+
+      if (e.key.toLowerCase() === "p") {
+        setTool("paint");
+      } else if (e.key.toLowerCase() === "e") {
+        setTool("erase");
+      }
+
+      const colorIdx = parseInt(e.key) - 1;
+      if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
+        setColor(GRAYSCALE_PALETTE[colorIdx]);
+        setTool("paint");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeys);
+    return () => window.removeEventListener("keydown", handleKeys);
+  }, [handleUndo, handleRedo, setTool, setColor]);
+}

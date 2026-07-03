@@ -1,68 +1,25 @@
 "use client";
 
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
-import {
-  Undo2,
-  Redo2,
-  MousePointer2,
-  Eraser,
-  Move,
-  Trash2,
-  Download,
-  Upload,
-  X,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
-import {
-  SIDE,
-  H,
-  worldToTri,
-  triToString,
-  getTriPath,
-  getTriABC,
-  getTrianglesOnLine,
-  type TriKey,
-} from "@/lib/grid-math";
-
-const GRAYSCALE_PALETTE = [
-  "#000000",
-  "#404040",
-  "#808080",
-  "#c0c0c0",
-  "#ffffff",
-];
+import { useHistory } from "@/hooks/use-history";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useInteraction } from "@/hooks/use-interaction";
+import { Toolbar } from "@/components/Toolbar";
+import { GridCanvas } from "@/components/GridCanvas";
+import { SymmetryPanel } from "@/components/SymmetryPanel";
+import { ColorPalette } from "@/components/ColorPalette";
+import { AbcDisplay } from "@/components/AbcDisplay";
+import { GRAYSCALE_PALETTE } from "@/lib/constants";
 
 export default function TrixelGrid() {
-  const [mounted, setMounted] = useState(false);
   const { size, containerRef, updateSize } = useCanvasSize();
+  const { mounted, painted, setPainted, pushHistory, handleUndo, handleRedo, clearCanvas, history, historyIdx } = useHistory();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
-
-  const [painted, setPainted] = useState<Record<string, string>>({});
-  const [history, setHistory] = useState<Record<string, string>[]>([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -70,85 +27,39 @@ export default function TrixelGrid() {
   );
   const [extent, setExtent] = useState(10);
 
-  const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
-
-  const interaction = useRef<{
-    isPainting: boolean;
-    isPanning: boolean;
-    hasMoved: boolean;
-    startPos: { x: number; y: number } | null;
-    lastPos: { x: number; y: number } | null;
-    lastPaintedWorld: { x: number; y: number } | null;
-  }>({
-    isPainting: false,
-    isPanning: false,
-    hasMoved: false,
-    startPos: null,
-    lastPos: null,
-    lastPaintedWorld: null,
-  });
-
   useEffect(() => {
-    setMounted(true);
-    const saved = localStorage.getItem("symmetria-save");
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        setPainted(data);
-        setHistory([data]);
-        setHistoryIdx(0);
-      } catch (e) {
-        console.error("Failed to load save", e);
-      }
-    }
-
-    const timer = setTimeout(() => {
-      updateSize();
-    }, 500);
+    const timer = setTimeout(() => updateSize(), 500);
     return () => clearTimeout(timer);
   }, [updateSize]);
 
-  useEffect(() => {
-    if (mounted)
-      localStorage.setItem("symmetria-save", JSON.stringify(painted));
-  }, [painted, mounted]);
+  useKeyboardShortcuts(handleUndo, handleRedo, setTool, (c) => {
+    setColor(c);
+    setTool("paint");
+  });
 
-  const pushHistory = useCallback(
-    (newState: Record<string, string>) => {
-      setHistory((prev) => {
-        const next = prev.slice(0, historyIdx + 1);
-        next.push({ ...newState });
-        if (next.length > 50) next.shift();
-        return next;
-      });
-      setHistoryIdx((prev) => Math.min(prev + 1, 49));
-    },
-    [historyIdx],
-  );
+  const {
+    hoveredTri,
+    setHoveredTri,
+    screenToWorld,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onWheel,
+  } = useInteraction({
+    size,
+    view,
+    setView,
+    tool,
+    setTool,
+    color,
+    setColor,
+    painted,
+    setPainted,
+    pushHistory,
+    containerRef,
+  });
 
-  const handleUndo = useCallback(() => {
-    if (historyIdx > 0) {
-      const prevState = history[historyIdx - 1];
-      setPainted(prevState);
-      setHistoryIdx(historyIdx - 1);
-    }
-  }, [history, historyIdx]);
-
-  const handleRedo = useCallback(() => {
-    if (historyIdx < history.length - 1) {
-      const nextState = history[historyIdx + 1];
-      setPainted(nextState);
-      setHistoryIdx(historyIdx + 1);
-    }
-  }, [history, historyIdx]);
-
-  const clearCanvas = () => {
-    const empty = {};
-    setPainted(empty);
-    pushHistory(empty);
-  };
-
-  const handleExport = () => {
+  const handleExport = useCallback(() => {
     const dataStr = JSON.stringify(painted, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -159,34 +70,37 @@ export default function TrixelGrid() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, [painted]);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const content = event.target?.result as string;
-        const importedData = JSON.parse(content);
-        if (typeof importedData === "object" && importedData !== null) {
-          setPainted(importedData);
-          pushHistory(importedData);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const content = event.target?.result as string;
+          const importedData = JSON.parse(content);
+          if (typeof importedData === "object" && importedData !== null) {
+            setPainted(importedData);
+            pushHistory(importedData);
+          }
+        } catch (err) {
+          console.error("Failed to import", err);
         }
-      } catch (err) {
-        console.error("Failed to import", err);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    },
+    [setPainted, pushHistory],
+  );
 
-  const runSymmetryFunction = () => {
+  const runSymmetryFunction = useCallback(() => {
     const newPainted = { ...painted };
     try {
       const check = new Function(
@@ -198,7 +112,6 @@ export default function TrixelGrid() {
 
       for (let a = -extent; a <= extent; a++) {
         for (let b = -extent; b <= extent; b++) {
-          // Up triangle check: a + b + c = 0
           const cUp = -a - b;
           if (Math.abs(cUp) <= extent) {
             if (check(a, b, cUp)) {
@@ -206,7 +119,6 @@ export default function TrixelGrid() {
             }
           }
 
-          // Down triangle check: a + b + c = -1
           const cDown = -1 - a - b;
           if (Math.abs(cDown) <= extent) {
             if (check(a, b, cDown)) {
@@ -223,298 +135,12 @@ export default function TrixelGrid() {
         "Invalid mathematical expression. Use JavaScript syntax, e.g. a % 5 === 0",
       );
     }
-  };
+  }, [painted, formula, extent, color, setPainted, pushHistory]);
 
-  useEffect(() => {
-    const handleKeys = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) handleRedo();
-        else handleUndo();
-        return;
-      }
-
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      )
-        return;
-
-      if (e.key.toLowerCase() === "p") {
-        setTool("paint");
-      } else if (e.key.toLowerCase() === "e") {
-        setTool("erase");
-      }
-
-      const colorIdx = parseInt(e.key) - 1;
-      if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
-        setColor(GRAYSCALE_PALETTE[colorIdx]);
-        setTool("paint");
-      }
-    };
-    window.addEventListener("keydown", handleKeys);
-    return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo]);
-
-  const screenToWorld = useCallback(
-    (sx: number, sy: number) => {
-      return {
-        x: (sx - size.width / 2) / view.zoom - view.x,
-        y: (sy - size.height / 2) / view.zoom - view.y,
-      };
-    },
-    [size, view],
-  );
-
-  const getRelativePointer = (e: React.PointerEvent | React.MouseEvent) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    const isRightClick = e.button === 2 || e.ctrlKey;
-    const pos = getRelativePointer(e);
-
-    if (isRightClick || tool === "pan") {
-      interaction.current = {
-        isPainting: false,
-        isPanning: true,
-        hasMoved: false,
-        startPos: { x: e.clientX, y: e.clientY },
-        lastPos: { x: e.clientX, y: e.clientY },
-        lastPaintedWorld: null,
-      };
-    } else {
-      const world = screenToWorld(pos.x, pos.y);
-
-      interaction.current = {
-        isPainting: true,
-        isPanning: false,
-        hasMoved: false,
-        startPos: { x: e.clientX, y: e.clientY },
-        lastPos: null,
-        lastPaintedWorld: { x: world.x, y: world.y },
-      };
-
-      const key = triToString(worldToTri(world.x, world.y));
-
-      setPainted((prev) => {
-        const next = { ...prev };
-        if (tool === "paint") {
-          if (prev[key] === color) {
-            delete next[key];
-          } else {
-            next[key] = color;
-          }
-        } else {
-          delete next[key];
-        }
-        return next;
-      });
-    }
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    const pos = getRelativePointer(e);
-    const world = screenToWorld(pos.x, pos.y);
-    const tri = worldToTri(world.x, world.y);
-    setHoveredTri(tri);
-
-    if (interaction.current.isPanning && interaction.current.lastPos) {
-      const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
-      const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
-
-      const totalDist = Math.hypot(
-        e.clientX - (interaction.current.startPos?.x || 0),
-        e.clientY - (interaction.current.startPos?.y || 0),
-      );
-      if (totalDist > 3) interaction.current.hasMoved = true;
-
-      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
-      interaction.current.lastPos = { x: e.clientX, y: e.clientY };
-    } else if (interaction.current.isPainting) {
-      const lastWorld = interaction.current.lastPaintedWorld;
-      if (!lastWorld) return;
-
-      const tris = getTrianglesOnLine(lastWorld.x, lastWorld.y, world.x, world.y);
-      interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
-
-      setPainted((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const tri of tris) {
-          const key = triToString(tri);
-          if (tool === "paint") {
-            if (next[key] !== color) {
-              next[key] = color;
-              changed = true;
-            }
-          } else {
-            if (key in next) {
-              delete next[key];
-              changed = true;
-            }
-          }
-        }
-        return changed ? next : prev;
-      });
-    }
-  };
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    if (interaction.current.isPanning && !interaction.current.hasMoved) {
-      const pos = getRelativePointer(e);
-      const world = screenToWorld(pos.x, pos.y);
-      const key = triToString(worldToTri(world.x, world.y));
-      const pickedColor = painted[key];
-      if (pickedColor) {
-        setColor(pickedColor);
-        setTool("paint");
-      }
-    }
-
-    if (interaction.current.isPainting) {
-      pushHistory(painted);
-    }
-
-    interaction.current = {
-      isPainting: false,
-      isPanning: false,
-      hasMoved: false,
-      startPos: null,
-      lastPos: null,
-      lastPaintedWorld: null,
-    };
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-
-  const onWheel = (e: React.WheelEvent) => {
-    const zoomFactor = Math.pow(1.1, -e.deltaY / 200);
-    setView((v) => ({
-      ...v,
-      zoom: Math.min(Math.max(v.zoom * zoomFactor, 0.1), 15),
-    }));
-  };
-
-  const gridContent = useMemo(() => {
-    if (size.width === 0 || !mounted) return null;
-
-    const triangles: JSX.Element[] = [];
-    const buffer = 3;
-    const worldTopLeft = screenToWorld(0, 0);
-    const worldBottomRight = screenToWorld(size.width, size.height);
-
-    const minR = Math.floor(worldTopLeft.y / H) - buffer;
-    const maxR = Math.ceil(worldBottomRight.y / H) + buffer;
-    const minQ =
-      Math.floor(
-        Math.min(worldTopLeft.x, worldBottomRight.x) / SIDE - maxR * 0.5,
-      ) - buffer;
-    const maxQ =
-      Math.ceil(
-        Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - minR * 0.5,
-      ) + buffer;
-
-    for (let r = minR; r <= maxR; r++) {
-      for (let q = minQ; q <= maxQ; q++) {
-        const upKey = `${q},${r},up`;
-        const dnKey = `${q},${r},down`;
-
-        triangles.push(
-          <path
-            key={upKey}
-            d={getTriPath(q, r, "up")}
-            fill={painted[upKey] || "transparent"}
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={0.5 / view.zoom}
-          />,
-        );
-        triangles.push(
-          <path
-            key={dnKey}
-            d={getTriPath(q, r, "down")}
-            fill={painted[dnKey] || "transparent"}
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={0.5 / view.zoom}
-          />,
-        );
-      }
-    }
-    return triangles;
-  }, [size, view, painted, mounted, screenToWorld]);
-
-  const guides = useMemo(
-    () => (
-      <g pointerEvents="none">
-        <line
-          x1={-10000}
-          y1={0}
-          x2={10000}
-          y2={0}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <line
-          x1={-5000}
-          y1={-8660}
-          x2={5000}
-          y2={8660}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <line
-          x1={5000}
-          y1={-8660}
-          x2={-5000}
-          y2={8660}
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={1 / view.zoom}
-        />
-        <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
-      </g>
-    ),
-    [view.zoom],
-  );
-
-  const hoverOutline = useMemo(() => {
-    if (!hoveredTri) return null;
-    return (
-      <path
-        d={getTriPath(hoveredTri.q, hoveredTri.r, hoveredTri.type)}
-        fill="none"
-        stroke="white"
-        strokeWidth={2 / view.zoom}
-        pointerEvents="none"
-        className="opacity-50"
-      />
-    );
-  }, [hoveredTri, view.zoom]);
-
-  const abcDisplay = useMemo(() => {
-    if (!hoveredTri) return null;
-    const { a, b, c } = getTriABC(hoveredTri.q, hoveredTri.r, hoveredTri.type);
-    return (
-      <div className="absolute bottom-4 right-4 px-3 py-1 bg-card/90 backdrop-blur-md border rounded-full text-[10px] font-mono shadow-xl z-50 flex gap-3">
-        <span className="flex items-center gap-1.5">
-          <span className="text-primary font-bold">a</span> {a}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-primary font-bold">b</span> {b}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-primary font-bold">c</span> {c}
-        </span>
-        <span className="text-muted-foreground uppercase">
-          {hoveredTri.type}
-        </span>
-      </div>
-    );
-  }, [hoveredTri]);
+  const onColorChange = useCallback((c: string) => {
+    setColor(c);
+    setTool("paint");
+  }, []);
 
   if (!mounted) return <div className="h-full w-full bg-background" />;
 
@@ -528,118 +154,19 @@ export default function TrixelGrid() {
         className="hidden"
       />
 
-      {/* Toolbar */}
-      <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
-        <div className="flex items-center gap-1">
-          <Button
-            variant={tool === "paint" ? "default" : "ghost"}
-            size="icon"
-            onClick={() => setTool("paint")}
-            title="Paint (P)"
-          >
-            <MousePointer2 className="w-4 h-4" />
-          </Button>
-          <Button
-            variant={tool === "erase" ? "default" : "ghost"}
-            size="icon"
-            onClick={() => setTool("erase")}
-            title="Erase (E)"
-          >
-            <Eraser className="w-4 h-4" />
-          </Button>
-          <Button
-            variant={tool === "pan" ? "default" : "ghost"}
-            size="icon"
-            onClick={() => setTool("pan")}
-            title="Pan"
-          >
-            <Move className="w-4 h-4" />
-          </Button>
-
-          <div className="w-px h-6 bg-border mx-1" />
-
-          <Button
-            variant={isFunctionOpen ? "default" : "ghost"}
-            size="icon"
-            onClick={() => setIsFunctionOpen(!isFunctionOpen)}
-            title="Symmetry Function (ƒ)"
-            className="text-lg font-serif"
-          >
-            ƒ
-          </Button>
-
-          <div className="w-px h-6 bg-border mx-1" />
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleUndo}
-            disabled={historyIdx <= 0}
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo2 className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleRedo}
-            disabled={historyIdx >= history.length - 1}
-            title="Redo (Ctrl+Shift+Z)"
-          >
-            <Redo2 className="w-4 h-4" />
-          </Button>
-
-          <div className="w-px h-6 bg-border mx-1" />
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleExport}
-            title="Export JSON"
-          >
-            <Download className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleImportClick}
-            title="Import JSON"
-          >
-            <Upload className="w-4 h-4" />
-          </Button>
-        </div>
-
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hover:bg-destructive/10 hover:text-destructive"
-              title="Clear Everything"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently delete all your drawing data from the
-                infinite grid. This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={clearCanvas}
-                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              >
-                Clear Everything
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+      <Toolbar
+        tool={tool}
+        isFunctionOpen={isFunctionOpen}
+        onToolChange={setTool}
+        onFunctionToggle={() => setIsFunctionOpen((v) => !v)}
+        handleUndo={handleUndo}
+        handleRedo={handleRedo}
+        historyIdx={historyIdx}
+        historyLength={history.length}
+        onExport={handleExport}
+        onImportClick={handleImportClick}
+        onClear={clearCanvas}
+      />
 
       <div
         ref={containerRef}
@@ -647,108 +174,36 @@ export default function TrixelGrid() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={() => {
-          onPointerUp;
-          setHoveredTri(null);
-        }}
+        onPointerLeave={() => setHoveredTri(null)}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
         tabIndex={0}
       >
-        <svg
-          width="100%"
-          height="100%"
-          className="absolute inset-0 pointer-events-none"
-        >
-          <g
-            transform={`translate(${size.width / 2}, ${size.height / 2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}
-          >
-            {gridContent}
-            {hoverOutline}
-            {guides}
-          </g>
-        </svg>
+        <GridCanvas
+          size={size}
+          view={view}
+          mounted={mounted}
+          painted={painted}
+          hoveredTri={hoveredTri}
+          screenToWorld={screenToWorld}
+        />
 
-        {isFunctionOpen && (
-          <div
-            className="absolute top-4 left-4 w-80 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl z-50 space-y-4"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold flex items-center gap-2">
-                <span className="text-xl font-serif">ƒ</span> Symmetry Function
-              </h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setIsFunctionOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
+        <SymmetryPanel
+          isOpen={isFunctionOpen}
+          formula={formula}
+          onFormulaChange={setFormula}
+          extent={extent}
+          onExtentChange={setExtent}
+          onApply={runSymmetryFunction}
+          onClose={() => setIsFunctionOpen(false)}
+        />
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Condition (a, b, c axes)
-              </label>
-              <textarea
-                className="w-full h-20 p-2 text-sm bg-background border rounded-md font-mono resize-none focus:ring-2 focus:ring-primary outline-none"
-                placeholder="e.g. a % 5 === 0"
-                value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-              />
-            </div>
+        <ColorPalette
+          color={color}
+          onColorChange={onColorChange}
+        />
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Extent (Range: {extent})
-              </label>
-              <input
-                type="range"
-                min="10"
-                max="200"
-                value={extent}
-                onChange={(e) => setExtent(parseInt(e.target.value))}
-                className="w-full accent-primary"
-              />
-            </div>
-
-            <Button className="w-full" onClick={runSymmetryFunction}>
-              Apply Rule to Grid
-            </Button>
-
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Variables <b>a, b, c</b> represent triangle-width strips. Sum{" "}
-              <b>a+b+c</b> is 0 for 'up' triangles and -1 for 'down' triangles.
-            </p>
-          </div>
-        )}
-
-        <div
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {GRAYSCALE_PALETTE.map((c, i) => (
-            <button
-              key={c}
-              onClick={() => {
-                setColor(c);
-                setTool("paint");
-              }}
-              title={`Color ${i + 1} (${i + 1})`}
-              className={cn(
-                "w-8 h-8 rounded-full border-2 transition-all hover:scale-110",
-                color === c
-                  ? "border-white scale-125 shadow-lg"
-                  : "border-white/10 opacity-70",
-              )}
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
-
-        {abcDisplay}
+        <AbcDisplay hoveredTri={hoveredTri} />
       </div>
     </div>
   );
