@@ -1,40 +1,72 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Redo2, MousePointer2, Eraser, Move, Trash2, Download, Upload, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { 
-  AlertDialog, 
-  AlertDialogAction, 
-  AlertDialogCancel, 
-  AlertDialogContent, 
-  AlertDialogDescription, 
-  AlertDialogFooter, 
-  AlertDialogHeader, 
-  AlertDialogTitle, 
-  AlertDialogTrigger 
-} from '@/components/ui/alert-dialog';
-import { useCanvasSize } from '@/hooks/use-canvas-size';
-import { SIDE, H, worldToTri, triToString, getTriPath, getTriABC, type TriKey } from '@/lib/grid-math';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import {
+  Undo2,
+  Redo2,
+  MousePointer2,
+  Eraser,
+  Move,
+  Trash2,
+  Download,
+  Upload,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { useCanvasSize } from "@/hooks/use-canvas-size";
+import {
+  SIDE,
+  H,
+  worldToTri,
+  triToString,
+  getTriPath,
+  getTriABC,
+  type TriKey,
+} from "@/lib/grid-math";
 
-const GRAYSCALE_PALETTE = ['#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'];
+const GRAYSCALE_PALETTE = [
+  "#000000",
+  "#404040",
+  "#808080",
+  "#c0c0c0",
+  "#ffffff",
+];
 
-export default function SymmetriaGrid() {
+export default function TrixelGrid() {
   const [mounted, setMounted] = useState(false);
   const { size, containerRef, updateSize } = useCanvasSize();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-  const [tool, setTool] = useState<'paint' | 'erase' | 'pan'>('paint');
+  const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
-  
+
   const [painted, setPainted] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
-  const [formula, setFormula] = useState('a % 5 === 0 || b % 5 === 0 || c % 5 === 0');
+  const [formula, setFormula] = useState(
+    "a % 5 === 0 || b % 5 === 0 || c % 5 === 0",
+  );
   const [extent, setExtent] = useState(10);
 
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
@@ -45,17 +77,17 @@ export default function SymmetriaGrid() {
     hasMoved: boolean;
     startPos: { x: number; y: number } | null;
     lastPos: { x: number; y: number } | null;
-  }>({ 
-    isPainting: false, 
-    isPanning: false, 
+  }>({
+    isPainting: false,
+    isPanning: false,
     hasMoved: false,
     startPos: null,
-    lastPos: null 
+    lastPos: null,
   });
 
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem('symmetria-save');
+    const saved = localStorage.getItem("symmetria-save");
     if (saved) {
       try {
         const data = JSON.parse(saved);
@@ -74,18 +106,22 @@ export default function SymmetriaGrid() {
   }, [updateSize]);
 
   useEffect(() => {
-    if (mounted) localStorage.setItem('symmetria-save', JSON.stringify(painted));
+    if (mounted)
+      localStorage.setItem("symmetria-save", JSON.stringify(painted));
   }, [painted, mounted]);
 
-  const pushHistory = useCallback((newState: Record<string, string>) => {
-    setHistory(prev => {
-      const next = prev.slice(0, historyIdx + 1);
-      next.push({ ...newState });
-      if (next.length > 50) next.shift();
-      return next;
-    });
-    setHistoryIdx(prev => Math.min(prev + 1, 49));
-  }, [historyIdx]);
+  const pushHistory = useCallback(
+    (newState: Record<string, string>) => {
+      setHistory((prev) => {
+        const next = prev.slice(0, historyIdx + 1);
+        next.push({ ...newState });
+        if (next.length > 50) next.shift();
+        return next;
+      });
+      setHistoryIdx((prev) => Math.min(prev + 1, 49));
+    },
+    [historyIdx],
+  );
 
   const handleUndo = useCallback(() => {
     if (historyIdx > 0) {
@@ -111,11 +147,11 @@ export default function SymmetriaGrid() {
 
   const handleExport = () => {
     const dataStr = JSON.stringify(painted, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+    const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
-    link.download = `symmetria-grid-${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `symmetria-grid-${new Date().toISOString().split("T")[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -135,7 +171,7 @@ export default function SymmetriaGrid() {
       try {
         const content = event.target?.result as string;
         const importedData = JSON.parse(content);
-        if (typeof importedData === 'object' && importedData !== null) {
+        if (typeof importedData === "object" && importedData !== null) {
           setPainted(importedData);
           pushHistory(importedData);
         }
@@ -144,17 +180,21 @@ export default function SymmetriaGrid() {
       }
     };
     reader.readAsText(file);
-    e.target.value = '';
+    e.target.value = "";
   };
 
   const runSymmetryFunction = () => {
     const newPainted = { ...painted };
     try {
-      const check = new Function('a', 'b', 'c', `try { return !!(${formula}); } catch(e) { return false; }`);
-      
+      const check = new Function(
+        "a",
+        "b",
+        "c",
+        `try { return !!(${formula}); } catch(e) { return false; }`,
+      );
+
       for (let a = -extent; a <= extent; a++) {
         for (let b = -extent; b <= extent; b++) {
-          
           // Up triangle check: a + b + c = 0
           const cUp = -a - b;
           if (Math.abs(cUp) <= extent) {
@@ -176,79 +216,89 @@ export default function SymmetriaGrid() {
       pushHistory(newPainted);
       setIsFunctionOpen(false);
     } catch (e) {
-      alert("Invalid mathematical expression. Use JavaScript syntax, e.g. a % 5 === 0");
+      alert(
+        "Invalid mathematical expression. Use JavaScript syntax, e.g. a % 5 === 0",
+      );
     }
   };
 
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        if (e.shiftKey) handleRedo(); else handleUndo();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
         return;
       }
 
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      )
+        return;
 
-      if (e.key.toLowerCase() === 'p') {
-        setTool('paint');
-      } else if (e.key.toLowerCase() === 'e') {
-        setTool('erase');
+      if (e.key.toLowerCase() === "p") {
+        setTool("paint");
+      } else if (e.key.toLowerCase() === "e") {
+        setTool("erase");
       }
 
       const colorIdx = parseInt(e.key) - 1;
       if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
         setColor(GRAYSCALE_PALETTE[colorIdx]);
-        setTool('paint');
+        setTool("paint");
       }
     };
-    window.addEventListener('keydown', handleKeys);
-    return () => window.removeEventListener('keydown', handleKeys);
+    window.addEventListener("keydown", handleKeys);
+    return () => window.removeEventListener("keydown", handleKeys);
   }, [handleUndo, handleRedo]);
 
-  const screenToWorld = useCallback((sx: number, sy: number) => {
-    return {
-      x: (sx - size.width / 2) / view.zoom - view.x,
-      y: (sy - size.height / 2) / view.zoom - view.y
-    };
-  }, [size, view]);
+  const screenToWorld = useCallback(
+    (sx: number, sy: number) => {
+      return {
+        x: (sx - size.width / 2) / view.zoom - view.x,
+        y: (sy - size.height / 2) / view.zoom - view.y,
+      };
+    },
+    [size, view],
+  );
 
   const getRelativePointer = (e: React.PointerEvent | React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return {
       x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      y: e.clientY - rect.top,
     };
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
     const isRightClick = e.button === 2 || e.ctrlKey;
     const pos = getRelativePointer(e);
-    
-    if (isRightClick || tool === 'pan') {
-      interaction.current = { 
-        isPainting: false, 
-        isPanning: true, 
+
+    if (isRightClick || tool === "pan") {
+      interaction.current = {
+        isPainting: false,
+        isPanning: true,
         hasMoved: false,
         startPos: { x: e.clientX, y: e.clientY },
-        lastPos: { x: e.clientX, y: e.clientY } 
+        lastPos: { x: e.clientX, y: e.clientY },
       };
     } else {
-      interaction.current = { 
-        isPainting: true, 
-        isPanning: false, 
+      interaction.current = {
+        isPainting: true,
+        isPanning: false,
         hasMoved: false,
         startPos: { x: e.clientX, y: e.clientY },
-        lastPos: null 
+        lastPos: null,
       };
-      
+
       const world = screenToWorld(pos.x, pos.y);
       const key = triToString(worldToTri(world.x, world.y));
-      
-      setPainted(prev => {
+
+      setPainted((prev) => {
         const next = { ...prev };
-        if (tool === 'paint') {
+        if (tool === "paint") {
           if (prev[key] === color) {
             delete next[key];
           } else {
@@ -272,20 +322,20 @@ export default function SymmetriaGrid() {
     if (interaction.current.isPanning && interaction.current.lastPos) {
       const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
       const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
-      
+
       const totalDist = Math.hypot(
-        e.clientX - (interaction.current.startPos?.x || 0), 
-        e.clientY - (interaction.current.startPos?.y || 0)
+        e.clientX - (interaction.current.startPos?.x || 0),
+        e.clientY - (interaction.current.startPos?.y || 0),
       );
       if (totalDist > 3) interaction.current.hasMoved = true;
 
-      setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
       interaction.current.lastPos = { x: e.clientX, y: e.clientY };
     } else if (interaction.current.isPainting) {
       const key = triToString(tri);
-      
-      setPainted(prev => {
-        if (tool === 'paint') {
+
+      setPainted((prev) => {
+        if (tool === "paint") {
           if (prev[key] === color) return prev;
           return { ...prev, [key]: color };
         } else {
@@ -306,29 +356,29 @@ export default function SymmetriaGrid() {
       const pickedColor = painted[key];
       if (pickedColor) {
         setColor(pickedColor);
-        setTool('paint');
+        setTool("paint");
       }
     }
 
     if (interaction.current.isPainting) {
       pushHistory(painted);
     }
-    
-    interaction.current = { 
-      isPainting: false, 
-      isPanning: false, 
-      hasMoved: false, 
-      startPos: null, 
-      lastPos: null 
+
+    interaction.current = {
+      isPainting: false,
+      isPanning: false,
+      hasMoved: false,
+      startPos: null,
+      lastPos: null,
     };
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const onWheel = (e: React.WheelEvent) => {
     const zoomFactor = Math.pow(1.1, -e.deltaY / 200);
-    setView(v => ({
+    setView((v) => ({
       ...v,
-      zoom: Math.min(Math.max(v.zoom * zoomFactor, 0.1), 15)
+      zoom: Math.min(Math.max(v.zoom * zoomFactor, 0.1), 15),
     }));
   };
 
@@ -339,11 +389,17 @@ export default function SymmetriaGrid() {
     const buffer = 3;
     const worldTopLeft = screenToWorld(0, 0);
     const worldBottomRight = screenToWorld(size.width, size.height);
-    
+
     const minR = Math.floor(worldTopLeft.y / H) - buffer;
     const maxR = Math.ceil(worldBottomRight.y / H) + buffer;
-    const minQ = Math.floor(Math.min(worldTopLeft.x, worldBottomRight.x) / SIDE - (maxR * 0.5)) - buffer;
-    const maxQ = Math.ceil(Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - (minR * 0.5)) + buffer;
+    const minQ =
+      Math.floor(
+        Math.min(worldTopLeft.x, worldBottomRight.x) / SIDE - maxR * 0.5,
+      ) - buffer;
+    const maxQ =
+      Math.ceil(
+        Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - minR * 0.5,
+      ) + buffer;
 
     for (let r = minR; r <= maxR; r++) {
       for (let q = minQ; q <= maxQ; q++) {
@@ -351,41 +407,65 @@ export default function SymmetriaGrid() {
         const dnKey = `${q},${r},down`;
 
         triangles.push(
-          <path 
-            key={upKey} 
-            d={getTriPath(q, r, 'up')} 
-            fill={painted[upKey] || 'transparent'} 
-            stroke="rgba(255,255,255,0.06)" 
+          <path
+            key={upKey}
+            d={getTriPath(q, r, "up")}
+            fill={painted[upKey] || "transparent"}
+            stroke="rgba(255,255,255,0.06)"
             strokeWidth={0.5 / view.zoom}
-          />
+          />,
         );
         triangles.push(
-          <path 
-            key={dnKey} 
-            d={getTriPath(q, r, 'down')} 
-            fill={painted[dnKey] || 'transparent'} 
-            stroke="rgba(255,255,255,0.06)" 
+          <path
+            key={dnKey}
+            d={getTriPath(q, r, "down")}
+            fill={painted[dnKey] || "transparent"}
+            stroke="rgba(255,255,255,0.06)"
             strokeWidth={0.5 / view.zoom}
-          />
+          />,
         );
       }
     }
     return triangles;
   }, [size, view, painted, mounted, screenToWorld]);
 
-  const guides = useMemo(() => (
-    <g pointerEvents="none">
-      <line x1={-10000} y1={0} x2={10000} y2={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
-      <line x1={-5000} y1={-8660} x2={5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
-      <line x1={5000} y1={-8660} x2={-5000} y2={8660} stroke="rgba(255,255,255,0.15)" strokeWidth={1/view.zoom} />
-      <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
-    </g>
-  ), [view.zoom]);
+  const guides = useMemo(
+    () => (
+      <g pointerEvents="none">
+        <line
+          x1={-10000}
+          y1={0}
+          x2={10000}
+          y2={0}
+          stroke="rgba(255,255,255,0.15)"
+          strokeWidth={1 / view.zoom}
+        />
+        <line
+          x1={-5000}
+          y1={-8660}
+          x2={5000}
+          y2={8660}
+          stroke="rgba(255,255,255,0.15)"
+          strokeWidth={1 / view.zoom}
+        />
+        <line
+          x1={5000}
+          y1={-8660}
+          x2={-5000}
+          y2={8660}
+          stroke="rgba(255,255,255,0.15)"
+          strokeWidth={1 / view.zoom}
+        />
+        <circle cx={0} cy={0} r={5 / view.zoom} fill="white" />
+      </g>
+    ),
+    [view.zoom],
+  );
 
   const hoverOutline = useMemo(() => {
     if (!hoveredTri) return null;
     return (
-      <path 
+      <path
         d={getTriPath(hoveredTri.q, hoveredTri.r, hoveredTri.type)}
         fill="none"
         stroke="white"
@@ -401,10 +481,18 @@ export default function SymmetriaGrid() {
     const { a, b, c } = getTriABC(hoveredTri.q, hoveredTri.r, hoveredTri.type);
     return (
       <div className="absolute bottom-4 right-4 px-3 py-1 bg-card/90 backdrop-blur-md border rounded-full text-[10px] font-mono shadow-xl z-50 flex gap-3">
-        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">a</span> {a}</span>
-        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">b</span> {b}</span>
-        <span className="flex items-center gap-1.5"><span className="text-primary font-bold">c</span> {c}</span>
-        <span className="text-muted-foreground uppercase">{hoveredTri.type}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-primary font-bold">a</span> {a}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-primary font-bold">b</span> {b}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-primary font-bold">c</span> {c}
+        </span>
+        <span className="text-muted-foreground uppercase">
+          {hoveredTri.type}
+        </span>
       </div>
     );
   }, [hoveredTri]);
@@ -413,33 +501,48 @@ export default function SymmetriaGrid() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background select-none">
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept=".json" 
-        className="hidden" 
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".json"
+        className="hidden"
       />
 
       {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
         <div className="flex items-center gap-1">
-          <Button variant={tool === 'paint' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('paint')} title="Paint (P)">
+          <Button
+            variant={tool === "paint" ? "default" : "ghost"}
+            size="icon"
+            onClick={() => setTool("paint")}
+            title="Paint (P)"
+          >
             <MousePointer2 className="w-4 h-4" />
           </Button>
-          <Button variant={tool === 'erase' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('erase')} title="Erase (E)">
+          <Button
+            variant={tool === "erase" ? "default" : "ghost"}
+            size="icon"
+            onClick={() => setTool("erase")}
+            title="Erase (E)"
+          >
             <Eraser className="w-4 h-4" />
           </Button>
-          <Button variant={tool === 'pan' ? 'default' : 'ghost'} size="icon" onClick={() => setTool('pan')} title="Pan">
+          <Button
+            variant={tool === "pan" ? "default" : "ghost"}
+            size="icon"
+            onClick={() => setTool("pan")}
+            title="Pan"
+          >
             <Move className="w-4 h-4" />
           </Button>
-          
+
           <div className="w-px h-6 bg-border mx-1" />
-          
-          <Button 
-            variant={isFunctionOpen ? 'default' : 'ghost'} 
-            size="icon" 
-            onClick={() => setIsFunctionOpen(!isFunctionOpen)} 
+
+          <Button
+            variant={isFunctionOpen ? "default" : "ghost"}
+            size="icon"
+            onClick={() => setIsFunctionOpen(!isFunctionOpen)}
             title="Symmetry Function (ƒ)"
             className="text-lg font-serif"
           >
@@ -447,29 +550,51 @@ export default function SymmetriaGrid() {
           </Button>
 
           <div className="w-px h-6 bg-border mx-1" />
-          
-          <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIdx <= 0} title="Undo (Ctrl+Z)">
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleUndo}
+            disabled={historyIdx <= 0}
+            title="Undo (Ctrl+Z)"
+          >
             <Undo2 className="w-4 h-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleRedo} disabled={historyIdx >= history.length - 1} title="Redo (Ctrl+Shift+Z)">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRedo}
+            disabled={historyIdx >= history.length - 1}
+            title="Redo (Ctrl+Shift+Z)"
+          >
             <Redo2 className="w-4 h-4" />
           </Button>
-          
+
           <div className="w-px h-6 bg-border mx-1" />
-          
-          <Button variant="ghost" size="icon" onClick={handleExport} title="Export JSON">
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleExport}
+            title="Export JSON"
+          >
             <Download className="w-4 h-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleImportClick} title="Import JSON">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleImportClick}
+            title="Import JSON"
+          >
             <Upload className="w-4 h-4" />
           </Button>
         </div>
 
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="hover:bg-destructive/10 hover:text-destructive"
               title="Clear Everything"
             >
@@ -480,12 +605,16 @@ export default function SymmetriaGrid() {
             <AlertDialogHeader>
               <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently delete all your drawing data from the infinite grid. This action cannot be undone.
+                This will permanently delete all your drawing data from the
+                infinite grid. This action cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={clearCanvas} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+              <AlertDialogAction
+                onClick={clearCanvas}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              >
                 Clear Everything
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -493,22 +622,28 @@ export default function SymmetriaGrid() {
         </AlertDialog>
       </div>
 
-      <div 
-        ref={containerRef} 
-        className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none" 
-        onPointerDown={onPointerDown} 
-        onPointerMove={onPointerMove} 
-        onPointerUp={onPointerUp} 
+      <div
+        ref={containerRef}
+        className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         onPointerLeave={() => {
           onPointerUp;
           setHoveredTri(null);
         }}
-        onWheel={onWheel} 
-        onContextMenu={e => e.preventDefault()}
+        onWheel={onWheel}
+        onContextMenu={(e) => e.preventDefault()}
         tabIndex={0}
       >
-        <svg width="100%" height="100%" className="absolute inset-0 pointer-events-none">
-          <g transform={`translate(${size.width/2}, ${size.height/2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}>
+        <svg
+          width="100%"
+          height="100%"
+          className="absolute inset-0 pointer-events-none"
+        >
+          <g
+            transform={`translate(${size.width / 2}, ${size.height / 2}) scale(${view.zoom}) translate(${view.x}, ${view.y})`}
+          >
             {gridContent}
             {hoverOutline}
             {guides}
@@ -516,7 +651,7 @@ export default function SymmetriaGrid() {
         </svg>
 
         {isFunctionOpen && (
-          <div 
+          <div
             className="absolute top-4 left-4 w-80 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl z-50 space-y-4"
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -524,14 +659,21 @@ export default function SymmetriaGrid() {
               <h3 className="font-semibold flex items-center gap-2">
                 <span className="text-xl font-serif">ƒ</span> Symmetry Function
               </h3>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsFunctionOpen(false)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setIsFunctionOpen(false)}
+              >
                 <X className="w-4 h-4" />
               </Button>
             </div>
-            
+
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Condition (a, b, c axes)</label>
-              <textarea 
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Condition (a, b, c axes)
+              </label>
+              <textarea
                 className="w-full h-20 p-2 text-sm bg-background border rounded-md font-mono resize-none focus:ring-2 focus:ring-primary outline-none"
                 placeholder="e.g. a % 5 === 0"
                 value={formula}
@@ -540,12 +682,14 @@ export default function SymmetriaGrid() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Extent (Range: {extent})</label>
-              <input 
-                type="range" 
-                min="10" 
-                max="200" 
-                value={extent} 
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Extent (Range: {extent})
+              </label>
+              <input
+                type="range"
+                min="10"
+                max="200"
+                value={extent}
                 onChange={(e) => setExtent(parseInt(e.target.value))}
                 className="w-full accent-primary"
               />
@@ -554,31 +698,33 @@ export default function SymmetriaGrid() {
             <Button className="w-full" onClick={runSymmetryFunction}>
               Apply Rule to Grid
             </Button>
-            
+
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Variables <b>a, b, c</b> represent triangle-width strips. 
-              Sum <b>a+b+c</b> is 0 for 'up' triangles and -1 for 'down' triangles.
+              Variables <b>a, b, c</b> represent triangle-width strips. Sum{" "}
+              <b>a+b+c</b> is 0 for 'up' triangles and -1 for 'down' triangles.
             </p>
           </div>
         )}
 
-        <div 
+        <div
           className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl z-40"
           onPointerDown={(e) => e.stopPropagation()}
         >
           {GRAYSCALE_PALETTE.map((c, i) => (
-            <button 
-              key={c} 
+            <button
+              key={c}
               onClick={() => {
                 setColor(c);
-                setTool('paint');
-              }} 
+                setTool("paint");
+              }}
               title={`Color ${i + 1} (${i + 1})`}
               className={cn(
-                "w-8 h-8 rounded-full border-2 transition-all hover:scale-110", 
-                color === c ? "border-white scale-125 shadow-lg" : "border-white/10 opacity-70"
-              )} 
-              style={{ backgroundColor: c }} 
+                "w-8 h-8 rounded-full border-2 transition-all hover:scale-110",
+                color === c
+                  ? "border-white scale-125 shadow-lg"
+                  : "border-white/10 opacity-70",
+              )}
+              style={{ backgroundColor: c }}
             />
           ))}
         </div>

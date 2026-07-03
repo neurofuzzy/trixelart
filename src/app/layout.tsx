@@ -1,11 +1,11 @@
-import './globals.css';
-import { Inter } from 'next/font/google';
+import "./globals.css";
+import { Inter } from "next/font/google";
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: 'Symmetria',
-  description: 'Infinite Triangular Drawing Grid',
+  title: "Trixel",
+  description: "Infinite Triangular Drawing Grid",
 };
 
 export default function RootLayout({
@@ -15,7 +15,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-background text-foreground overflow-hidden`}>
+      <body
+        className={`${inter.className} bg-background text-foreground overflow-hidden`}
+      >
         {children}
       </body>
     </html>

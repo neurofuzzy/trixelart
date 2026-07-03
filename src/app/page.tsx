@@ -1,9 +1,9 @@
-import SymmetriaGrid from '@/components/SymmetriaGrid';
+import TrixelGrid from "@/components/TrixelGrid";
 
 export default function Home() {
   return (
     <main className="h-screen w-full">
-      <SymmetriaGrid />
+      <TrixelGrid />
     </main>
   );
 }
