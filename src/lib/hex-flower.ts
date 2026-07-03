@@ -81,30 +81,37 @@ export function rotateTrixelCCW(
   return worldToTri(cx + ndx, cy + ndy);
 }
 
+export type Symmetry = "off" | "sym60" | "sym120";
+
 /**
  * Expands a single painted trixel into the full set of trixel keys to write,
- * combining 6-fold hex rotation (sym60) with the hex flower copy offsets.
- *   - tree[0] is always the original trixel.
- *   - rotation groups are applied per base trixel, then each result is
- *     translated by every flower offset (so a flower+symmetry paint writes
- *     6·(1 + |offsets|) trixels).
+ * combining hex rotation symmetry (6-fold at 60°, or 3-fold at 120°) with
+ * the hex flower copy offsets.
+ *   - base[0] is always the original trixel.
+ *   - sym60: 5 additional rotations (60°, 120°, … 300°) around the home hex.
+ *   - sym120: 2 additional rotations (120°, 240°) around the home hex.
+ *   - Each rotated trixel is then translated by every flower offset.
  */
 export function paintTargets(
   tri: TriKey,
   N: number,
-  sym60: boolean,
+  symmetry: Symmetry,
   offsets: Array<{ dq: number; dr: number }>,
 ): TriKey[] {
   const base: TriKey[] = [tri];
 
-  if (sym60 && N > 0) {
+  if (symmetry !== "off" && N > 0) {
     const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
     const qc = N * (c - k);
     const rc = N * (c + 2 * k);
     let cur = tri;
-    for (let i = 0; i < 5; i++) {
-      cur = rotateTrixelCCW(cur, qc, rc);
-      base.push(cur);
+    for (let i = 1; i <= 5; i++) {
+      cur = rotateTrixelCCW(cur, qc, rc); // now at i * 60°
+      const deg = i * 60;
+      // sym60: include all 5 rotations. sym120: only 120° and 240°.
+      if (symmetry === "sym60" || deg % 120 === 0) {
+        base.push(cur);
+      }
     }
   }
 

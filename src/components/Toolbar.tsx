@@ -1,18 +1,7 @@
 "use client";
 
-import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Undo2, Redo2 } from "lucide-react";
+import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Undo2, Redo2, Crosshair, Maximize, Minimize } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 
 export function Toolbar({
   tool,
@@ -26,6 +15,9 @@ export function Toolbar({
   onExport,
   onImportClick,
   onClear,
+  onCenterView,
+  isFullscreen,
+  onToggleFullscreen,
 }: {
   tool: "paint" | "erase" | "pan";
   isFunctionOpen: boolean;
@@ -38,6 +30,9 @@ export function Toolbar({
   onExport: () => void;
   onImportClick: () => void;
   onClear: () => void;
+  onCenterView: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
 }) {
   return (
     <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
@@ -57,6 +52,15 @@ export function Toolbar({
           title="Erase (E)"
         >
           <Eraser className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClear}
+          className="hover:bg-destructive/10 hover:text-destructive"
+          title="Clear (undo with Ctrl+Z)"
+        >
+          <Trash2 className="w-4 h-4" />
         </Button>
         <Button
           variant={tool === "pan" ? "default" : "ghost"}
@@ -120,36 +124,24 @@ export function Toolbar({
         </Button>
       </div>
 
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="hover:bg-destructive/10 hover:text-destructive"
-            title="Clear Everything"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete all your drawing data from the
-              infinite grid. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={onClear}
-              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-            >
-              Clear Everything
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onCenterView}
+          title="Center view"
+        >
+          <Crosshair className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+        </Button>
+      </div>
     </div>
   );
 }

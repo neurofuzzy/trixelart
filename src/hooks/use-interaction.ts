@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
-import { flowerOffsets, paintTargets } from "@/lib/hex-flower";
+import { flowerOffsets, paintTargets, type Symmetry } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
@@ -28,7 +28,7 @@ export function useInteraction({
   containerRef,
   flowerRadius,
   gridDivisions,
-  symmetry60,
+  symmetry,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -43,7 +43,7 @@ export function useInteraction({
   containerRef: { current: HTMLDivElement | null };
   flowerRadius: number;
   gridDivisions: number;
-  symmetry60: boolean;
+  symmetry: Symmetry;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -79,9 +79,9 @@ export function useInteraction({
     }
   }, [flowerRadius, gridDivisions]);
 
-  // 6-fold hex symmetry — mirrored into a ref so paint callbacks stay stable.
-  const symmetry60Ref = useRef(symmetry60);
-  symmetry60Ref.current = symmetry60;
+  // Hex rotation symmetry — mirrored into a ref so paint callbacks stay stable.
+  const symmetryRef = useRef(symmetry);
+  symmetryRef.current = symmetry;
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
 
@@ -234,7 +234,7 @@ export function useInteraction({
 
         const tri = worldToTri(world.x, world.y);
         const offsets = flowerOffsetsRef.current;
-        const sym = symmetry60Ref.current;
+        const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
         const targets = paintTargets(tri, N, sym, offsets);
         const keys = targets.map(triToString);
@@ -301,7 +301,7 @@ export function useInteraction({
         interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
 
         const offsets = flowerOffsetsRef.current;
-        const sym = symmetry60Ref.current;
+        const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
 
         setPainted((prev) => {

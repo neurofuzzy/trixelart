@@ -9,13 +9,15 @@ import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
 import { SymmetryPanel } from "@/components/SymmetryPanel";
 import { ColorPalette } from "@/components/ColorPalette";
-import { Footer, type HexMode } from "@/components/Footer";
+import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE } from "@/lib/constants";
 
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
   const { mounted, painted, setPainted, pushHistory, handleUndo, handleRedo, clearCanvas, history, historyIdx } = useHistory();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
@@ -23,7 +25,7 @@ export default function TrixelGrid() {
   const [gridDivisions, setGridDivisions] = useState(0);
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
-  const [symmetry60, setSymmetry60] = useState(false);
+  const [symmetry, setSymmetry] = useState<Symmetry>("off");
 
   const SETTINGS_KEY = "symmetria-settings";
 
@@ -44,15 +46,17 @@ export default function TrixelGrid() {
           setFlowerRadius(data.flowerRadius);
         }
         if (typeof data.symmetry60 === "boolean") {
-          setSymmetry60(data.symmetry60);
+          setSymmetry(data.symmetry60 ? "sym60" : "off");
+        } else if (typeof data.symmetry === "string") {
+          setSymmetry(data.symmetry as Symmetry);
         }
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry60 }));
-  }, [gridDivisions, hexMode, flowerRadius, symmetry60]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry }));
+  }, [gridDivisions, hexMode, flowerRadius, symmetry]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -95,7 +99,7 @@ export default function TrixelGrid() {
     containerRef,
     flowerRadius,
     gridDivisions,
-    symmetry60,
+    symmetry,
   });
 
   const handleExport = useCallback(() => {
@@ -181,10 +185,32 @@ export default function TrixelGrid() {
     setTool("paint");
   }, []);
 
+  const onCenterView = useCallback(() => setView({ x: 0, y: 0, zoom: 1 }), []);
+
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+      // Wait one frame for the new layout, then re-measure.
+      requestAnimationFrame(() => requestAnimationFrame(updateSize));
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, [updateSize]);
+
+  const onToggleFullscreen = useCallback(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      el.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
   if (!mounted) return <div className="h-full w-full bg-background" />;
 
   return (
-    <div className="flex flex-col h-full w-full bg-background select-none">
+    <div ref={rootRef} className="flex flex-col h-full w-full bg-background select-none">
       <input
         type="file"
         ref={fileInputRef}
@@ -205,6 +231,9 @@ export default function TrixelGrid() {
         onExport={handleExport}
         onImportClick={handleImportClick}
         onClear={clearCanvas}
+        onCenterView={onCenterView}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={onToggleFullscreen}
       />
 
       <div
@@ -256,8 +285,8 @@ export default function TrixelGrid() {
         onHexModeChange={setHexMode}
         flowerRadius={flowerRadius}
         onFlowerRadiusChange={setFlowerRadius}
-        symmetry60={symmetry60}
-        onSymmetry60Change={setSymmetry60}
+        symmetry={symmetry}
+        onSymmetryChange={setSymmetry}
       />
     </div>
   );
