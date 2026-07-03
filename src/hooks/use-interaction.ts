@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
-import { flowerOffsets, paintTargets, type Symmetry } from "@/lib/hex-flower";
+import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, type Symmetry } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
@@ -29,12 +29,14 @@ export function useInteraction({
   flowerRadius,
   gridDivisions,
   symmetry,
+  selectedHex,
+  setSelectedHex,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
   setView: React.Dispatch<React.SetStateAction<{ x: number; y: number; zoom: number }>>;
-  tool: "paint" | "erase" | "pan";
-  setTool: (tool: "paint" | "erase" | "pan") => void;
+  tool: "paint" | "erase" | "pan" | "select" | "stamp";
+  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void;
   color: string;
   setColor: (color: string) => void;
   painted: Record<string, string>;
@@ -44,6 +46,8 @@ export function useInteraction({
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;
+  selectedHex: { c: number; k: number } | null;
+  setSelectedHex: (h: { c: number; k: number } | null) => void;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -85,15 +89,20 @@ export function useInteraction({
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
 
+  // Selected hex (for stamp tool) — mirrored so click callbacks stay stable.
+  const selectedHexRef = useRef(selectedHex);
+  selectedHexRef.current = selectedHex;
+
   // Ghost-preview targets: the hovered trixel + all its flower + symmetry
   // mirrors. Recomputed whenever the hover or any setting changes; rendered
   // on the canvas so users can see what a paint would land on before clicking.
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
+    if (tool === "select" || tool === "stamp") return [hoveredTri];
     if (gridDivisions <= 0) return [hoveredTri];
     const offsets = flowerOffsets(flowerRadius, gridDivisions);
     return paintTargets(hoveredTri, gridDivisions, symmetry, offsets);
-  }, [hoveredTri, gridDivisions, flowerRadius, symmetry]);
+  }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
@@ -221,13 +230,84 @@ export function useInteraction({
       const isRightClick = e.button === 2 || e.ctrlKey;
       const pos = getRelativePointer(e);
 
-      if (isRightClick || tool === "pan") {
+      if ((isRightClick && tool !== "stamp") || tool === "pan") {
         interaction.current = {
           isPainting: false,
           isPanning: true,
           hasMoved: false,
           startPos: { x: e.clientX, y: e.clientY },
           lastPos: { x: e.clientX, y: e.clientY },
+          lastPaintedWorld: null,
+        };
+      } else if (tool === "select") {
+        // Tap a trixel to select its enclosing hex.
+        const N = gridDivisionsRef.current;
+        const world = screenToWorld(pos.x, pos.y);
+        const tri = worldToTri(world.x, world.y);
+        if (N > 0) {
+          setSelectedHex(triToHex(tri.q, tri.r, tri.type, N));
+        } else {
+          setSelectedHex(null);
+        }
+        interaction.current = {
+          isPainting: false,
+          isPanning: false,
+          hasMoved: false,
+          startPos: null,
+          lastPos: null,
+          lastPaintedWorld: null,
+        };
+      } else if (tool === "stamp") {
+        // Paste the currently selected hex's trixels into the single hex under
+        // the cursor, aligned center-to-center. Right-click stamp erases the
+        // target hex's contents using the selection's footprint; left-click
+        // paints the selection into it.
+        const N = gridDivisionsRef.current;
+        const world = screenToWorld(pos.x, pos.y);
+        const tri = worldToTri(world.x, world.y);
+        const sel = selectedHexRef.current;
+
+        if (N > 0 && sel) {
+          const destHex = triToHex(tri.q, tri.r, tri.type, N);
+          // Source trixels — enumerated on each stamp so the selection is live.
+          const src = enumerateHexTrixels(sel.c, sel.k, N);
+          // The translation from source hex to destination hex:
+          const { dq, dr } = hexTranslation(
+            sel.c, sel.k, destHex.c, destHex.k, N,
+          );
+
+          const erase = e.button === 2 || e.ctrlKey;
+          setPainted((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const t of src) {
+              const key = triToString({
+                q: t.q + dq,
+                r: t.r + dr,
+                type: t.type,
+              });
+              if (erase) {
+                if (key in next) { delete next[key]; changed = true; }
+              } else {
+                const v = prev[triToString(t)];
+                if (v) {
+                  if (next[key] !== v) { next[key] = v; changed = true; }
+                } else if (key in next) {
+                  delete next[key]; changed = true;
+                }
+              }
+            }
+            return changed ? next : prev;
+          });
+          pushHistory(painted);
+        }
+
+        interaction.current = {
+          isPainting: false,
+          isPanning: false,
+          hasMoved: false,
+          startPos: null,
+          lastPos: null,
           lastPaintedWorld: null,
         };
       } else {
@@ -280,7 +360,7 @@ export function useInteraction({
       }
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [tool, color, getRelativePointer, screenToWorld, setPainted],
+    [tool, color, getRelativePointer, screenToWorld, setPainted, setSelectedHex, painted, pushHistory],
   );
 
   const onPointerMove = useCallback(

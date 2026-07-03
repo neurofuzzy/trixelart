@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useEffect } from "react";
-import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
+import { useRef, useEffect, useState } from "react";
+import { SIDE, H, getTriVertices, triToString, type TriKey } from "@/lib/grid-math";
+import { hexCenterWorld, enumerateHexTrixels, hexTranslation, triToHex } from "@/lib/hex-flower";
 import type { HexMode } from "@/components/Footer";
 
 export function GridCanvas({
@@ -13,6 +14,8 @@ export function GridCanvas({
   screenToWorld,
   gridDivisions,
   hexMode,
+  selectedHex,
+  tool,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -22,8 +25,25 @@ export function GridCanvas({
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
   hexMode: HexMode;
+  selectedHex: { c: number; k: number } | null;
+  tool: "paint" | "erase" | "pan" | "select" | "stamp";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [antPhase, setAntPhase] = useState(0);
+
+  // Marching-ants animation tick (8 px/s equivalent in screen px). Stops
+  // when there's no selection so we don't repaint forever.
+  useEffect(() => {
+    if (!selectedHex) return;
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      setAntPhase(((now - start) / 1000) * 24);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [selectedHex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -254,46 +274,171 @@ export function GridCanvas({
     ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
     ctx.fill();
 
-    // Hover outlines — primary + affected (flower/symmetry) ghosts
-    if (hoverTargets.length > 0) {
-      ctx.strokeStyle = "white";
-      ctx.lineWidth = Math.max(2 / view.zoom, 1);
-
-      const [pa, pb, pc] = getTriVertices(
-        hoverTargets[0].q,
-        hoverTargets[0].r,
-        hoverTargets[0].type,
+    // Selection overlay — cyan/blue tint on the selected hex's trixels, with a
+    // marching-ants hex outline. Only shown when hex lattice is active.
+    if (selectedHex && gridDivisions > 0) {
+      const s = gridDivisions * SIDE;
+      const vHalf = gridDivisions * H;
+      const { x: cx, y: cy } = hexCenterWorld(
+        selectedHex.c,
+        selectedHex.k,
+        gridDivisions,
       );
-      ctx.globalAlpha = 0.7;
+
+      // Cyan tint on the selected trixels.
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = "rgb(34, 211, 238)"; // cyan-400
+      const tris = enumerateHexTrixels(
+        selectedHex.c,
+        selectedHex.k,
+        gridDivisions,
+      );
       ctx.beginPath();
-      ctx.moveTo(pa.x, pa.y);
-      ctx.lineTo(pb.x, pb.y);
-      ctx.lineTo(pc.x, pc.y);
+      for (const t of tris) {
+        const [a, b, c] = getTriVertices(t.q, t.r, t.type);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.restore();
+
+      // Hex outline with marching-ants dash.
+      ctx.save();
+      ctx.strokeStyle = "rgb(34, 211, 238)";
+      ctx.lineWidth = Math.max(2 / view.zoom, 1.5);
+      ctx.setLineDash([8, 6]);
+      ctx.lineDashOffset = -antPhase / view.zoom;
+      ctx.beginPath();
+      ctx.moveTo(cx + s, cy);
+      ctx.lineTo(cx + s / 2, cy + vHalf);
+      ctx.lineTo(cx - s / 2, cy + vHalf);
+      ctx.lineTo(cx - s, cy);
+      ctx.lineTo(cx - s / 2, cy - vHalf);
+      ctx.lineTo(cx + s / 2, cy - vHalf);
       ctx.closePath();
       ctx.stroke();
+      ctx.restore();
 
-      if (hoverTargets.length > 1) {
-        ctx.globalAlpha = 0.3;
-        ctx.beginPath();
-        for (let i = 1; i < hoverTargets.length; i++) {
-          const [a, b, c] = getTriVertices(
-            hoverTargets[i].q,
-            hoverTargets[i].r,
-            hoverTargets[i].type,
-          );
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(c.x, c.y);
-          ctx.closePath();
+      // Stamp preview: render the selection's actual painted trixels translated
+      // to the hovered hex, using their real colors so the user sees exactly
+      // what a stamp would land there.
+      if (tool === "stamp" && hoverTargets.length > 0) {
+        const N = gridDivisions;
+        const hov = hoverTargets[0];
+        const tgt = triToHex(hov.q, hov.r, hov.type, N);
+
+        const off = hexTranslation(
+          selectedHex.c,
+          selectedHex.k,
+          tgt.c,
+          tgt.k,
+          N,
+        );
+
+        // Group source trixels by their painted color.
+        const previewGroups = new Map<string, TriKey[]>();
+        for (const t of tris) {
+          const v = painted[triToString(t)];
+          if (!v) continue;
+          const list = previewGroups.get(v);
+          if (list) list.push(t);
+          else previewGroups.set(v, [t]);
         }
-        ctx.stroke();
-      }
 
-      ctx.globalAlpha = 1;
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        for (const [fillColor, list] of previewGroups) {
+          ctx.fillStyle = fillColor;
+          ctx.beginPath();
+          for (const t of list) {
+            const [a, b, c] = getTriVertices(
+              t.q + off.dq,
+              t.r + off.dr,
+              t.type,
+            );
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.closePath();
+          }
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    // Hover outlines — primary + affected (flower/symmetry) ghosts.
+    // Stamp tool renders a hexagon hover instead of per-trixel triangles.
+    if (hoverTargets.length > 0) {
+      ctx.lineWidth = Math.max(2 / view.zoom, 1);
+
+      if ((tool === "stamp" || tool === "select") && gridDivisions > 0) {
+        const hov = hoverTargets[0];
+        const { c, k } = triToHex(hov.q, hov.r, hov.type, gridDivisions);
+        const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
+        const hs = gridDivisions * SIDE;
+        const hv = gridDivisions * H;
+        ctx.beginPath();
+        ctx.moveTo(hx + hs, hy);
+        ctx.lineTo(hx + hs / 2, hy + hv);
+        ctx.lineTo(hx - hs / 2, hy + hv);
+        ctx.lineTo(hx - hs, hy);
+        ctx.lineTo(hx - hs / 2, hy - hv);
+        ctx.lineTo(hx + hs / 2, hy - hv);
+        ctx.closePath();
+        if (tool === "stamp") {
+          ctx.strokeStyle = "white";
+          ctx.globalAlpha = 0.7;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        } else {
+          // Select: fill only, no stroke.
+          ctx.fillStyle = "white";
+          ctx.globalAlpha = 0.08;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        ctx.strokeStyle = "white";
+        const [pa, pb, pc] = getTriVertices(
+          hoverTargets[0].q,
+          hoverTargets[0].r,
+          hoverTargets[0].type,
+        );
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.lineTo(pc.x, pc.y);
+        ctx.closePath();
+        ctx.stroke();
+
+        if (hoverTargets.length > 1) {
+          ctx.globalAlpha = 0.3;
+          ctx.beginPath();
+          for (let i = 1; i < hoverTargets.length; i++) {
+            const [a, b, c] = getTriVertices(
+              hoverTargets[i].q,
+              hoverTargets[i].r,
+              hoverTargets[i].type,
+            );
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.closePath();
+          }
+          ctx.stroke();
+        }
+
+        ctx.globalAlpha = 1;
+      }
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase]);
 
   return (
     <canvas

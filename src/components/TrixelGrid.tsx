@@ -20,14 +20,13 @@ export default function TrixelGrid() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-  const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
+  const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
   const [gridDivisions, setGridDivisions] = useState(0);
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
-
-  // Flower copy and symmetry only make sense when the hex lattice is drawn.
+  const [selectedHex, setSelectedHex] = useState<{ c: number; k: number } | null>(null);
   const hexEnabled = gridDivisions > 0 && hexMode !== "off";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
   const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
@@ -106,6 +105,8 @@ export default function TrixelGrid() {
     flowerRadius: effectiveFlowerRadius,
     gridDivisions,
     symmetry: effectiveSymmetry,
+    selectedHex,
+    setSelectedHex,
   });
 
   const handleExport = useCallback(() => {
@@ -240,6 +241,7 @@ export default function TrixelGrid() {
         onCenterView={onCenterView}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
+        hasSelection={selectedHex !== null}
       />
 
       <div
@@ -265,6 +267,8 @@ export default function TrixelGrid() {
           screenToWorld={screenToWorld}
           gridDivisions={gridDivisions}
           hexMode={hexMode}
+          selectedHex={selectedHex}
+          tool={tool}
         />
 
         <SymmetryPanel

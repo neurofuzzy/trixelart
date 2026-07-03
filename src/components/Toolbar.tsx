@@ -1,6 +1,6 @@
 "use client";
 
-import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Undo2, Redo2, Crosshair, Maximize, Minimize } from "lucide-react";
+import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Undo2, Redo2, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function Toolbar({
@@ -18,10 +18,11 @@ export function Toolbar({
   onCenterView,
   isFullscreen,
   onToggleFullscreen,
+  hasSelection,
 }: {
-  tool: "paint" | "erase" | "pan";
+  tool: "paint" | "erase" | "pan" | "select" | "stamp";
   isFunctionOpen: boolean;
-  onToolChange: (tool: "paint" | "erase" | "pan") => void;
+  onToolChange: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void;
   onFunctionToggle: () => void;
   handleUndo: () => void;
   handleRedo: () => void;
@@ -33,6 +34,7 @@ export function Toolbar({
   onCenterView: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  hasSelection: boolean;
 }) {
   return (
     <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
@@ -66,9 +68,26 @@ export function Toolbar({
           variant={tool === "pan" ? "default" : "ghost"}
           size="icon"
           onClick={() => onToolChange("pan")}
-          title="Pan"
+          title="Pan (H)"
         >
           <Move className="w-4 h-4" />
+        </Button>
+        <Button
+          variant={tool === "select" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => onToolChange("select")}
+          title="Select hex (S)"
+        >
+          <SquareDashed className="w-4 h-4" />
+        </Button>
+        <Button
+          variant={tool === "stamp" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => onToolChange("stamp")}
+          disabled={!hasSelection}
+          title="Stamp selection (T)"
+        >
+          <Stamp className="w-4 h-4" />
         </Button>
 
         <div className="w-px h-6 bg-border mx-1" />

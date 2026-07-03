@@ -6,7 +6,7 @@ import { GRAYSCALE_PALETTE } from "@/lib/constants";
 export function useKeyboardShortcuts(
   handleUndo: () => void,
   handleRedo: () => void,
-  setTool: (tool: "paint" | "erase" | "pan") => void,
+  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void,
   setColor: (color: string) => void,
 ) {
   useEffect(() => {
@@ -28,6 +28,12 @@ export function useKeyboardShortcuts(
         setTool("paint");
       } else if (e.key.toLowerCase() === "e") {
         setTool("erase");
+      } else if (e.key.toLowerCase() === "h") {
+        setTool("pan");
+      } else if (e.key.toLowerCase() === "s") {
+        setTool("select");
+      } else if (e.key.toLowerCase() === "t") {
+        setTool("stamp");
       }
 
       const colorIdx = parseInt(e.key) - 1;

@@ -83,6 +83,75 @@ export function rotateTrixelCCW(
 
 export type Symmetry = "off" | "sym60" | "sym120";
 
+export interface HexCoord {
+  c: number;
+  k: number;
+}
+
+/**
+ * World-space center of the hex (c, k) at lattice spacing N.
+ */
+export function hexCenterWorld(c: number, k: number, N: number) {
+  return {
+    x: 1.5 * c * N * SIDE,
+    y: N * H * (c + 2 * k),
+  };
+}
+
+/**
+ * Enumerates all trixels whose centroid lies inside hex (c, k) at lattice
+ * spacing N. A hex of side N*S tiles into exactly 6N² triangles, so this is
+ * the tri-axial membership of one honeycomb cell.
+ */
+export function enumerateHexTrixels(
+  c: number,
+  k: number,
+  N: number,
+): TriKey[] {
+  const { x: cx, y: cy } = hexCenterWorld(c, k, N);
+  const s = N * SIDE;
+  const vHalf = N * H;
+  const x0 = cx - 2 * s;
+  const x1 = cx + 2 * s;
+  const y0 = cy - 2 * vHalf;
+  const y1 = cy + 2 * vHalf;
+  const rMin = Math.floor(y0 / H) - 1;
+  const rMax = Math.ceil(y1 / H) + 1;
+  const qMin = Math.floor(x0 / SIDE - rMax / 2) - 1;
+  const qMax = Math.ceil(x1 / SIDE - rMin / 2) + 1;
+
+  const out: TriKey[] = [];
+  for (let r = rMin; r <= rMax; r++) {
+    for (let q = qMin; q <= qMax; q++) {
+      for (const type of ["up", "down"] as const) {
+        const h = triToHex(q, r, type, N);
+        if (h.c === c && h.k === k) {
+          out.push({ q, r, type });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Tri-axial translation (dq, dr) that maps trixels of hex (sc, sk) onto hex
+ * (dc, dk) at the same lattice spacing N. Equivalent to N·(c-axis e1) +
+ * N·(k-axis e2); the lattice basis changes are c-axis (N, N) and k-axis
+ * (-N, 2N).
+ */
+export function hexTranslation(
+  sc: number,
+  sk: number,
+  dc: number,
+  dk: number,
+  N: number,
+): { dq: number; dr: number } {
+  const ddc = dc - sc;
+  const ddk = dk - sk;
+  return { dq: N * (ddc - ddk), dr: N * (ddc + 2 * ddk) };
+}
+
 /**
  * Expands a single painted trixel into the full set of trixel keys to write,
  * combining hex rotation symmetry (6-fold at 60°, or 3-fold at 120°) with
