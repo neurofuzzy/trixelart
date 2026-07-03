@@ -11,6 +11,7 @@ export function GridCanvas({
   hoveredTri,
   screenToWorld,
   gridDivisions,
+  hexMode,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -19,6 +20,7 @@ export function GridCanvas({
   hoveredTri: TriKey | null;
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
+  hexMode: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -186,6 +188,51 @@ export function GridCanvas({
       ctx.stroke();
     }
 
+    // Hex mode: flat-top honeycomb. Hex side s = N*SIDE so each hex edge
+    // lies along a grid division guide line. Centers form the lattice
+    //   (Q,R) = (cN - kN, cN + 2kN)  (axial)
+    // whose world x = 1.5*c*N*SIDE (columns are vertical) and y advances by
+    // 2N*H (= s*sqrt(3)) within a column, adjacent columns offset by N*H.
+    if (hexMode && gridDivisions > 0) {
+      const N = gridDivisions;
+      const s = N * SIDE;        // hex side = circumradius
+      const vHalf = N * H;       // s*sqrt(3)/2 — vertical vertex offset
+      const colWidth = 1.5 * s;  // horizontal column pitch
+      const rowHeight = 2 * vHalf; // vertical pitch within a column
+
+      const xMinW = Math.min(worldTopLeft.x, worldBottomRight.x);
+      const xMaxW = Math.max(worldTopLeft.x, worldBottomRight.x);
+      const yMinW = Math.min(worldTopLeft.y, worldBottomRight.y);
+      const yMaxW = Math.max(worldTopLeft.y, worldBottomRight.y);
+
+      const cMin = Math.floor(xMinW / colWidth) - 1;
+      const cMax = Math.ceil(xMaxW / colWidth) + 1;
+
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.lineWidth = Math.max(1.5 / view.zoom, 1);
+
+      for (let c = cMin; c <= cMax; c++) {
+        const cx = 1.5 * c * N * SIDE;
+        const cyBase = c * N * H;
+        const kMin = Math.floor((yMinW - cyBase) / rowHeight) - 1;
+        const kMax = Math.ceil((yMaxW - cyBase) / rowHeight) + 1;
+
+        for (let k = kMin; k <= kMax; k++) {
+          const cy = cyBase + k * rowHeight;
+
+          ctx.beginPath();
+          ctx.moveTo(cx + s, cy);
+          ctx.lineTo(cx + s / 2, cy + vHalf);
+          ctx.lineTo(cx - s / 2, cy + vHalf);
+          ctx.lineTo(cx - s, cy);
+          ctx.lineTo(cx - s / 2, cy - vHalf);
+          ctx.lineTo(cx + s / 2, cy - vHalf);
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+    }
+
     ctx.fillStyle = "white";
     ctx.beginPath();
     ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
@@ -209,7 +256,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoveredTri, mounted, screenToWorld, gridDivisions]);
+  }, [size, view, painted, hoveredTri, mounted, screenToWorld, gridDivisions, hexMode]);
 
   return (
     <canvas

@@ -21,6 +21,7 @@ export default function TrixelGrid() {
   const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
   const [gridDivisions, setGridDivisions] = useState(0);
+  const [hexMode, setHexMode] = useState(false);
 
   const SETTINGS_KEY = "symmetria-settings";
 
@@ -32,13 +33,16 @@ export default function TrixelGrid() {
         if (typeof data.gridDivisions === "number") {
           setGridDivisions(data.gridDivisions);
         }
+        if (typeof data.hexMode === "boolean") {
+          setHexMode(data.hexMode);
+        }
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions }));
-  }, [gridDivisions]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode }));
+  }, [gridDivisions, hexMode]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -212,6 +216,7 @@ export default function TrixelGrid() {
           hoveredTri={hoveredTri}
           screenToWorld={screenToWorld}
           gridDivisions={gridDivisions}
+          hexMode={hexMode}
         />
 
         <SymmetryPanel
@@ -234,6 +239,8 @@ export default function TrixelGrid() {
         hoveredTri={hoveredTri}
         gridDivisions={gridDivisions}
         onGridDivisionsChange={setGridDivisions}
+        hexMode={hexMode}
+        onHexModeChange={setHexMode}
       />
     </div>
   );

@@ -1,18 +1,31 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Grid3x3 } from "lucide-react";
+import { Grid3x3, Hexagon } from "lucide-react";
 import { getTriABC, type TriKey } from "@/lib/grid-math";
 import { cn } from "@/lib/utils";
+
+export type HexMode = "off" | "outlines" | "centers";
+
+const HEX_CYCLE: HexMode[] = ["off", "outlines", "centers"];
+const HEX_TITLE: Record<HexMode, string> = {
+  off: "Hex: off",
+  outlines: "Hex: outlines",
+  centers: "Hex: outlines + centers",
+};
 
 export function Footer({
   hoveredTri,
   gridDivisions,
   onGridDivisionsChange,
+  hexMode,
+  onHexModeChange,
 }: {
   hoveredTri: TriKey | null;
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
+  hexMode: HexMode;
+  onHexModeChange: (v: HexMode) => void;
 }) {
   const [sliderOpen, setSliderOpen] = useState(false);
 
@@ -38,7 +51,18 @@ export function Footer({
       ) : (
         <div />
       )}
-      <div className="relative">
+      <div className="relative flex items-center gap-0.5">
+        <button
+          className={cn(
+            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            hexMode && gridDivisions > 0 && "bg-accent text-accent-foreground",
+          )}
+          onClick={() => onHexModeChange(!hexMode)}
+          disabled={gridDivisions === 0}
+          title="Hex mode"
+        >
+          <Hexagon className="w-4 h-4" />
+        </button>
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
