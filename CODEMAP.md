@@ -1,0 +1,81 @@
+```
+# Auto-generated project map
+# Last updated: 2026-07-03 22:39:19
+# Files: 21
+# Lines of code: ~2665
+```
+- **/app**
+  - **/lib**
+  - [layout.tsx](../src/app/layout.tsx)
+    - Variable: `metadata`
+    - Variable: `viewport`
+    - Function: `RootLayout`
+  - [page.tsx](../src/app/page.tsx)
+    - Function: `Home`
+- **/components**
+  - **/ui**
+    - [alert-dialog.tsx](../src/components/ui/alert-dialog.tsx)
+    - [button.tsx](../src/components/ui/button.tsx)
+      - Interface: `ButtonProps`
+  - [AbcDisplay.tsx](../src/components/AbcDisplay.tsx)
+    - Function: `AbcDisplay`
+  - [ColorPalette.tsx](../src/components/ColorPalette.tsx)
+    - Function: `ColorPalette`
+  - [Footer.tsx](../src/components/Footer.tsx)
+    - Type: `HexMode`
+    - Type: `Symmetry`
+    - Function: `Footer`
+  - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
+    - Function: `GridCanvas`
+  - [SelectionPalette.tsx](../src/components/SelectionPalette.tsx)
+    - Function: `SelectionPalette`
+  - [SymmetryPanel.tsx](../src/components/SymmetryPanel.tsx)
+    - Function: `SymmetryPanel`
+  - [Toolbar.tsx](../src/components/Toolbar.tsx)
+    - Function: `Toolbar`
+  - [TrixelGrid.tsx](../src/components/TrixelGrid.tsx)
+    - Function: `TrixelGrid`
+- **/hooks**
+  - [use-canvas-size.ts](../src/hooks/use-canvas-size.ts)
+    - Function: `useCanvasSize` - Reliable hook for measuring a container element...
+  - [use-history.ts](../src/hooks/use-history.ts)
+    - Function: `useHistory`
+  - [use-interaction.ts](../src/hooks/use-interaction.ts)
+    - Function: `useInteraction`
+  - [use-keyboard-shortcuts.ts](../src/hooks/use-keyboard-shortcuts.ts)
+    - Function: `useKeyboardShortcuts`
+- **/lib**
+  - [config.ts](../src/lib/config.ts)
+    - Variable: `ZOOM_MIN`
+    - Variable: `ZOOM_MAX`
+    - Variable: `WHEEL_DIVISOR`
+    - Variable: `PINCH_SENSITIVITY`
+  - [constants.ts](../src/lib/constants.ts)
+    - Variable: `GRAYSCALE_PALETTE`
+  - [grid-math.ts](../src/lib/grid-math.ts) - Triangular Grid Mathematics
+    - Variable: `SIDE` - Triangular Grid Mathematics Uses a coordinate s...
+    - Variable: `H`
+    - Type: `TriType`
+    - Interface: `TriKey`
+    - Function: `triToString` - Converts a TriKey object to a unique string for...
+    - Function: `stringToTri` - Parses a TriKey string back into an object
+    - Function: `worldToTri` - Converts world coordinates (relative to origin)...
+    - Function: `getTriABC` - Returns the analytical coordinates for a triang...
+    - Function: `getTrianglesOnLine` - Returns all triangles intersected by a line seg...
+    - Function: `getTriVertices` - Returns the three vertex coordinates for a tria...
+    - Function: `getTriPath` - Generates the SVG path string for a specific tr...
+  - [hex-flower.ts](../src/lib/hex-flower.ts)
+    - Function: `triToHex` - Hex coordinates of the home hex containing trix...
+    - Function: `flowerOffsets` - Tri-axial offsets (dq, dr) to mirror a trixel f...
+    - Function: `rotateTrixelCCW` - 60°-CCW rotation of a trixel around a hex cente...
+    - Type: `Symmetry`
+    - Interface: `SelectionSnapshot`
+    - Function: `hexCenterTriAxial`
+    - Function: `captureHexSnapshot`
+    - Interface: `HexCoord`
+    - Function: `hexCenterWorld` - World-space center of the hex (c, k) at lattice...
+    - Function: `enumerateHexTrixels` - Enumerates all trixels whose centroid lies insi...
+    - Function: `hexTranslation` - Tri-axial translation (dq, dr) that maps trixel...
+    - Function: `paintTargets` - Expands a single painted trixel into the full s...
+  - [utils.ts](../src/lib/utils.ts)
+    - Function: `cn`
