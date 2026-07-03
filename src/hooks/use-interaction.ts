@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
-import { flowerOffsets } from "@/lib/hex-flower";
+import { flowerOffsets, paintTargets } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
@@ -28,6 +28,7 @@ export function useInteraction({
   containerRef,
   flowerRadius,
   gridDivisions,
+  symmetry60,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -42,6 +43,7 @@ export function useInteraction({
   containerRef: { current: HTMLDivElement | null };
   flowerRadius: number;
   gridDivisions: number;
+  symmetry60: boolean;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -76,6 +78,12 @@ export function useInteraction({
       flowerOffsetsRef.current = [];
     }
   }, [flowerRadius, gridDivisions]);
+
+  // 6-fold hex symmetry — mirrored into a ref so paint callbacks stay stable.
+  const symmetry60Ref = useRef(symmetry60);
+  symmetry60Ref.current = symmetry60;
+  const gridDivisionsRef = useRef(gridDivisions);
+  gridDivisionsRef.current = gridDivisions;
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
@@ -226,15 +234,15 @@ export function useInteraction({
 
         const tri = worldToTri(world.x, world.y);
         const offsets = flowerOffsetsRef.current;
-        const keys: string[] = [triToString(tri)];
-        for (const o of offsets) {
-          keys.push(triToString({ q: tri.q + o.dq, r: tri.r + o.dr, type: tri.type }));
-        }
+        const sym = symmetry60Ref.current;
+        const N = gridDivisionsRef.current;
+        const targets = paintTargets(tri, N, sym, offsets);
+        const keys = targets.map(triToString);
 
         setPainted((prev) => {
           const next = { ...prev };
-          if (offsets.length === 0 && tool === "paint") {
-            // No flower: original toggle behavior on the single trixel.
+          if (tool === "paint" && targets.length === 1) {
+            // No flower, no symmetry: original toggle behavior.
             if (prev[keys[0]] === color) {
               delete next[keys[0]];
             } else {
@@ -293,15 +301,14 @@ export function useInteraction({
         interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
 
         const offsets = flowerOffsetsRef.current;
+        const sym = symmetry60Ref.current;
+        const N = gridDivisionsRef.current;
 
         setPainted((prev) => {
           const next = { ...prev };
           let changed = false;
           for (const tri of tris) {
-            const keys: string[] = [triToString(tri)];
-            for (const o of offsets) {
-              keys.push(triToString({ q: tri.q + o.dq, r: tri.r + o.dr, type: tri.type }));
-            }
+            const keys = paintTargets(tri, N, sym, offsets).map(triToString);
             for (const k of keys) {
               if (tool === "paint") {
                 if (next[k] !== color) {

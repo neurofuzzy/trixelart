@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Grid3x3, Hexagon, Flower } from "lucide-react";
+import { Grid3x3, Hexagon, Flower, RotateCw } from "lucide-react";
 import { getTriABC, type TriKey } from "@/lib/grid-math";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +22,8 @@ export function Footer({
   onHexModeChange,
   flowerRadius,
   onFlowerRadiusChange,
+  symmetry60,
+  onSymmetry60Change,
 }: {
   hoveredTri: TriKey | null;
   gridDivisions: number;
@@ -30,6 +32,8 @@ export function Footer({
   onHexModeChange: (v: HexMode) => void;
   flowerRadius: number;
   onFlowerRadiusChange: (n: number) => void;
+  symmetry60: boolean;
+  onSymmetry60Change: (v: boolean) => void;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
 
@@ -77,6 +81,17 @@ export function Footer({
           title={HEX_TITLE[hexMode]}
         >
           <Hexagon className="w-4 h-4" />
+        </button>
+        <button
+          className={cn(
+            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            symmetry60 && gridDivisions > 0 && "bg-accent text-accent-foreground",
+          )}
+          onClick={() => onSymmetry60Change(!symmetry60)}
+          disabled={gridDivisions === 0}
+          title="6-fold hex symmetry"
+        >
+          <RotateCw className="w-4 h-4" />
         </button>
         <button
           className={cn(

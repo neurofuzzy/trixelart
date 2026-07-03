@@ -23,6 +23,7 @@ export default function TrixelGrid() {
   const [gridDivisions, setGridDivisions] = useState(0);
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
+  const [symmetry60, setSymmetry60] = useState(false);
 
   const SETTINGS_KEY = "symmetria-settings";
 
@@ -42,13 +43,16 @@ export default function TrixelGrid() {
         if (typeof data.flowerRadius === "number") {
           setFlowerRadius(data.flowerRadius);
         }
+        if (typeof data.symmetry60 === "boolean") {
+          setSymmetry60(data.symmetry60);
+        }
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius }));
-  }, [gridDivisions, hexMode, flowerRadius]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry60 }));
+  }, [gridDivisions, hexMode, flowerRadius, symmetry60]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -91,6 +95,7 @@ export default function TrixelGrid() {
     containerRef,
     flowerRadius,
     gridDivisions,
+    symmetry60,
   });
 
   const handleExport = useCallback(() => {
@@ -251,6 +256,8 @@ export default function TrixelGrid() {
         onHexModeChange={setHexMode}
         flowerRadius={flowerRadius}
         onFlowerRadiusChange={setFlowerRadius}
+        symmetry60={symmetry60}
+        onSymmetry60Change={setSymmetry60}
       />
     </div>
   );

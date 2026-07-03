@@ -1,4 +1,4 @@
-import type { TriType } from "./grid-math";
+import { SIDE, H, worldToTri, type TriKey, type TriType } from "./grid-math";
 
 /**
  * Hex coordinates of the home hex containing trixel (q, r, type).
@@ -52,6 +52,67 @@ export function flowerOffsets(
       const d = (Math.abs(dc) + Math.abs(dk) + Math.abs(dc + dk)) / 2;
       if (d > R) continue;
       out.push({ dq: N * (dc - dk), dr: N * (dc + 2 * dk) });
+    }
+  }
+  return out;
+}
+
+/**
+ * 60°-CCW rotation of a trixel around a hex center (qc, rc) in tri-axial
+ * coordinates. Rotates the trixel centroid; the resulting world point maps
+ * back to a trixel of the opposite type (the two triangle orientations
+ * alternate around each hex-center vertex).
+ */
+export function rotateTrixelCCW(
+  tri: TriKey,
+  qc: number,
+  rc: number,
+): TriKey {
+  const cx = qc * SIDE + (rc * SIDE) / 2;
+  const cy = rc * H;
+  const bx = tri.q * SIDE + (tri.r * SIDE) / 2;
+  const by = tri.r * H;
+  const centX = tri.type === "up" ? bx + SIDE / 2 : bx + SIDE;
+  const centY = tri.type === "up" ? by + H / 3 : by + (2 * H) / 3;
+  const dx = centX - cx;
+  const dy = centY - cy;
+  const ndx = 0.5 * dx - (Math.sqrt(3) / 2) * dy;
+  const ndy = (Math.sqrt(3) / 2) * dx + 0.5 * dy;
+  return worldToTri(cx + ndx, cy + ndy);
+}
+
+/**
+ * Expands a single painted trixel into the full set of trixel keys to write,
+ * combining 6-fold hex rotation (sym60) with the hex flower copy offsets.
+ *   - tree[0] is always the original trixel.
+ *   - rotation groups are applied per base trixel, then each result is
+ *     translated by every flower offset (so a flower+symmetry paint writes
+ *     6·(1 + |offsets|) trixels).
+ */
+export function paintTargets(
+  tri: TriKey,
+  N: number,
+  sym60: boolean,
+  offsets: Array<{ dq: number; dr: number }>,
+): TriKey[] {
+  const base: TriKey[] = [tri];
+
+  if (sym60 && N > 0) {
+    const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
+    const qc = N * (c - k);
+    const rc = N * (c + 2 * k);
+    let cur = tri;
+    for (let i = 0; i < 5; i++) {
+      cur = rotateTrixelCCW(cur, qc, rc);
+      base.push(cur);
+    }
+  }
+
+  const out: TriKey[] = [];
+  for (const b of base) {
+    out.push(b);
+    for (const o of offsets) {
+      out.push({ q: b.q + o.dq, r: b.r + o.dr, type: b.type });
     }
   }
   return out;
