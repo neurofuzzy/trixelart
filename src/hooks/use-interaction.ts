@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
 import { flowerOffsets, paintTargets, type Symmetry } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
@@ -84,6 +84,16 @@ export function useInteraction({
   symmetryRef.current = symmetry;
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
+
+  // Ghost-preview targets: the hovered trixel + all its flower + symmetry
+  // mirrors. Recomputed whenever the hover or any setting changes; rendered
+  // on the canvas so users can see what a paint would land on before clicking.
+  const hoverTargets = useMemo<TriKey[]>(() => {
+    if (!hoveredTri) return [];
+    if (gridDivisions <= 0) return [hoveredTri];
+    const offsets = flowerOffsets(flowerRadius, gridDivisions);
+    return paintTargets(hoveredTri, gridDivisions, symmetry, offsets);
+  }, [hoveredTri, gridDivisions, flowerRadius, symmetry]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
@@ -375,6 +385,7 @@ export function useInteraction({
   return {
     hoveredTri,
     setHoveredTri,
+    hoverTargets,
     screenToWorld,
     onPointerDown,
     onPointerMove,

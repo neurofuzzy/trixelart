@@ -27,6 +27,11 @@ export default function TrixelGrid() {
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
 
+  // Flower copy and symmetry only make sense when the hex lattice is drawn.
+  const hexEnabled = gridDivisions > 0 && hexMode !== "off";
+  const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
+  const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
+
   const SETTINGS_KEY = "symmetria-settings";
 
   useEffect(() => {
@@ -76,6 +81,7 @@ export default function TrixelGrid() {
 
   const {
     hoveredTri,
+    hoverTargets,
     setHoveredTri,
     screenToWorld,
     onPointerDown,
@@ -97,9 +103,9 @@ export default function TrixelGrid() {
     setPainted,
     pushHistory,
     containerRef,
-    flowerRadius,
+    flowerRadius: effectiveFlowerRadius,
     gridDivisions,
-    symmetry,
+    symmetry: effectiveSymmetry,
   });
 
   const handleExport = useCallback(() => {
@@ -255,7 +261,7 @@ export default function TrixelGrid() {
           view={view}
           mounted={mounted}
           painted={painted}
-          hoveredTri={hoveredTri}
+          hoverTargets={hoverTargets}
           screenToWorld={screenToWorld}
           gridDivisions={gridDivisions}
           hexMode={hexMode}

@@ -43,7 +43,8 @@ export function Footer({
   symmetry: Symmetry;
   onSymmetryChange: (v: Symmetry) => void;
 }) {
-  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [gridPopoverOpen, setGridPopoverOpen] = useState(false);
+  const [flowerPopoverOpen, setFlowerPopoverOpen] = useState(false);
 
   const coords = useMemo(() => {
     if (!hoveredTri) return null;
@@ -77,24 +78,14 @@ export function Footer({
         <div />
       )}
       <div className="flex items-center gap-1.5">
-        {gridDivisions > 0 && (
-          <span className="text-[11px] font-mono text-muted-foreground">
-            N={gridDivisions}
-          </span>
-        )}
         {hexMode !== "off" && gridDivisions > 0 && (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/25 text-cyan-300">
-            hex:{hexMode === "centers" ? "●" : "○"}
+            hex: {hexMode === "centers" ? "●" : "○"}
           </span>
         )}
-        {symmetry !== "off" && gridDivisions > 0 && (
+        {symmetry !== "off" && gridDivisions > 0 && hexMode !== "off" && (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/25 text-purple-300">
             {symmetry === "sym60" ? "6-fold" : "3-fold"}
-          </span>
-        )}
-        {flowerRadius > 0 && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/25 text-amber-300">
-            R{flowerRadius}
           </span>
         )}
       </div>
@@ -102,8 +93,12 @@ export function Footer({
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            hexMode === "outlines" && gridDivisions > 0 && "bg-cyan-500/25 text-cyan-300",
-            hexMode === "centers" && gridDivisions > 0 && "bg-cyan-500/40 text-cyan-200",
+            hexMode === "outlines" &&
+              gridDivisions > 0 &&
+              "bg-cyan-500/25 text-cyan-300",
+            hexMode === "centers" &&
+              gridDivisions > 0 &&
+              "bg-cyan-500/40 text-cyan-200",
           )}
           onClick={() => {
             const i = HEX_CYCLE.indexOf(hexMode);
@@ -117,42 +112,38 @@ export function Footer({
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            symmetry === "sym60" && gridDivisions > 0 && "bg-purple-500/25 text-purple-300",
-            symmetry === "sym120" && gridDivisions > 0 && "bg-purple-500/45 text-purple-200",
+            symmetry === "sym60" &&
+              gridDivisions > 0 &&
+              "bg-purple-500/25 text-purple-300",
+            symmetry === "sym120" &&
+              gridDivisions > 0 &&
+              "bg-purple-500/45 text-purple-200",
           )}
           onClick={() => {
             const i = SYM_CYCLE.indexOf(symmetry);
             onSymmetryChange(SYM_CYCLE[(i + 1) % SYM_CYCLE.length]);
           }}
-          disabled={gridDivisions === 0}
+          disabled={gridDivisions === 0 || hexMode === "off"}
           title={SYM_TITLE[symmetry]}
         >
           <Aperture className="w-4 h-4" />
         </button>
-        <button
-          className={cn(
-            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            popoverOpen && "bg-accent text-accent-foreground",
-          )}
-          onClick={() => setPopoverOpen((v) => !v)}
-          title="Grid divisions"
-        >
-          <Grid3x3 className="w-4 h-4" />
-        </button>
-        <button
-          className={cn(
-            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            flowerRadius > 0 && "bg-amber-500/25 text-amber-300",
-          )}
-          onClick={() => setPopoverOpen((v) => !v)}
-          disabled={gridDivisions === 0}
-          title="Flower radius"
-        >
-          <Flower className="w-4 h-4" />
-        </button>
-        {popoverOpen && (
-          <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex items-end gap-4">
-            <div className="flex flex-col items-center gap-2">
+        <div className="relative">
+          <button
+            className={cn(
+              "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              gridPopoverOpen && "bg-accent text-accent-foreground",
+            )}
+            onClick={() => {
+              setGridPopoverOpen((v) => !v);
+              setFlowerPopoverOpen(false);
+            }}
+            title="Grid divisions"
+          >
+            <Grid3x3 className="w-4 h-4" />
+          </button>
+          {gridPopoverOpen && (
+            <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
               <input
                 type="range"
                 min={0}
@@ -162,9 +153,32 @@ export function Footer({
                 className={sliderClass}
                 style={{ writingMode: "vertical-lr", direction: "rtl" }}
               />
-              <span className="text-xs font-mono text-muted-foreground">N={gridDivisions}</span>
+              <span className="text-xs font-mono text-muted-foreground">
+                N={gridDivisions}
+              </span>
             </div>
-            <div className="flex flex-col items-center gap-2">
+          )}
+        </div>
+        <div className="relative">
+          <button
+            className={cn(
+              "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              flowerRadius > 0 &&
+                hexMode !== "off" &&
+                gridDivisions > 0 &&
+                "bg-amber-500/25 text-amber-300",
+            )}
+            onClick={() => {
+              setFlowerPopoverOpen((v) => !v);
+              setGridPopoverOpen(false);
+            }}
+            disabled={gridDivisions === 0 || hexMode === "off"}
+            title="Flower radius"
+          >
+            <Flower className="w-4 h-4" />
+          </button>
+          {flowerPopoverOpen && (
+            <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
               <input
                 type="range"
                 min={0}
@@ -172,12 +186,15 @@ export function Footer({
                 value={flowerRadius}
                 onChange={(e) => onFlowerRadiusChange(Number(e.target.value))}
                 className={sliderClass}
+                disabled={hexMode === "off"}
                 style={{ writingMode: "vertical-lr", direction: "rtl" }}
               />
-              <span className="text-xs font-mono text-muted-foreground">R={flowerRadius}</span>
+              <span className="text-xs font-mono text-muted-foreground">
+                R={flowerRadius}
+              </span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

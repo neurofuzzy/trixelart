@@ -9,7 +9,7 @@ export function GridCanvas({
   view,
   mounted,
   painted,
-  hoveredTri,
+  hoverTargets,
   screenToWorld,
   gridDivisions,
   hexMode,
@@ -18,7 +18,7 @@ export function GridCanvas({
   view: { x: number; y: number; zoom: number };
   mounted: boolean;
   painted: Record<string, string>;
-  hoveredTri: TriKey | null;
+  hoverTargets: TriKey[];
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
   hexMode: HexMode;
@@ -254,25 +254,46 @@ export function GridCanvas({
     ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
     ctx.fill();
 
-    // Hover outline
-    if (hoveredTri) {
+    // Hover outlines — primary + affected (flower/symmetry) ghosts
+    if (hoverTargets.length > 0) {
       ctx.strokeStyle = "white";
       ctx.lineWidth = Math.max(2 / view.zoom, 1);
-      ctx.globalAlpha = 0.5;
 
-      const [a, b, c] = getTriVertices(hoveredTri.q, hoveredTri.r, hoveredTri.type);
+      const [pa, pb, pc] = getTriVertices(
+        hoverTargets[0].q,
+        hoverTargets[0].r,
+        hoverTargets[0].type,
+      );
+      ctx.globalAlpha = 0.7;
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(c.x, c.y);
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.lineTo(pc.x, pc.y);
       ctx.closePath();
       ctx.stroke();
+
+      if (hoverTargets.length > 1) {
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        for (let i = 1; i < hoverTargets.length; i++) {
+          const [a, b, c] = getTriVertices(
+            hoverTargets[i].q,
+            hoverTargets[i].r,
+            hoverTargets[i].type,
+          );
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+        }
+        ctx.stroke();
+      }
 
       ctx.globalAlpha = 1;
     }
 
     ctx.restore();
-  }, [size, view, painted, hoveredTri, mounted, screenToWorld, gridDivisions, hexMode]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode]);
 
   return (
     <canvas
