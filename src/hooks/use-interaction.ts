@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
+import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
   isPainting: boolean;
@@ -47,6 +48,120 @@ export function useInteraction({
     lastPaintedWorld: null,
   });
 
+  // Mirrored refs so callbacks don't need dependency on view/size objects
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
+
+  // Two-finger gesture state
+  const isTwoFinger = useRef(false);
+  const pinch = useRef<{
+    dist: number;
+    worldAtMid: { x: number; y: number };
+    startView: { x: number; y: number; zoom: number };
+  } | null>(null);
+
+  // Prevent browser zoom from trackpad pinch globally (document-level).
+  // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
+  // Container-level wheel prevention for scroll is handled separately below.
+  useEffect(() => {
+    const preventCtrlWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    const preventGesture = (e: Event) => e.preventDefault();
+
+    document.addEventListener("wheel", preventCtrlWheel, { passive: false });
+    document.addEventListener("gesturestart", preventGesture);
+    document.addEventListener("gesturechange", preventGesture);
+    document.addEventListener("gestureend", preventGesture);
+
+    return () => {
+      document.removeEventListener("wheel", preventCtrlWheel);
+      document.removeEventListener("gesturestart", preventGesture);
+      document.removeEventListener("gesturechange", preventGesture);
+      document.removeEventListener("gestureend", preventGesture);
+    };
+  }, []);
+
+  // Prevent browser scroll within the canvas container so wheel events
+  // are fully captured by our React onWheel handler.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const prevent = (e: WheelEvent) => e.preventDefault();
+    el.addEventListener("wheel", prevent, { passive: false });
+
+    return () => el.removeEventListener("wheel", prevent);
+  }, [containerRef]);
+
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+
+    isTwoFinger.current = true;
+    interaction.current.isPainting = false;
+    interaction.current.isPanning = false;
+
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    const midX = (t1.clientX + t2.clientX) / 2;
+    const midY = (t1.clientY + t2.clientY) / 2;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = midX - rect.left;
+    const sy = midY - rect.top;
+    const { x: vx, y: vy, zoom } = viewRef.current;
+    const { width, height } = sizeRef.current;
+
+    pinch.current = {
+      dist,
+      startView: { x: vx, y: vy, zoom },
+      worldAtMid: {
+        x: (sx - width / 2) / zoom - vx,
+        y: (sy - height / 2) / zoom - vy,
+      },
+    };
+  }, [containerRef]);
+
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!pinch.current) return;
+    if (e.touches.length < 2) return;
+    e.preventDefault();
+
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+    const { dist: initDist, startView, worldAtMid } = pinch.current;
+    const scale = 1 + (dist / initDist - 1) * PINCH_SENSITIVITY;
+    const newZoom = Math.min(Math.max(startView.zoom * scale, ZOOM_MIN), ZOOM_MAX);
+
+    const midX = (t1.clientX + t2.clientX) / 2;
+    const midY = (t1.clientY + t2.clientY) / 2;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = midX - rect.left;
+    const sy = midY - rect.top;
+    const { width, height } = sizeRef.current;
+
+    setView({
+      x: (sx - width / 2) / newZoom - worldAtMid.x,
+      y: (sy - height / 2) / newZoom - worldAtMid.y,
+      zoom: newZoom,
+    });
+  }, [containerRef, setView]);
+
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length < 2) {
+      isTwoFinger.current = false;
+      pinch.current = null;
+    }
+  }, []);
+
   const screenToWorld = useCallback(
     (sx: number, sy: number) => ({
       x: (sx - size.width / 2) / view.zoom - view.x,
@@ -69,6 +184,7 @@ export function useInteraction({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      if (isTwoFinger.current) return;
       const isRightClick = e.button === 2 || e.ctrlKey;
       const pos = getRelativePointer(e);
 
@@ -116,6 +232,7 @@ export function useInteraction({
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (isTwoFinger.current) return;
       const pos = getRelativePointer(e);
       const world = screenToWorld(pos.x, pos.y);
       const tri = worldToTri(world.x, world.y);
@@ -166,6 +283,7 @@ export function useInteraction({
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (isTwoFinger.current) return;
       if (interaction.current.isPanning && !interaction.current.hasMoved) {
         const pos = getRelativePointer(e);
         const world = screenToWorld(pos.x, pos.y);
@@ -196,10 +314,10 @@ export function useInteraction({
 
   const onWheel = useCallback(
     (e: React.WheelEvent) => {
-      const zoomFactor = Math.pow(1.1, -e.deltaY / 200);
+      const zoomFactor = Math.pow(1.1, -e.deltaY / WHEEL_DIVISOR);
       setView((v) => ({
         ...v,
-        zoom: Math.min(Math.max(v.zoom * zoomFactor, 0.1), 15),
+        zoom: Math.min(Math.max(v.zoom * zoomFactor, ZOOM_MIN), ZOOM_MAX),
       }));
     },
     [setView],
@@ -213,5 +331,8 @@ export function useInteraction({
     onPointerMove,
     onPointerUp,
     onWheel,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
   };
 }

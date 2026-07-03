@@ -45,6 +45,9 @@ export default function TrixelGrid() {
     onPointerMove,
     onPointerUp,
     onWheel,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
   } = useInteraction({
     size,
     view,
@@ -175,6 +178,9 @@ export default function TrixelGrid() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => setHoveredTri(null)}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
         tabIndex={0}
