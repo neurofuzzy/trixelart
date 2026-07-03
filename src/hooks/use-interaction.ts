@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
+import { flowerOffsets } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 
 interface InteractionState {
@@ -25,6 +26,8 @@ export function useInteraction({
   setPainted,
   pushHistory,
   containerRef,
+  flowerRadius,
+  gridDivisions,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -37,6 +40,8 @@ export function useInteraction({
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   pushHistory: (state: Record<string, string>) => void;
   containerRef: { current: HTMLDivElement | null };
+  flowerRadius: number;
+  gridDivisions: number;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -61,6 +66,16 @@ export function useInteraction({
     worldAtMid: { x: number; y: number };
     startView: { x: number; y: number; zoom: number };
   } | null>(null);
+
+  // Flower copy offsets — recomputed when radius or N changes.
+  const flowerOffsetsRef = useRef<Array<{ dq: number; dr: number }>>([]);
+  useEffect(() => {
+    if (flowerRadius > 0 && gridDivisions > 0) {
+      flowerOffsetsRef.current = flowerOffsets(flowerRadius, gridDivisions);
+    } else {
+      flowerOffsetsRef.current = [];
+    }
+  }, [flowerRadius, gridDivisions]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
@@ -209,18 +224,38 @@ export function useInteraction({
           lastPaintedWorld: { x: world.x, y: world.y },
         };
 
-        const key = triToString(worldToTri(world.x, world.y));
+        const tri = worldToTri(world.x, world.y);
+        const offsets = flowerOffsetsRef.current;
+        const keys: string[] = [triToString(tri)];
+        for (const o of offsets) {
+          keys.push(triToString({ q: tri.q + o.dq, r: tri.r + o.dr, type: tri.type }));
+        }
 
         setPainted((prev) => {
           const next = { ...prev };
-          if (tool === "paint") {
-            if (prev[key] === color) {
-              delete next[key];
+          if (offsets.length === 0 && tool === "paint") {
+            // No flower: original toggle behavior on the single trixel.
+            if (prev[keys[0]] === color) {
+              delete next[keys[0]];
             } else {
-              next[key] = color;
+              next[keys[0]] = color;
             }
           } else {
-            delete next[key];
+            let changed = false;
+            for (const k of keys) {
+              if (tool === "paint") {
+                if (next[k] !== color) {
+                  next[k] = color;
+                  changed = true;
+                }
+              } else {
+                if (k in next) {
+                  delete next[k];
+                  changed = true;
+                }
+              }
+            }
+            if (!changed) return prev;
           }
           return next;
         });
@@ -257,20 +292,27 @@ export function useInteraction({
         const tris = getTrianglesOnLine(lastWorld.x, lastWorld.y, world.x, world.y);
         interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
 
+        const offsets = flowerOffsetsRef.current;
+
         setPainted((prev) => {
           const next = { ...prev };
           let changed = false;
           for (const tri of tris) {
-            const key = triToString(tri);
-            if (tool === "paint") {
-              if (next[key] !== color) {
-                next[key] = color;
-                changed = true;
-              }
-            } else {
-              if (key in next) {
-                delete next[key];
-                changed = true;
+            const keys: string[] = [triToString(tri)];
+            for (const o of offsets) {
+              keys.push(triToString({ q: tri.q + o.dq, r: tri.r + o.dr, type: tri.type }));
+            }
+            for (const k of keys) {
+              if (tool === "paint") {
+                if (next[k] !== color) {
+                  next[k] = color;
+                  changed = true;
+                }
+              } else {
+                if (k in next) {
+                  delete next[k];
+                  changed = true;
+                }
               }
             }
           }

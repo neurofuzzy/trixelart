@@ -9,7 +9,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
 import { SymmetryPanel } from "@/components/SymmetryPanel";
 import { ColorPalette } from "@/components/ColorPalette";
-import { Footer } from "@/components/Footer";
+import { Footer, type HexMode } from "@/components/Footer";
 import { GRAYSCALE_PALETTE } from "@/lib/constants";
 
 export default function TrixelGrid() {
@@ -21,7 +21,8 @@ export default function TrixelGrid() {
   const [tool, setTool] = useState<"paint" | "erase" | "pan">("paint");
   const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
   const [gridDivisions, setGridDivisions] = useState(0);
-  const [hexMode, setHexMode] = useState(false);
+  const [hexMode, setHexMode] = useState<HexMode>("off");
+  const [flowerRadius, setFlowerRadius] = useState(0);
 
   const SETTINGS_KEY = "symmetria-settings";
 
@@ -34,15 +35,20 @@ export default function TrixelGrid() {
           setGridDivisions(data.gridDivisions);
         }
         if (typeof data.hexMode === "boolean") {
-          setHexMode(data.hexMode);
+          setHexMode(data.hexMode ? "outlines" : "off");
+        } else if (typeof data.hexMode === "string") {
+          setHexMode(data.hexMode as HexMode);
+        }
+        if (typeof data.flowerRadius === "number") {
+          setFlowerRadius(data.flowerRadius);
         }
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode }));
-  }, [gridDivisions, hexMode]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius }));
+  }, [gridDivisions, hexMode, flowerRadius]);
 
   const [isFunctionOpen, setIsFunctionOpen] = useState(false);
   const [formula, setFormula] = useState(
@@ -83,6 +89,8 @@ export default function TrixelGrid() {
     setPainted,
     pushHistory,
     containerRef,
+    flowerRadius,
+    gridDivisions,
   });
 
   const handleExport = useCallback(() => {
@@ -241,6 +249,8 @@ export default function TrixelGrid() {
         onGridDivisionsChange={setGridDivisions}
         hexMode={hexMode}
         onHexModeChange={setHexMode}
+        flowerRadius={flowerRadius}
+        onFlowerRadiusChange={setFlowerRadius}
       />
     </div>
   );

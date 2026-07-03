@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
+import type { HexMode } from "@/components/Footer";
 
 export function GridCanvas({
   size,
@@ -20,7 +21,7 @@ export function GridCanvas({
   hoveredTri: TriKey | null;
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
-  hexMode: boolean;
+  hexMode: HexMode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -193,7 +194,7 @@ export function GridCanvas({
     //   (Q,R) = (cN - kN, cN + 2kN)  (axial)
     // whose world x = 1.5*c*N*SIDE (columns are vertical) and y advances by
     // 2N*H (= s*sqrt(3)) within a column, adjacent columns offset by N*H.
-    if (hexMode && gridDivisions > 0) {
+    if (hexMode !== "off" && gridDivisions > 0) {
       const N = gridDivisions;
       const s = N * SIDE;        // hex side = circumradius
       const vHalf = N * H;       // s*sqrt(3)/2 — vertical vertex offset
@@ -210,6 +211,8 @@ export function GridCanvas({
 
       ctx.strokeStyle = "rgba(255,255,255,0.16)";
       ctx.lineWidth = Math.max(1.5 / view.zoom, 1);
+
+      const centers: { cx: number; cy: number }[] = [];
 
       for (let c = cMin; c <= cMax; c++) {
         const cx = 1.5 * c * N * SIDE;
@@ -229,6 +232,19 @@ export function GridCanvas({
           ctx.lineTo(cx + s / 2, cy - vHalf);
           ctx.closePath();
           ctx.stroke();
+
+          centers.push({ cx, cy });
+        }
+      }
+
+      if (hexMode === "centers") {
+        // Center markers — same radius as the origin dot, dimmer.
+        const r = Math.max(5 / view.zoom, 2);
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        for (const { cx, cy } of centers) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
     }
