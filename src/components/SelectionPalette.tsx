@@ -63,19 +63,23 @@ export function SelectionPalette({
   selections,
   activeSelectionId,
   onSelect,
+  onPointerEnter,
 }: {
   selections: SelectionSnapshot[];
   activeSelectionId: string | null;
   onSelect: (s: SelectionSnapshot) => void;
+  onPointerEnter: () => void;
 }) {
   if (selections.length === 0) return null;
 
   return (
     <div
-      className="absolute z-40 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl
+      className="absolute z-40 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl cursor-default
         bottom-12 left-1/2 -translate-x-1/2
         lg:flex-col lg:bottom-1/2 lg:left-4 lg:translate-x-0 lg:translate-y-1/2"
       onPointerDown={(e) => e.stopPropagation()}
+      onPointerMove={(e) => e.stopPropagation()}
+      onPointerEnter={onPointerEnter}
     >
       {selections.map((s) => (
         <SelectionSwatch

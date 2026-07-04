@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, type SelectionSnapshot } from "@/lib/hex-flower";
+import { CHECKER_LIGHT, CHECKER_DARK } from "@/lib/config";
 import type { HexMode } from "@/components/Footer";
 
 export function GridCanvas({
@@ -33,6 +34,53 @@ export function GridCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
 
+  // Build a tileable checkerboard pattern once (SIDE x 2H). The half-size
+  // triangular grid repeats every 2 half-units in q and r, which maps to a
+  // rectangular tile of SIDE x 2H.
+  const checkerPattern = useMemo(() => {
+    const off = document.createElement("canvas");
+    off.width = SIDE;
+    off.height = 2 * H;
+    const octx = off.getContext("2d")!;
+
+    const s2 = SIDE / 2;
+    const h2 = H / 2;
+    const qMin = -2, qMax = 4;
+    const rMin = -2, rMax = 6;
+
+    const groups = new Map<string, { q: number; r: number; type: "up" | "down" }[]>();
+    for (let r = rMin; r <= rMax; r++) {
+      for (let q = qMin; q <= qMax; q++) {
+        const color = (q + r) & 1 ? CHECKER_LIGHT : CHECKER_DARK;
+        const list = groups.get(color);
+        const up = { q, r, type: "up" as const };
+        const down = { q, r, type: "down" as const };
+        if (list) list.push(up, down);
+        else groups.set(color, [up, down]);
+      }
+    }
+    for (const [fillColor, tris] of groups) {
+      octx.fillStyle = fillColor;
+      octx.beginPath();
+      for (const t of tris) {
+        const bx = t.q * s2 + t.r * (s2 / 2);
+        const by = t.r * h2;
+        if (t.type === "up") {
+          octx.moveTo(bx, by);
+          octx.lineTo(bx + s2, by);
+          octx.lineTo(bx + s2 / 2, by + h2);
+        } else {
+          octx.moveTo(bx + s2 / 2, by + h2);
+          octx.lineTo(bx + s2 * 1.5, by + h2);
+          octx.lineTo(bx + s2, by);
+        }
+        octx.closePath();
+      }
+      octx.fill();
+    }
+    return off;
+  }, []);
+
   // Marching-ants animation tick (8 px/s equivalent in screen px). Stops
   // when there's no selection so we don't repaint forever.
   useEffect(() => {
@@ -60,6 +108,14 @@ export function GridCanvas({
     ctx.scale(dpr, dpr);
 
     ctx.clearRect(0, 0, size.width, size.height);
+
+    // Triangular checkerboard background (half-size triangles) via tiled pattern.
+    const pattern = ctx.createPattern(checkerPattern, "repeat");
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, size.width, size.height);
+    }
+
     ctx.save();
 
     ctx.translate(size.width / 2, size.height / 2);
@@ -431,7 +487,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, checkerPattern]);
 
   return (
     <canvas

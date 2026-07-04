@@ -354,11 +354,13 @@ export default function TrixelGrid() {
             selections={selections}
             activeSelectionId={activeSelection?.id ?? null}
             onSelect={(s) => setActiveSelection(s)}
+            onPointerEnter={() => setHoveredTri(null)}
           />
         ) : (
           <ColorPalette
             color={color}
             onColorChange={onColorChange}
+            onPointerEnter={() => setHoveredTri(null)}
           />
         )}
       </div>
