@@ -250,3 +250,29 @@ export function rotateHexCW(
   }
   return result;
 }
+
+export function remapHex(
+  painted: Record<string, string>,
+  c: number,
+  k: number,
+  N: number,
+  paletteIdx: number,
+  direction: 1 | -1,
+  colorCount: number,
+): Record<string, string> {
+  const tris = enumerateHexTrixels(c, k, N);
+  const result = { ...painted };
+  for (const t of tris) {
+    const key = triToString(t);
+    const encoded = painted[key];
+    if (!encoded) continue;
+    const parts = encoded.split(",");
+    if (parts.length !== 2) continue;
+    const p = Number(parts[0]);
+    const i = Number(parts[1]);
+    if (isNaN(p) || isNaN(i) || p !== paletteIdx) continue;
+    const newIdx = ((i + direction) % colorCount + colorCount) % colorCount;
+    result[key] = `${paletteIdx},${newIdx}`;
+  }
+  return result;
+}

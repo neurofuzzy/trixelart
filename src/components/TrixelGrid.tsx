@@ -12,7 +12,7 @@ import { SelectionPalette } from "@/components/SelectionPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { rotateHexCW } from "@/lib/hex-flower";
+import { rotateHexCW, remapHex } from "@/lib/hex-flower";
 
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
@@ -231,19 +231,29 @@ export default function TrixelGrid() {
 
   const onShiftUp = useCallback(() => {
     setPainted((prev) => {
-      const next = remapGrid(prev, activePaletteIdx, 1);
+      let next: Record<string, string>;
+      if (selectedHex && gridDivisions > 0) {
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, activePaletteIdx, 1, activePalette.length);
+      } else {
+        next = remapGrid(prev, activePaletteIdx, 1);
+      }
       if (next !== prev) pushHistory(next);
       return next;
     });
-  }, [activePaletteIdx, setPainted, pushHistory]);
+  }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
 
   const onShiftDown = useCallback(() => {
     setPainted((prev) => {
-      const next = remapGrid(prev, activePaletteIdx, -1);
+      let next: Record<string, string>;
+      if (selectedHex && gridDivisions > 0) {
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, activePaletteIdx, -1, activePalette.length);
+      } else {
+        next = remapGrid(prev, activePaletteIdx, -1);
+      }
       if (next !== prev) pushHistory(next);
       return next;
     });
-  }, [activePaletteIdx, setPainted, pushHistory]);
+  }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
 
   const onRotateSelection = useCallback(() => {
     if (!selectedHex || gridDivisions <= 0) return;
