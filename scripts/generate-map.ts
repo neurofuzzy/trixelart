@@ -104,7 +104,7 @@ function parseExports(content: string, filePath: string): Export[] {
   const exports: Export[] = [];
 
   function visit(node: ts.Node) {
-    const isExported = node.modifiers?.some(
+    const isExported = ts.canHaveModifiers(node) && ts.getModifiers(node)?.some(
       (m) => m.kind === ts.SyntaxKind.ExportKeyword
     );
 
