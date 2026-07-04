@@ -313,6 +313,7 @@ export default function TrixelGrid() {
       <div
         ref={containerRef}
         className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none"
+        style={{ background: "repeating-linear-gradient(30deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 6px, rgba(0,0,0,0.06) 6px, rgba(0,0,0,0.06) 12px)" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
