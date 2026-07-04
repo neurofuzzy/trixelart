@@ -23,7 +23,8 @@ export default function TrixelGrid() {
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp">("paint");
-  const [color, setColor] = useState(GRAYSCALE_PALETTE[4]);
+  const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
+  const [color, setColor] = useState(activePalette[4]);
   const [gridDivisions, setGridDivisions] = useState(0);
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
@@ -104,7 +105,7 @@ export default function TrixelGrid() {
   useKeyboardShortcuts(handleUndo, handleRedo, setTool, (c) => {
     setColor(c);
     setTool("paint");
-  });
+  }, activePalette);
 
   const {
     hoveredTri,
@@ -359,7 +360,13 @@ export default function TrixelGrid() {
         ) : (
           <ColorPalette
             color={color}
+            palette={activePalette}
             onColorChange={onColorChange}
+            onPaletteChange={(colors) => {
+              setActivePalette(colors);
+              setColor(colors[colors.length - 1]);
+              setTool("paint");
+            }}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}

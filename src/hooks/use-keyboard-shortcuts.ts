@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { GRAYSCALE_PALETTE } from "@/lib/constants";
 
 export function useKeyboardShortcuts(
   handleUndo: () => void,
   handleRedo: () => void,
   setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void,
   setColor: (color: string) => void,
+  palette: string[],
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -37,8 +37,8 @@ export function useKeyboardShortcuts(
       }
 
       const colorIdx = parseInt(e.key) - 1;
-      if (colorIdx >= 0 && colorIdx < GRAYSCALE_PALETTE.length) {
-        setColor(GRAYSCALE_PALETTE[colorIdx]);
+      if (colorIdx >= 0 && colorIdx < palette.length) {
+        setColor(palette[colorIdx]);
         setTool("paint");
       }
     };
