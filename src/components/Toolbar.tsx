@@ -131,7 +131,7 @@ export function Toolbar({
           onClick={onExport}
           title="Export JSON"
         >
-          <Download className="w-4 h-4" />
+          <Upload className="w-4 h-4" />
         </Button>
         <Button
           variant="ghost"
@@ -139,7 +139,7 @@ export function Toolbar({
           onClick={onImportClick}
           title="Import JSON"
         >
-          <Upload className="w-4 h-4" />
+          <Download className="w-4 h-4" />
         </Button>
       </div>
 

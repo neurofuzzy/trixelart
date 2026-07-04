@@ -141,7 +141,13 @@ export default function TrixelGrid() {
   });
 
   const handleExport = useCallback(() => {
-    const dataStr = JSON.stringify(painted, null, 2);
+    const project = {
+      version: 1,
+      painted,
+      settings: { gridDivisions, hexMode, flowerRadius, symmetry },
+      selections,
+    };
+    const dataStr = JSON.stringify(project, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -151,7 +157,7 @@ export default function TrixelGrid() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [painted]);
+  }, [painted, gridDivisions, hexMode, flowerRadius, symmetry, selections]);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -166,10 +172,40 @@ export default function TrixelGrid() {
       reader.onload = (event) => {
         try {
           const content = event.target?.result as string;
-          const importedData = JSON.parse(content);
-          if (typeof importedData === "object" && importedData !== null) {
-            setPainted(importedData);
-            pushHistory(importedData);
+          const data = JSON.parse(content);
+          if (typeof data !== "object" || data === null) return;
+
+          // New format: { version, painted, settings, selections }
+          if (data.version === 1 || data.painted) {
+            const grid = data.painted || {};
+            setPainted(grid);
+            pushHistory(grid);
+
+            if (data.settings) {
+              const s = data.settings;
+              if (typeof s.gridDivisions === "number") setGridDivisions(s.gridDivisions);
+              if (typeof s.hexMode === "boolean") {
+                setHexMode(s.hexMode ? "outlines" : "off");
+              } else if (typeof s.hexMode === "string") {
+                setHexMode(s.hexMode as HexMode);
+              }
+              if (typeof s.flowerRadius === "number") setFlowerRadius(s.flowerRadius);
+              if (typeof s.symmetry60 === "boolean") {
+                setSymmetry(s.symmetry60 ? "sym60" : "off");
+              } else if (typeof s.symmetry === "string") {
+                setSymmetry(s.symmetry as Symmetry);
+              }
+            }
+
+            if (Array.isArray(data.selections)) {
+              setSelections(data.selections);
+              const ok = data.selections[0] && Array.isArray(data.selections[0].trixels) && typeof data.selections[0].N === "number";
+              if (ok) setActiveSelection(data.selections[0]);
+            }
+          } else {
+            // Legacy format: plain painted grid object
+            setPainted(data);
+            pushHistory(data);
           }
         } catch (err) {
           console.error("Failed to import", err);
@@ -178,7 +214,7 @@ export default function TrixelGrid() {
       reader.readAsText(file);
       e.target.value = "";
     },
-    [setPainted, pushHistory],
+    [setPainted, pushHistory, setGridDivisions, setHexMode, setFlowerRadius, setSymmetry, setSelections, setActiveSelection],
   );
 
   const runSymmetryFunction = useCallback(() => {
