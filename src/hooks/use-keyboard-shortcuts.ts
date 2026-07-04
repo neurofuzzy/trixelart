@@ -6,8 +6,8 @@ export function useKeyboardShortcuts(
   handleUndo: () => void,
   handleRedo: () => void,
   setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void,
-  setColor: (color: string) => void,
-  palette: string[],
+  setColorIdx: (idx: number) => void,
+  colorCount: number,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -37,13 +37,13 @@ export function useKeyboardShortcuts(
       }
 
       const colorIdx = parseInt(e.key) - 1;
-      if (colorIdx >= 0 && colorIdx < palette.length) {
-        setColor(palette[colorIdx]);
+      if (colorIdx >= 0 && colorIdx < colorCount) {
+        setColorIdx(colorIdx);
         setTool("paint");
       }
     };
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColor]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount]);
 }

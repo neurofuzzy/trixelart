@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useMemo } from "react";
 import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, type SelectionSnapshot } from "@/lib/hex-flower";
 import { CHECKER_LIGHT, CHECKER_DARK } from "@/lib/config";
+import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 
 export function GridCanvas({
@@ -145,9 +146,10 @@ export function GridCanvas({
           const key = `${q},${r},${type}`;
           const fill = painted[key];
           if (fill) {
-            const list = colorGroups.get(fill);
+            const hex = resolveColor(fill);
+            const list = colorGroups.get(hex);
             if (list) list.push({ q, r, type });
-            else colorGroups.set(fill, [{ q, r, type }]);
+            else colorGroups.set(hex, [{ q, r, type }]);
           }
         }
       }
@@ -389,12 +391,13 @@ export function GridCanvas({
         const tgt = triToHex(hov.q, hov.r, hov.type, N);
         const { qc, rc } = hexCenterTriAxial(tgt.c, tgt.k, N);
 
-        // Group snapshot trixels by color so we batch fills.
+        // Group snapshot trixels by resolved color so we batch fills.
         const previewGroups = new Map<string, typeof activeSelection.trixels>();
         for (const t of activeSelection.trixels) {
-          const list = previewGroups.get(t.color);
+          const hex = resolveColor(t.color);
+          const list = previewGroups.get(hex);
           if (list) list.push(t);
-          else previewGroups.set(t.color, [t]);
+          else previewGroups.set(hex, [t]);
         }
 
         ctx.save();

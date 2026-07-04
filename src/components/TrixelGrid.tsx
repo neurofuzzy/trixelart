@@ -7,12 +7,12 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
-import { SymmetryPanel } from "@/components/SymmetryPanel";
 import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
-import { GRAYSCALE_PALETTE } from "@/lib/constants";
+import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
+import { rotateHexCW } from "@/lib/hex-flower";
 
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
@@ -24,8 +24,12 @@ export default function TrixelGrid() {
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp">("paint");
   const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
-  const [color, setColor] = useState(activePalette[4]);
-  const [gridDivisions, setGridDivisions] = useState(0);
+  const [activePaletteIdx, setActivePaletteIdx] = useState(0);
+  const [colorIdx, setColorIdx] = useState(4);
+
+  const colorHex = activePalette[colorIdx] ?? activePalette[4];
+  const paintKey = encodeColor(activePaletteIdx, colorIdx);
+  const [gridDivisions, setGridDivisions] = useState(1);
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
@@ -91,24 +95,17 @@ export default function TrixelGrid() {
     } catch { /* ignore */ }
   }, [selections]);
 
-  const [isFunctionOpen, setIsFunctionOpen] = useState(false);
-  const [formula, setFormula] = useState(
-    "a % 5 === 0 || b % 5 === 0 || c % 5 === 0",
-  );
-  const [extent, setExtent] = useState(10);
-
   useEffect(() => {
     const timer = setTimeout(() => updateSize(), 500);
     return () => clearTimeout(timer);
   }, [updateSize]);
 
   useKeyboardShortcuts(handleUndo, handleRedo, setTool, (c) => {
-    setColor(c);
+    setColorIdx(c);
     setTool("paint");
-  }, activePalette);
+  }, activePalette.length);
 
   const {
-    hoveredTri,
     hoverTargets,
     setHoveredTri,
     screenToWorld,
@@ -125,8 +122,16 @@ export default function TrixelGrid() {
     setView,
     tool,
     setTool,
-    color,
-    setColor,
+    color: paintKey,
+    setColor: (encoded) => {
+      const d = decodeColor(encoded);
+      if (d && PALETTES[d.paletteIdx]) {
+        setActivePaletteIdx(d.paletteIdx);
+        setActivePalette(PALETTES[d.paletteIdx].colors);
+        setColorIdx(d.colorIdx);
+        setTool("paint");
+      }
+    },
     painted,
     setPainted,
     pushHistory,
@@ -218,47 +223,36 @@ export default function TrixelGrid() {
     [setPainted, pushHistory, setGridDivisions, setHexMode, setFlowerRadius, setSymmetry, setSelections, setActiveSelection],
   );
 
-  const runSymmetryFunction = useCallback(() => {
-    const newPainted = { ...painted };
-    try {
-      const check = new Function(
-        "a",
-        "b",
-        "c",
-        `try { return !!(${formula}); } catch(e) { return false; }`,
-      );
-
-      for (let a = -extent; a <= extent; a++) {
-        for (let b = -extent; b <= extent; b++) {
-          const cUp = -a - b;
-          if (Math.abs(cUp) <= extent) {
-            if (check(a, b, cUp)) {
-              newPainted[`${b},${a},up`] = color;
-            }
-          }
-
-          const cDown = -1 - a - b;
-          if (Math.abs(cDown) <= extent) {
-            if (check(a, b, cDown)) {
-              newPainted[`${b},${a},down`] = color;
-            }
-          }
-        }
-      }
-      setPainted(newPainted);
-      pushHistory(newPainted);
-      setIsFunctionOpen(false);
-    } catch (e) {
-      alert(
-        "Invalid mathematical expression. Use JavaScript syntax, e.g. a % 5 === 0",
-      );
-    }
-  }, [painted, formula, extent, color, setPainted, pushHistory]);
-
   const onColorChange = useCallback((c: string) => {
-    setColor(c);
+    const idx = activePalette.indexOf(c);
+    if (idx >= 0) setColorIdx(idx);
     setTool("paint");
-  }, []);
+  }, [activePalette]);
+
+  const onShiftUp = useCallback(() => {
+    setPainted((prev) => {
+      const next = remapGrid(prev, activePaletteIdx, 1);
+      if (next !== prev) pushHistory(next);
+      return next;
+    });
+  }, [activePaletteIdx, setPainted, pushHistory]);
+
+  const onShiftDown = useCallback(() => {
+    setPainted((prev) => {
+      const next = remapGrid(prev, activePaletteIdx, -1);
+      if (next !== prev) pushHistory(next);
+      return next;
+    });
+  }, [activePaletteIdx, setPainted, pushHistory]);
+
+  const onRotateSelection = useCallback(() => {
+    if (!selectedHex || gridDivisions <= 0) return;
+    setPainted((prev) => {
+      const next = rotateHexCW(prev, selectedHex.c, selectedHex.k, gridDivisions);
+      if (next !== prev) pushHistory(next);
+      return next;
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
   const onCenterView = useCallback(() => setView({ x: 0, y: 0, zoom: 1 }), []);
 
@@ -296,13 +290,7 @@ export default function TrixelGrid() {
 
       <Toolbar
         tool={tool}
-        isFunctionOpen={isFunctionOpen}
         onToolChange={setTool}
-        onFunctionToggle={() => setIsFunctionOpen((v) => !v)}
-        handleUndo={handleUndo}
-        handleRedo={handleRedo}
-        historyIdx={historyIdx}
-        historyLength={history.length}
         onExport={handleExport}
         onImportClick={handleImportClick}
         onClear={clearCanvas}
@@ -340,40 +328,36 @@ export default function TrixelGrid() {
           activeSelection={activeSelection}
         />
 
-        <SymmetryPanel
-          isOpen={isFunctionOpen}
-          formula={formula}
-          onFormulaChange={setFormula}
-          extent={extent}
-          onExtentChange={setExtent}
-          onApply={runSymmetryFunction}
-          onClose={() => setIsFunctionOpen(false)}
-        />
-
         {tool === "select" || tool === "stamp" ? (
           <SelectionPalette
             selections={selections}
             activeSelectionId={activeSelection?.id ?? null}
             onSelect={(s) => setActiveSelection(s)}
+            onShiftUp={onShiftUp}
+            onShiftDown={onShiftDown}
+            onRotate={onRotateSelection}
+            hasSelection={selectedHex !== null}
             onPointerEnter={() => setHoveredTri(null)}
           />
         ) : (
           <ColorPalette
-            color={color}
+            color={colorHex}
             palette={activePalette}
             onColorChange={onColorChange}
-            onPaletteChange={(colors) => {
+            onPaletteChange={(colors, idx) => {
               setActivePalette(colors);
-              setColor(colors[colors.length - 1]);
+              setActivePaletteIdx(idx);
+              setColorIdx(colors.length - 1);
               setTool("paint");
             }}
+            onShiftUp={onShiftUp}
+            onShiftDown={onShiftDown}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
       </div>
 
       <Footer
-        hoveredTri={hoveredTri}
         gridDivisions={gridDivisions}
         onGridDivisionsChange={setGridDivisions}
         hexMode={hexMode}
@@ -382,6 +366,10 @@ export default function TrixelGrid() {
         onFlowerRadiusChange={setFlowerRadius}
         symmetry={symmetry}
         onSymmetryChange={setSymmetry}
+        handleUndo={handleUndo}
+        handleRedo={handleRedo}
+        historyIdx={historyIdx}
+        historyLength={history.length}
       />
     </div>
   );

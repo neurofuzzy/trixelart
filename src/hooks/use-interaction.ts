@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
 import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, hexCenterTriAxial, captureHexSnapshot, type Symmetry, type SelectionSnapshot } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
+import { encodeColor, resolveColor } from "@/lib/constants";
 
 interface InteractionState {
   isPainting: boolean;
@@ -346,8 +347,7 @@ export function useInteraction({
         setPainted((prev) => {
           const next = { ...prev };
           if (tool === "paint" && targets.length === 1) {
-            // No flower, no symmetry: original toggle behavior.
-            if (prev[keys[0]] === color) {
+            if (resolveColor(prev[keys[0]] ?? "") === resolveColor(color)) {
               delete next[keys[0]];
             } else {
               next[keys[0]] = color;
@@ -356,7 +356,7 @@ export function useInteraction({
             let changed = false;
             for (const k of keys) {
               if (tool === "paint") {
-                if (next[k] !== color) {
+                if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
                   next[k] = color;
                   changed = true;
                 }
@@ -415,7 +415,7 @@ export function useInteraction({
             const keys = paintTargets(tri, N, sym, offsets).map(triToString);
             for (const k of keys) {
               if (tool === "paint") {
-                if (next[k] !== color) {
+                if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
                   next[k] = color;
                   changed = true;
                 }

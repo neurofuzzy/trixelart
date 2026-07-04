@@ -2,6 +2,9 @@
 
 import { cn } from "@/lib/utils";
 import { SIDE, H } from "@/lib/grid-math";
+import { resolveColor } from "@/lib/constants";
+import { Button } from "@/components/ui/button";
+import { ChevronUp, ChevronDown, RotateCw } from "lucide-react";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 
 function SelectionSwatch({
@@ -42,7 +45,7 @@ function SelectionSwatch({
               [bx + SIDE / 2, by + H],
             ];
             return (
-              <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={t.color} />
+              <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
             );
           }
           const [a, b, c] = [
@@ -51,7 +54,7 @@ function SelectionSwatch({
             [bx + SIDE, by],
           ];
           return (
-            <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={t.color} />
+            <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
           );
         })}
       </svg>
@@ -63,11 +66,19 @@ export function SelectionPalette({
   selections,
   activeSelectionId,
   onSelect,
+  onShiftUp,
+  onShiftDown,
+  onRotate,
+  hasSelection,
   onPointerEnter,
 }: {
   selections: SelectionSnapshot[];
   activeSelectionId: string | null;
   onSelect: (s: SelectionSnapshot) => void;
+  onShiftUp: () => void;
+  onShiftDown: () => void;
+  onRotate: () => void;
+  hasSelection: boolean;
   onPointerEnter: () => void;
 }) {
   if (selections.length === 0) return null;
@@ -89,6 +100,45 @@ export function SelectionPalette({
           onClick={() => onSelect(s)}
         />
       ))}
+      <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShiftUp();
+          }}
+          title="Shift colors lighter"
+        >
+          <ChevronUp className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShiftDown();
+          }}
+          title="Shift colors darker"
+        >
+          <ChevronDown className="w-4 h-4" />
+        </Button>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRotate();
+        }}
+        disabled={!hasSelection}
+        title="Rotate selection 60° CW"
+      >
+        <RotateCw className="w-4 h-4" />
+      </Button>
     </div>
   );
 }

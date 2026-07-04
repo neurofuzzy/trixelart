@@ -1,17 +1,11 @@
 "use client";
 
-import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Undo2, Redo2, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
+import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function Toolbar({
   tool,
-  isFunctionOpen,
   onToolChange,
-  onFunctionToggle,
-  handleUndo,
-  handleRedo,
-  historyIdx,
-  historyLength,
   onExport,
   onImportClick,
   onClear,
@@ -21,13 +15,7 @@ export function Toolbar({
   hasSelection,
 }: {
   tool: "paint" | "erase" | "pan" | "select" | "stamp";
-  isFunctionOpen: boolean;
   onToolChange: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void;
-  onFunctionToggle: () => void;
-  handleUndo: () => void;
-  handleRedo: () => void;
-  historyIdx: number;
-  historyLength: number;
   onExport: () => void;
   onImportClick: () => void;
   onClear: () => void;
@@ -88,39 +76,6 @@ export function Toolbar({
           title="Stamp selection (T)"
         >
           <Stamp className="w-4 h-4" />
-        </Button>
-
-        <div className="w-px h-6 bg-border mx-1" />
-
-        <Button
-          variant={isFunctionOpen ? "default" : "ghost"}
-          size="icon"
-          onClick={onFunctionToggle}
-          title="Symmetry Function (ƒ)"
-          className="text-lg font-serif"
-        >
-          ƒ
-        </Button>
-
-        <div className="w-px h-6 bg-border mx-1" />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleUndo}
-          disabled={historyIdx <= 0}
-          title="Undo (Ctrl+Z)"
-        >
-          <Undo2 className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleRedo}
-          disabled={historyIdx >= historyLength - 1}
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          <Redo2 className="w-4 h-4" />
         </Button>
 
         <div className="w-px h-6 bg-border mx-1" />

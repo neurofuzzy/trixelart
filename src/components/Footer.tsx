@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Grid3x3, Hexagon, Flower, Aperture } from "lucide-react";
-import { getTriABC, type TriKey } from "@/lib/grid-math";
+import { useState } from "react";
+import { Grid3x3, Hexagon, Flower, Aperture, Undo2, Redo2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export type HexMode = "off" | "outlines" | "centers";
@@ -23,7 +23,6 @@ const SYM_TITLE: Record<Symmetry, string> = {
 };
 
 export function Footer({
-  hoveredTri,
   gridDivisions,
   onGridDivisionsChange,
   hexMode,
@@ -32,8 +31,11 @@ export function Footer({
   onFlowerRadiusChange,
   symmetry,
   onSymmetryChange,
+  handleUndo,
+  handleRedo,
+  historyIdx,
+  historyLength,
 }: {
-  hoveredTri: TriKey | null;
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
   hexMode: HexMode;
@@ -42,14 +44,13 @@ export function Footer({
   onFlowerRadiusChange: (n: number) => void;
   symmetry: Symmetry;
   onSymmetryChange: (v: Symmetry) => void;
+  handleUndo: () => void;
+  handleRedo: () => void;
+  historyIdx: number;
+  historyLength: number;
 }) {
   const [gridPopoverOpen, setGridPopoverOpen] = useState(false);
   const [flowerPopoverOpen, setFlowerPopoverOpen] = useState(false);
-
-  const coords = useMemo(() => {
-    if (!hoveredTri) return null;
-    return getTriABC(hoveredTri.q, hoveredTri.r, hoveredTri.type);
-  }, [hoveredTri]);
 
   const sliderClass =
     "h-28 w-5 cursor-pointer appearance-none bg-transparent " +
@@ -60,23 +61,26 @@ export function Footer({
 
   return (
     <div className="flex items-center justify-between p-2 border-t bg-card/90 backdrop-blur-md z-30">
-      {coords ? (
-        <div className="flex items-center gap-3 pl-4">
-          <div className="flex gap-3 text-[11px] font-mono text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <span className="font-bold text-foreground">a</span> {coords.a}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-bold text-foreground">b</span> {coords.b}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-bold text-foreground">c</span> {coords.c}
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div />
-      )}
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleUndo}
+          disabled={historyIdx <= 0}
+          title="Undo (Ctrl+Z)"
+        >
+          <Undo2 className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleRedo}
+          disabled={historyIdx >= historyLength - 1}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <Redo2 className="w-4 h-4" />
+        </Button>
+      </div>
       <div className="flex items-center gap-1.5">
         {hexMode !== "off" && gridDivisions > 0 && (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/25 text-cyan-300">

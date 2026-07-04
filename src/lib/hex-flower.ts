@@ -223,3 +223,30 @@ export function paintTargets(
   }
   return out;
 }
+
+export function rotateHexCW(
+  painted: Record<string, string>,
+  c: number,
+  k: number,
+  N: number,
+): Record<string, string> {
+  const { qc, rc } = hexCenterTriAxial(c, k, N);
+  const tris = enumerateHexTrixels(c, k, N);
+  const result = { ...painted };
+
+  const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
+  for (const t of tris) {
+    const key = triToString(t);
+    const color = painted[key];
+    if (color) {
+      delete result[key];
+      let cur: TriKey = t;
+      cur = rotateTrixelCCW(cur, qc, rc);
+      moved.push({ q: cur.q, r: cur.r, type: cur.type, color });
+    }
+  }
+  for (const m of moved) {
+    result[triToString({ q: m.q, r: m.r, type: m.type })] = m.color;
+  }
+  return result;
+}

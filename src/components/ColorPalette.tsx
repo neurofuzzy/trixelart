@@ -4,19 +4,24 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PalettePicker } from "@/components/PalettePicker";
-import { Palette } from "lucide-react";
+import { Palette, ChevronUp, ChevronDown } from "lucide-react";
+import { PALETTES } from "@/lib/constants";
 
 export function ColorPalette({
   color,
   palette,
   onColorChange,
   onPaletteChange,
+  onShiftUp,
+  onShiftDown,
   onPointerEnter,
 }: {
   color: string;
   palette: string[];
   onColorChange: (color: string) => void;
-  onPaletteChange: (colors: string[]) => void;
+  onPaletteChange: (colors: string[], idx: number) => void;
+  onShiftUp: () => void;
+  onShiftDown: () => void;
   onPointerEnter: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -45,6 +50,32 @@ export function ColorPalette({
           style={{ backgroundColor: c }}
         />
       ))}
+      <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShiftUp();
+          }}
+          title="Shift colors lighter"
+        >
+          <ChevronUp className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShiftDown();
+          }}
+          title="Shift colors darker"
+        >
+          <ChevronDown className="w-4 h-4" />
+        </Button>
+      </div>
       <div className="relative ml-1 lg:ml-0 lg:mt-1">
         <Button
           variant="ghost"
@@ -62,7 +93,8 @@ export function ColorPalette({
           isOpen={pickerOpen}
           onClose={() => setPickerOpen(false)}
           onSelect={(colors) => {
-            onPaletteChange(colors);
+            const idx = PALETTES.findIndex((p) => p.colors === colors);
+            onPaletteChange(colors, idx >= 0 ? idx : 0);
             setPickerOpen(false);
           }}
         />

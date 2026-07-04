@@ -62,3 +62,43 @@ export const PALETTES = [
     ],
   },
 ];
+
+export function encodeColor(paletteIdx: number, colorIdx: number): string {
+  return `${paletteIdx},${colorIdx}`;
+}
+
+export function decodeColor(encoded: string): { paletteIdx: number; colorIdx: number } | null {
+  const parts = encoded.split(",");
+  if (parts.length !== 2) return null;
+  const p = Number(parts[0]);
+  const i = Number(parts[1]);
+  if (isNaN(p) || isNaN(i)) return null;
+  return { paletteIdx: p, colorIdx: i };
+}
+
+export function resolveColor(encoded: string): string {
+  const d = decodeColor(encoded);
+  if (d && PALETTES[d.paletteIdx] && PALETTES[d.paletteIdx].colors[d.colorIdx]) {
+    return PALETTES[d.paletteIdx].colors[d.colorIdx];
+  }
+  return encoded;
+}
+
+export function remapGrid(
+  painted: Record<string, string>,
+  paletteIdx: number,
+  direction: 1 | -1,
+): Record<string, string> {
+  const L = PALETTES[paletteIdx]?.colors.length ?? 5;
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(painted)) {
+    const d = decodeColor(value);
+    if (d && d.paletteIdx === paletteIdx) {
+      const newIdx = ((d.colorIdx + direction) % L + L) % L;
+      result[key] = encodeColor(paletteIdx, newIdx);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
