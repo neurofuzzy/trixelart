@@ -180,9 +180,20 @@ export function useInteraction({
 
     const t1 = e.touches[0];
     const t2 = e.touches[1];
-    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
-    const midX = (t1.clientX + t2.clientX) / 2;
-    const midY = (t1.clientY + t2.clientY) / 2;
+    let cx1 = t1.clientX;
+    let cy1 = t1.clientY;
+    let cx2 = t2.clientX;
+    let cy2 = t2.clientY;
+    if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
+      const dpr = window.devicePixelRatio || 1;
+      cx1 /= dpr;
+      cy1 /= dpr;
+      cx2 /= dpr;
+      cy2 /= dpr;
+    }
+    const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+    const midX = (cx1 + cx2) / 2;
+    const midY = (cy1 + cy2) / 2;
 
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -208,14 +219,25 @@ export function useInteraction({
 
     const t1 = e.touches[0];
     const t2 = e.touches[1];
-    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    let cx1 = t1.clientX;
+    let cy1 = t1.clientY;
+    let cx2 = t2.clientX;
+    let cy2 = t2.clientY;
+    if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
+      const dpr = window.devicePixelRatio || 1;
+      cx1 /= dpr;
+      cy1 /= dpr;
+      cx2 /= dpr;
+      cy2 /= dpr;
+    }
+    const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
 
     const { dist: initDist, startView, worldAtMid } = pinch.current;
     const scale = 1 + (dist / initDist - 1) * PINCH_SENSITIVITY;
     const newZoom = Math.min(Math.max(startView.zoom * scale, ZOOM_MIN), ZOOM_MAX);
 
-    const midX = (t1.clientX + t2.clientX) / 2;
-    const midY = (t1.clientY + t2.clientY) / 2;
+    const midX = (cx1 + cx2) / 2;
+    const midY = (cy1 + cy2) / 2;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = midX - rect.left;
@@ -248,9 +270,19 @@ export function useInteraction({
     (e: React.PointerEvent | React.MouseEvent) => {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return { x: 0, y: 0 };
+      let cx = e.clientX;
+      let cy = e.clientY;
+      // Safari on some devices reports pointer coordinates in physical
+      // pixels while getBoundingClientRect returns CSS pixels, causing
+      // a multiplicative drift. Detect and normalize.
+      if (cx > window.innerWidth * 1.5 || cy > window.innerHeight * 1.5) {
+        const dpr = window.devicePixelRatio || 1;
+        cx /= dpr;
+        cy /= dpr;
+      }
       return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
+        x: cx - rect.left,
+        y: cy - rect.top,
       };
     },
     [containerRef],

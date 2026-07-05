@@ -430,10 +430,21 @@ export default function TrixelGrid() {
         } else if (snap.id === activeSelection?.id) {
           setActiveSelection(null);
         }
+        pushHistory({
+          painted: paintedRef.current,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: next,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
         return next;
       });
     },
-    [activeSelection],
+    [activeSelection, pushHistory],
   );
 
   const onCenterView = useCallback(() => setView({ x: 0, y: 0, zoom: 1 }), []);

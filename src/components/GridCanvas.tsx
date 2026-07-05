@@ -58,7 +58,7 @@ export function GridCanvas({
     const dpr = window.devicePixelRatio || 1;
     canvas.width = size.width * dpr;
     canvas.height = size.height * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     ctx.clearRect(0, 0, size.width, size.height);
 
