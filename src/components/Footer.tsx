@@ -37,6 +37,8 @@ export function Footer({
   handleRedo,
   historyIdx,
   historyLength,
+  tool,
+  captureMode,
 }: {
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
@@ -50,6 +52,8 @@ export function Footer({
   handleRedo: () => void;
   historyIdx: number;
   historyLength: number;
+  tool?: "paint" | "erase" | "pan" | "select" | "stamp";
+  captureMode?: boolean;
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
@@ -106,6 +110,26 @@ export function Footer({
         {tooltip ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             {tooltip}
+          </span>
+        ) : tool === "paint" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            click to paint
+          </span>
+        ) : tool === "erase" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            click to erase
+          </span>
+        ) : tool === "pan" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            drag to move
+          </span>
+        ) : tool === "select" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            click on a hex to select
+          </span>
+        ) : tool === "stamp" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            {captureMode ? "click on an area to create a stamp" : "click on an area to place a stamp"}
           </span>
         ) : (
           <>
@@ -206,7 +230,9 @@ export function Footer({
           )}
           onClick={() => {
             const i = SYM_CYCLE.indexOf(symmetry);
-            onSymmetryChange(SYM_CYCLE[(i + 1) % SYM_CYCLE.length]);
+            const next = SYM_CYCLE[(i + 1) % SYM_CYCLE.length];
+            onSymmetryChange(next);
+            setTooltip(SYM_LABEL[next]);
           }}
           disabled={gridDivisions === 0 || hexMode === "off"}
           onMouseEnter={() => setTooltip(SYM_LABEL[symmetry])}

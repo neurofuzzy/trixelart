@@ -19,6 +19,7 @@ export function GridCanvas({
   tool,
   activeSelection,
   stampFlash,
+  captureMode,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -32,6 +33,7 @@ export function GridCanvas({
   tool: "paint" | "erase" | "pan" | "select" | "stamp";
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
+  captureMode?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -350,8 +352,8 @@ export function GridCanvas({
 
     // Stamp preview: render the active selection's trixels translated to
     // the hovered hex, using their real colors so the user sees exactly
-    // what a stamp would land there.
-    if (tool === "stamp" && hoverTargets.length > 0 && activeSelection && gridDivisions > 0 && gridDivisions === activeSelection.N) {
+    // what a stamp would land there. Skip when in capture mode.
+    if (tool === "stamp" && !captureMode && hoverTargets.length > 0 && activeSelection && gridDivisions > 0 && gridDivisions === activeSelection.N) {
       const N = gridDivisions;
       const hov = hoverTargets[0];
       const tgt = triToHex(hov.q, hov.r, hov.type, N);
@@ -407,10 +409,19 @@ export function GridCanvas({
         ctx.lineTo(hx + hs / 2, hy - hv);
         ctx.closePath();
         if (tool === "stamp") {
-          ctx.strokeStyle = "white";
-          ctx.globalAlpha = 0.7;
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+          if (captureMode) {
+            ctx.strokeStyle = "#fbbf24";
+            ctx.globalAlpha = 0.9;
+            ctx.setLineDash([8, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+          } else {
+            ctx.strokeStyle = "white";
+            ctx.globalAlpha = 0.7;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
         } else {
           // Select: fill only, no stroke.
           ctx.fillStyle = "white";
@@ -455,7 +466,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode]);
 
   return (
     <canvas

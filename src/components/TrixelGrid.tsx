@@ -597,6 +597,7 @@ export default function TrixelGrid() {
           tool={tool}
           activeSelection={activeSelection}
           stampFlash={stampFlash}
+          captureMode={captureMode}
         />
 
         {tool === "select" ? (
@@ -612,7 +613,10 @@ export default function TrixelGrid() {
           <StampPalette
             selections={selections}
             activeSelectionId={activeSelection?.id ?? null}
-            onSelect={(s) => setActiveSelection(s)}
+            onSelect={(s) => {
+              setActiveSelection(s);
+              setCaptureMode(false);
+            }}
             onPointerEnter={() => setHoveredTri(null)}
             onDelete={onDeletePaletteItem}
             onCapture={() => setCaptureMode(true)}
@@ -648,6 +652,8 @@ export default function TrixelGrid() {
         handleRedo={onRedo}
         historyIdx={historyIdx}
         historyLength={history.length}
+        tool={tool}
+        captureMode={captureMode}
       />
     </div>
   );
