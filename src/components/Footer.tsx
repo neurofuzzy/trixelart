@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Hexagon, Expand, Aperture, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,17 +16,12 @@ export type HexMode = "off" | "outlines" | "centers";
 export type Symmetry = "off" | "sym60" | "sym120";
 
 const HEX_CYCLE: HexMode[] = ["off", "outlines", "centers"];
-const HEX_TITLE: Record<HexMode, string> = {
-  off: "Hex: off",
-  outlines: "Hex: outlines",
-  centers: "Hex: outlines + centers",
-};
 
 const SYM_CYCLE: Symmetry[] = ["off", "sym60", "sym120"];
-const SYM_TITLE: Record<Symmetry, string> = {
+const SYM_LABEL: Record<Symmetry, string> = {
   off: "Symmetry: off",
-  sym60: "Symmetry: 6-fold (60°)",
-  sym120: "Symmetry: 3-fold (120°)",
+  sym60: "Symmetry: 6-fold (60\u00B0)",
+  sym120: "Symmetry: 3-fold (120\u00B0)",
 };
 
 export function Footer({
@@ -56,8 +51,17 @@ export function Footer({
   historyIdx: number;
   historyLength: number;
 }) {
+  const [tooltip, setTooltip] = useState<string | null>(null);
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
   const [flowerPopoverOpen, setFlowerPopoverOpen] = useState(false);
+  const hexDialogRef = useRef(false);
+  const flowerPopoverRef = useRef(false);
+
+  const clearTooltip = useCallback(() => {
+    if (!hexDialogRef.current && !flowerPopoverRef.current) {
+      setTooltip(null);
+    }
+  }, []);
 
   const sliderClass =
     "h-28 w-5 cursor-pointer appearance-none bg-transparent " +
@@ -82,7 +86,8 @@ export function Footer({
           size="icon"
           onClick={handleUndo}
           disabled={historyIdx <= 0}
-          title="Undo (Ctrl+Z)"
+          onMouseEnter={() => setTooltip("Undo (Ctrl+Z)")}
+          onMouseLeave={clearTooltip}
         >
           <Undo2 className="w-4 h-4" />
         </Button>
@@ -91,25 +96,41 @@ export function Footer({
           size="icon"
           onClick={handleRedo}
           disabled={historyIdx >= historyLength - 1}
-          title="Redo (Ctrl+Shift+Z)"
+          onMouseEnter={() => setTooltip("Redo (Ctrl+Shift+Z)")}
+          onMouseLeave={clearTooltip}
         >
           <Redo2 className="w-4 h-4" />
         </Button>
       </div>
-      <div className="flex items-center gap-1.5">
-        {hexMode !== "off" && gridDivisions > 0 && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/25 text-cyan-300">
-            hex: {hexMode === "centers" ? "●" : "○"}
+      <div className="flex items-center gap-1.5 min-w-0">
+        {tooltip ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            {tooltip}
           </span>
-        )}
-        {symmetry !== "off" && gridDivisions > 0 && hexMode !== "off" && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/25 text-purple-300">
-            {symmetry === "sym60" ? "6-fold" : "3-fold"}
-          </span>
+        ) : (
+          <>
+            {hexMode !== "off" && gridDivisions > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/25 text-cyan-300">
+                hex: {hexMode === "centers" ? "\u25CF" : "\u25CB"}
+              </span>
+            )}
+            {symmetry !== "off" && gridDivisions > 0 && hexMode !== "off" && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/25 text-purple-300">
+                {symmetry === "sym60" ? "6-fold" : "3-fold"}
+              </span>
+            )}
+          </>
         )}
       </div>
       <div className="relative flex items-center gap-0.5">
-        <AlertDialog open={hexDialogOpen} onOpenChange={setHexDialogOpen}>
+        <AlertDialog
+          open={hexDialogOpen}
+          onOpenChange={(open) => {
+            hexDialogRef.current = open;
+            setHexDialogOpen(open);
+            setTooltip(open ? "Grid settings" : null);
+          }}
+        >
           <AlertDialogTrigger asChild>
             <button
               className={cn(
@@ -122,7 +143,8 @@ export function Footer({
                   gridDivisions > 0 &&
                   "bg-cyan-500/40 text-cyan-200",
               )}
-              title={HEX_TITLE[hexMode]}
+              onMouseEnter={() => setTooltip("Grid settings")}
+              onMouseLeave={clearTooltip}
             >
               <Hexagon className="w-4 h-4" />
             </button>
@@ -187,7 +209,8 @@ export function Footer({
             onSymmetryChange(SYM_CYCLE[(i + 1) % SYM_CYCLE.length]);
           }}
           disabled={gridDivisions === 0 || hexMode === "off"}
-          title={SYM_TITLE[symmetry]}
+          onMouseEnter={() => setTooltip(SYM_LABEL[symmetry])}
+          onMouseLeave={clearTooltip}
         >
           <Aperture className="w-4 h-4" />
         </button>
@@ -201,10 +224,16 @@ export function Footer({
                 "bg-amber-500/25 text-amber-300",
             )}
             onClick={() => {
-              setFlowerPopoverOpen((v) => !v);
+              setFlowerPopoverOpen((v) => {
+                const next = !v;
+                flowerPopoverRef.current = next;
+                setTooltip(next ? "Edit nearby hexagons" : null);
+                return next;
+              });
             }}
             disabled={gridDivisions === 0 || hexMode === "off"}
-            title="edit nearby hexagons"
+            onMouseEnter={() => setTooltip("Edit nearby hexagons")}
+            onMouseLeave={clearTooltip}
           >
             <Expand className="w-4 h-4" />
           </button>
