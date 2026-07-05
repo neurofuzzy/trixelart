@@ -421,6 +421,21 @@ export default function TrixelGrid() {
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
+  const onDeletePaletteItem = useCallback(
+    (snap: SelectionSnapshot) => {
+      setSelections((prev) => {
+        const next = prev.filter((s) => s.id !== snap.id);
+        if (snap.id === activeSelection?.id && next.length > 0) {
+          setActiveSelection(next[0]);
+        } else if (snap.id === activeSelection?.id) {
+          setActiveSelection(null);
+        }
+        return next;
+      });
+    },
+    [activeSelection],
+  );
+
   const onCenterView = useCallback(() => setView({ x: 0, y: 0, zoom: 1 }), []);
 
   useEffect(() => {
@@ -505,6 +520,7 @@ export default function TrixelGrid() {
             onRotate={onRotateSelection}
             hasSelection={selectedHex !== null}
             onPointerEnter={() => setHoveredTri(null)}
+            onDelete={onDeletePaletteItem}
           />
         ) : (
           <ColorPalette

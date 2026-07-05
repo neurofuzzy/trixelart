@@ -1,9 +1,20 @@
 "use client";
 
+import { useState, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { SIDE, H } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { ChevronUp, ChevronDown, RotateCw } from "lucide-react";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 
@@ -11,54 +22,92 @@ function SelectionSwatch({
   snap,
   active,
   onClick,
+  onDelete,
 }: {
   snap: SelectionSnapshot;
   active: boolean;
   onClick: () => void;
+  onDelete: (snap: SelectionSnapshot) => void;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startPress = useCallback(() => {
+    timerRef.current = setTimeout(() => setConfirmOpen(true), 500);
+  }, []);
+
+  const cancelPress = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
   const s = snap.N * SIDE;
   const pad = 4;
   const viewBox = `${-s - pad} ${-s - pad} ${2 * s + 2 * pad} ${2 * s + 2 * pad}`;
   const tris = snap.trixels;
 
   return (
-    <button
-      onClick={onClick}
-      title="Stamp from this selection"
-      className={cn(
-        "w-8 h-8 rounded-full border-2 transition-all hover:scale-110 overflow-hidden p-0 bg-background",
-        active
-          ? "border-white scale-125 shadow-lg"
-          : "border-white/10 opacity-70",
-      )}
-    >
-      <svg viewBox={viewBox} className="w-full h-full block" preserveAspectRatio="xMidYMid meet">
-        {tris.map((t, i) => {
-          const q = t.dq;
-          const r = t.dr;
-          const bx = q * SIDE + (r * SIDE) / 2;
-          const by = r * H;
-          if (t.type === "up") {
+    <>
+      <button
+        onClick={onClick}
+        onPointerDown={startPress}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onContextMenu={(e) => e.preventDefault()}
+        title="Stamp from this selection"
+        className={cn(
+          "w-8 h-8 rounded-full border-2 transition-all hover:scale-110 overflow-hidden p-0 bg-background",
+          active
+            ? "border-white scale-125 shadow-lg"
+            : "border-white/10 opacity-70",
+        )}
+      >
+        <svg viewBox={viewBox} className="w-full h-full block" preserveAspectRatio="xMidYMid meet">
+          {tris.map((t, i) => {
+            const q = t.dq;
+            const r = t.dr;
+            const bx = q * SIDE + (r * SIDE) / 2;
+            const by = r * H;
+            if (t.type === "up") {
+              const [a, b, c] = [
+                [bx, by],
+                [bx + SIDE, by],
+                [bx + SIDE / 2, by + H],
+              ];
+              return (
+                <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
+              );
+            }
             const [a, b, c] = [
-              [bx, by],
-              [bx + SIDE, by],
               [bx + SIDE / 2, by + H],
+              [bx + SIDE * 1.5, by + H],
+              [bx + SIDE, by],
             ];
             return (
               <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
             );
-          }
-          const [a, b, c] = [
-            [bx + SIDE / 2, by + H],
-            [bx + SIDE * 1.5, by + H],
-            [bx + SIDE, by],
-          ];
-          return (
-            <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
-          );
-        })}
-      </svg>
-    </button>
+          })}
+        </svg>
+      </button>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this pattern?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the pattern from the palette.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => onDelete(snap)}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -71,6 +120,7 @@ export function SelectionPalette({
   onRotate,
   hasSelection,
   onPointerEnter,
+  onDelete,
 }: {
   selections: SelectionSnapshot[];
   activeSelectionId: string | null;
@@ -80,6 +130,7 @@ export function SelectionPalette({
   onRotate: () => void;
   hasSelection: boolean;
   onPointerEnter: () => void;
+  onDelete: (snap: SelectionSnapshot) => void;
 }) {
   if (selections.length === 0) return null;
 
@@ -98,6 +149,7 @@ export function SelectionPalette({
           snap={s}
           active={s.id === activeSelectionId}
           onClick={() => onSelect(s)}
+          onDelete={onDelete}
         />
       ))}
       <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
