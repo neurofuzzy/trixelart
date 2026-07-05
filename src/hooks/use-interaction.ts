@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { SIDE, H, worldToTri, triToString, getTrianglesOnLine, triCenter, type TriKey } from "@/lib/grid-math";
+import { SIDE, H, worldToTri, triToString, stringToTri, getTrianglesOnLine, triCenter, type TriKey } from "@/lib/grid-math";
 import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, hexCenterTriAxial, captureHexSnapshot, type Symmetry, type SelectionSnapshot } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 import { encodeColor, resolveColor } from "@/lib/constants";
@@ -9,10 +9,16 @@ import { encodeColor, resolveColor } from "@/lib/constants";
 interface InteractionState {
   isPainting: boolean;
   isPanning: boolean;
+  isViewPanning: boolean;
   hasMoved: boolean;
   startPos: { x: number; y: number } | null;
   lastPos: { x: number; y: number } | null;
   lastPaintedWorld: { x: number; y: number } | null;
+  moveStartWorld: { x: number; y: number } | null;
+  moveStartView: { x: number; y: number } | null;
+  moveDq: number;
+  moveDr: number;
+  moveOriginPainted: Record<string, string> | null;
 }
 
 export function useInteraction({
@@ -60,10 +66,16 @@ export function useInteraction({
   const interaction = useRef<InteractionState>({
     isPainting: false,
     isPanning: false,
+    isViewPanning: false,
     hasMoved: false,
     startPos: null,
     lastPos: null,
     lastPaintedWorld: null,
+    moveStartWorld: null,
+    moveStartView: null,
+    moveDq: 0,
+    moveDr: 0,
+    moveOriginPainted: null,
   });
 
   const onCommitRef = useRef(onCommit);
@@ -164,6 +176,7 @@ export function useInteraction({
     isTwoFinger.current = true;
     interaction.current.isPainting = false;
     interaction.current.isPanning = false;
+    interaction.current.isViewPanning = false;
 
     const t1 = e.touches[0];
     const t2 = e.touches[1];
@@ -249,14 +262,36 @@ export function useInteraction({
       const isRightClick = e.button === 2 || e.ctrlKey;
       const pos = getRelativePointer(e);
 
-      if ((isRightClick && tool !== "stamp") || tool === "pan") {
+      if (isRightClick && tool !== "stamp") {
         interaction.current = {
           isPainting: false,
-          isPanning: true,
+          isPanning: false,
+          isViewPanning: true,
           hasMoved: false,
           startPos: { x: e.clientX, y: e.clientY },
           lastPos: { x: e.clientX, y: e.clientY },
           lastPaintedWorld: null,
+          moveStartWorld: null,
+          moveOriginPainted: null,
+          moveStartView: null,
+          moveDq: 0,
+          moveDr: 0,
+        };
+      } else if (tool === "pan") {
+        const world = screenToWorld(pos.x, pos.y);
+        interaction.current = {
+          isPainting: false,
+          isPanning: true,
+          isViewPanning: false,
+          hasMoved: false,
+          startPos: { x: e.clientX, y: e.clientY },
+          lastPos: { x: e.clientX, y: e.clientY },
+          lastPaintedWorld: null,
+          moveStartWorld: { x: world.x, y: world.y },
+          moveStartView: { x: viewRef.current.x, y: viewRef.current.y },
+          moveDq: 0,
+          moveDr: 0,
+          moveOriginPainted: { ...paintedRef.current },
         };
       } else if (tool === "select") {
         const N = gridDivisionsRef.current;
@@ -279,10 +314,16 @@ export function useInteraction({
         interaction.current = {
           isPainting: false,
           isPanning: false,
+          isViewPanning: false,
           hasMoved: false,
           startPos: null,
           lastPos: null,
           lastPaintedWorld: null,
+          moveStartWorld: null,
+          moveOriginPainted: null,
+          moveStartView: null,
+          moveDq: 0,
+          moveDr: 0,
         };
       } else if (tool === "stamp") {
         const N = gridDivisionsRef.current;
@@ -318,10 +359,16 @@ export function useInteraction({
         interaction.current = {
           isPainting: true,
           isPanning: false,
+          isViewPanning: false,
           hasMoved: false,
           startPos: null,
           lastPos: null,
           lastPaintedWorld: null,
+          moveStartWorld: null,
+          moveOriginPainted: null,
+          moveStartView: null,
+          moveDq: 0,
+          moveDr: 0,
         };
       } else if ((tool === "paint" || tool === "erase") && e.shiftKey) {
         const world = screenToWorld(pos.x, pos.y);
@@ -390,10 +437,16 @@ export function useInteraction({
         interaction.current = {
           isPainting: true,
           isPanning: false,
+          isViewPanning: false,
           hasMoved: false,
           startPos: null,
           lastPos: null,
           lastPaintedWorld: null,
+          moveStartWorld: null,
+          moveOriginPainted: null,
+          moveStartView: null,
+          moveDq: 0,
+          moveDr: 0,
         };
       } else {
         const world = screenToWorld(pos.x, pos.y);
@@ -401,10 +454,16 @@ export function useInteraction({
         interaction.current = {
           isPainting: true,
           isPanning: false,
+          isViewPanning: false,
           hasMoved: false,
           startPos: { x: e.clientX, y: e.clientY },
           lastPos: null,
           lastPaintedWorld: { x: world.x, y: world.y },
+          moveStartWorld: null,
+          moveOriginPainted: null,
+          moveStartView: null,
+          moveDq: 0,
+          moveDr: 0,
         };
 
         const tri = worldToTri(world.x, world.y);
@@ -457,7 +516,7 @@ export function useInteraction({
       const tri = worldToTri(world.x, world.y);
       setHoveredTri(tri);
 
-      if (interaction.current.isPanning && interaction.current.lastPos) {
+      if (interaction.current.isViewPanning && interaction.current.lastPos) {
         const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
         const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
 
@@ -469,6 +528,24 @@ export function useInteraction({
 
         setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
         interaction.current.lastPos = { x: e.clientX, y: e.clientY };
+      } else if (interaction.current.isPanning && interaction.current.moveStartWorld) {
+        const ms = interaction.current.moveStartWorld;
+        const dr = Math.round((world.y - ms.y) / H);
+        const dq = Math.round((world.x - ms.x) / SIDE - dr * 0.5);
+
+        interaction.current.moveDq = dq;
+        interaction.current.moveDr = dr;
+
+        if (dq !== 0 || dr !== 0) interaction.current.hasMoved = true;
+
+        if (interaction.current.hasMoved && interaction.current.moveOriginPainted) {
+          const next: Record<string, string> = {};
+          for (const [key, value] of Object.entries(interaction.current.moveOriginPainted)) {
+            const t = stringToTri(key);
+            next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] = value;
+          }
+          setPainted(next);
+        }
       } else if (interaction.current.isPainting) {
         const lastWorld = interaction.current.lastPaintedWorld;
         if (!lastWorld) return;
@@ -509,7 +586,7 @@ export function useInteraction({
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (isTwoFinger.current) return;
-      if (interaction.current.isPanning && !interaction.current.hasMoved) {
+      if (interaction.current.isViewPanning && !interaction.current.hasMoved) {
         const pos = getRelativePointer(e);
         const world = screenToWorld(pos.x, pos.y);
         const key = triToString(worldToTri(world.x, world.y));
@@ -520,6 +597,41 @@ export function useInteraction({
         }
       }
 
+      if (interaction.current.isPanning) {
+        if (interaction.current.hasMoved) {
+          onCommitRef.current();
+          const sv = interaction.current.moveStartView;
+          if (sv) {
+            const dq = interaction.current.moveDq;
+            const dr = interaction.current.moveDr;
+            const dwx = (dq + dr * 0.5) * SIDE;
+            const dwy = dr * H;
+            setView({ x: sv.x - dwx, y: sv.y - dwy, zoom: viewRef.current.zoom });
+          }
+          lastPaintTriRef.current = null;
+          lastEditToolRef.current = null;
+        } else {
+          const pos = getRelativePointer(e);
+          const world = screenToWorld(pos.x, pos.y);
+          const tri = worldToTri(world.x, world.y);
+          const dq = -tri.q;
+          const dr = -tri.r;
+          if (dq !== 0 || dr !== 0) {
+            const next: Record<string, string> = {};
+            for (const [key, value] of Object.entries(painted)) {
+              const t = stringToTri(key);
+              next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] = value;
+            }
+            const dwx = (dq + dr * 0.5) * SIDE;
+            const dwy = dr * H;
+            setView((v) => ({ ...v, x: v.x - dwx, y: v.y - dwy }));
+            paintedRef.current = next;
+            setPainted(next);
+            onCommitRef.current();
+          }
+        }
+      }
+
       if (interaction.current.isPainting) {
         onCommitRef.current();
       }
@@ -527,14 +639,20 @@ export function useInteraction({
       interaction.current = {
         isPainting: false,
         isPanning: false,
+        isViewPanning: false,
         hasMoved: false,
         startPos: null,
         lastPos: null,
         lastPaintedWorld: null,
+        moveStartWorld: null,
+        moveStartView: null,
+        moveDq: 0,
+        moveDr: 0,
+        moveOriginPainted: null,
       };
       e.currentTarget.releasePointerCapture(e.pointerId);
     },
-    [painted, getRelativePointer, screenToWorld, setColor, setTool],
+    [painted, getRelativePointer, screenToWorld, setColor, setTool, setView],
   );
 
   const onWheel = useCallback(
