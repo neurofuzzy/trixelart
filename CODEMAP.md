@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-03 22:39:19
-# Files: 21
-# Lines of code: ~2665
+# Last updated: 2026-07-05 18:06:33
+# Files: 22
+# Lines of code: ~3588
 ```
 - **/app**
   - **/lib**
@@ -27,10 +27,12 @@
     - Function: `Footer`
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
+  - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
+    - Function: `PalettePicker`
   - [SelectionPalette.tsx](../src/components/SelectionPalette.tsx)
     - Function: `SelectionPalette`
-  - [SymmetryPanel.tsx](../src/components/SymmetryPanel.tsx)
-    - Function: `SymmetryPanel`
+  - [StampPalette.tsx](../src/components/StampPalette.tsx)
+    - Function: `StampPalette`
   - [Toolbar.tsx](../src/components/Toolbar.tsx)
     - Function: `Toolbar`
   - [TrixelGrid.tsx](../src/components/TrixelGrid.tsx)
@@ -39,6 +41,7 @@
   - [use-canvas-size.ts](../src/hooks/use-canvas-size.ts)
     - Function: `useCanvasSize` - Reliable hook for measuring a container element...
   - [use-history.ts](../src/hooks/use-history.ts)
+    - Interface: `ProjectSnapshot`
     - Function: `useHistory`
   - [use-interaction.ts](../src/hooks/use-interaction.ts)
     - Function: `useInteraction`
@@ -52,6 +55,11 @@
     - Variable: `PINCH_SENSITIVITY`
   - [constants.ts](../src/lib/constants.ts)
     - Variable: `GRAYSCALE_PALETTE`
+    - Variable: `PALETTES`
+    - Function: `encodeColor`
+    - Function: `decodeColor`
+    - Function: `resolveColor`
+    - Function: `remapGrid`
   - [grid-math.ts](../src/lib/grid-math.ts) - Triangular Grid Mathematics
     - Variable: `SIDE` - Triangular Grid Mathematics Uses a coordinate s...
     - Variable: `H`
@@ -63,6 +71,7 @@
     - Function: `getTriABC` - Returns the analytical coordinates for a triang...
     - Function: `getTrianglesOnLine` - Returns all triangles intersected by a line seg...
     - Function: `getTriVertices` - Returns the three vertex coordinates for a tria...
+    - Function: `triCenter` - Returns the world-space center of a triangle (c...
     - Function: `getTriPath` - Generates the SVG path string for a specific tr...
   - [hex-flower.ts](../src/lib/hex-flower.ts)
     - Function: `triToHex` - Hex coordinates of the home hex containing trix...
@@ -77,5 +86,7 @@
     - Function: `enumerateHexTrixels` - Enumerates all trixels whose centroid lies insi...
     - Function: `hexTranslation` - Tri-axial translation (dq, dr) that maps trixel...
     - Function: `paintTargets` - Expands a single painted trixel into the full s...
+    - Function: `rotateHexCW`
+    - Function: `remapHex`
   - [utils.ts](../src/lib/utils.ts)
     - Function: `cn`

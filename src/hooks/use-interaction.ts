@@ -120,6 +120,8 @@ export function useInteraction({
   activeSelectionRef.current = activeSelection;
   const paintedRef = useRef(painted);
   paintedRef.current = painted;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
 
   const lastPaintTriRef = useRef<TriKey | null>(null);
   const lastEditToolRef = useRef<"paint" | "erase" | null>(null);
@@ -294,7 +296,7 @@ export function useInteraction({
       const isRightClick = e.button === 2 || e.ctrlKey;
       const pos = getRelativePointer(e);
 
-      if (isRightClick && tool !== "stamp") {
+      if (isRightClick) {
         interaction.current = {
           isPainting: false,
           isPanning: false,
@@ -638,13 +640,39 @@ export function useInteraction({
     (e: React.PointerEvent) => {
       if (isTwoFinger.current) return;
       if (interaction.current.isViewPanning && !interaction.current.hasMoved) {
-        const pos = getRelativePointer(e);
-        const world = screenToWorld(pos.x, pos.y);
-        const key = triToString(worldToTri(world.x, world.y));
-        const pickedColor = painted[key];
-        if (pickedColor) {
-          setColor(pickedColor);
-          setTool("paint");
+        if (toolRef.current === "stamp") {
+          const pos = getRelativePointer(e);
+          const world = screenToWorld(pos.x, pos.y);
+          const tri = worldToTri(world.x, world.y);
+          const snap = activeSelectionRef.current;
+          const N = gridDivisionsRef.current;
+          if (snap && N === snap.N) {
+            const destHex = triToHex(tri.q, tri.r, tri.type, N);
+            const { qc, rc } = hexCenterTriAxial(destHex.c, destHex.k, N);
+            setPainted((prev) => {
+              const next = { ...prev };
+              let changed = false;
+              for (const t of snap.trixels) {
+                const key = triToString({
+                  q: qc + t.dq,
+                  r: rc + t.dr,
+                  type: t.type,
+                });
+                if (key in next) { delete next[key]; changed = true; }
+              }
+              return changed ? next : prev;
+            });
+            onCommitRef.current();
+          }
+        } else {
+          const pos = getRelativePointer(e);
+          const world = screenToWorld(pos.x, pos.y);
+          const key = triToString(worldToTri(world.x, world.y));
+          const pickedColor = painted[key];
+          if (pickedColor) {
+            setColor(pickedColor);
+            setTool("paint");
+          }
         }
       }
 

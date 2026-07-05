@@ -9,6 +9,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { GridCanvas } from "@/components/GridCanvas";
 import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
+import { StampPalette } from "@/components/StampPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
@@ -521,15 +522,19 @@ export default function TrixelGrid() {
           activeSelection={activeSelection}
         />
 
-        {tool === "select" || tool === "stamp" ? (
+        {tool === "select" ? (
           <SelectionPalette
-            selections={selections}
-            activeSelectionId={activeSelection?.id ?? null}
-            onSelect={(s) => setActiveSelection(s)}
             onShiftUp={onShiftUp}
             onShiftDown={onShiftDown}
             onRotate={onRotateSelection}
             hasSelection={selectedHex !== null}
+            onPointerEnter={() => setHoveredTri(null)}
+          />
+        ) : tool === "stamp" ? (
+          <StampPalette
+            selections={selections}
+            activeSelectionId={activeSelection?.id ?? null}
+            onSelect={(s) => setActiveSelection(s)}
             onPointerEnter={() => setHoveredTri(null)}
             onDelete={onDeletePaletteItem}
           />
