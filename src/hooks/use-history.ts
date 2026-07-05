@@ -1,6 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+
+export interface ProjectSnapshot {
+  painted: Record<string, string>;
+  gridDivisions: number;
+  hexMode: string;
+  flowerRadius: number;
+  symmetry: string;
+  selections: unknown[];
+  lastPaintTri: string | null;
+}
 
 const STORAGE_KEY = "symmetria-save";
 const MAX_HISTORY = 50;
@@ -8,34 +18,61 @@ const MAX_HISTORY = 50;
 export function useHistory() {
   const [mounted, setMounted] = useState(false);
   const [painted, setPainted] = useState<Record<string, string>>({});
-  const [history, setHistory] = useState<Record<string, string>[]>([]);
+  const [history, setHistory] = useState<ProjectSnapshot[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
 
+  const restoreRef = useRef<(s: ProjectSnapshot) => void>(() => {});
+
+  const registerRestore = useCallback(
+    (fn: (s: ProjectSnapshot) => void) => { restoreRef.current = fn; },
+    [],
+  );
+
   useEffect(() => {
-    setMounted(true);
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
         const data = JSON.parse(saved);
-        setPainted(data);
-        setHistory([data]);
-        setHistoryIdx(0);
-      } catch (e) {
-        console.error("Failed to load save", e);
+        if (typeof data === "object" && data !== null) {
+          if ("painted" in data && typeof data.painted === "object") {
+            const snap: ProjectSnapshot = {
+              painted: data.painted,
+              gridDivisions: data.gridDivisions ?? 1,
+              hexMode: typeof data.hexMode === "boolean"
+                ? (data.hexMode ? "outlines" : "off")
+                : (data.hexMode ?? "off"),
+              flowerRadius: data.flowerRadius ?? 0,
+              symmetry: data.symmetry ?? "off",
+              selections: Array.isArray(data.selections) ? data.selections : [],
+              lastPaintTri: typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
+            };
+            setPainted(snap.painted);
+            setHistory([snap]);
+            setHistoryIdx(0);
+          } else {
+            setPainted(data);
+            setHistory([{
+              painted: data,
+              gridDivisions: 1,
+              hexMode: "off",
+              flowerRadius: 0,
+              symmetry: "off",
+              selections: [],
+              lastPaintTri: null,
+            }]);
+            setHistoryIdx(0);
+          }
+        }
       }
-    }
+    } catch { /* ignore parse errors */ }
+    setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (mounted)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(painted));
-  }, [painted, mounted]);
-
   const pushHistory = useCallback(
-    (newState: Record<string, string>) => {
+    (snap: ProjectSnapshot) => {
       setHistory((prev) => {
         const next = prev.slice(0, historyIdx + 1);
-        next.push({ ...newState });
+        next.push({ ...snap });
         if (next.length > MAX_HISTORY) next.shift();
         return next;
       });
@@ -45,24 +82,20 @@ export function useHistory() {
   );
 
   const handleUndo = useCallback(() => {
-    if (historyIdx > 0) {
-      setPainted(history[historyIdx - 1]);
-      setHistoryIdx(historyIdx - 1);
-    }
+    if (historyIdx <= 0) return;
+    const target = history[historyIdx - 1];
+    setPainted(target.painted);
+    restoreRef.current(target);
+    setHistoryIdx((i) => i - 1);
   }, [history, historyIdx]);
 
   const handleRedo = useCallback(() => {
-    if (historyIdx < history.length - 1) {
-      setPainted(history[historyIdx + 1]);
-      setHistoryIdx(historyIdx + 1);
-    }
+    if (historyIdx >= history.length - 1) return;
+    const target = history[historyIdx + 1];
+    setPainted(target.painted);
+    restoreRef.current(target);
+    setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
-
-  const clearCanvas = useCallback(() => {
-    const empty = {};
-    setPainted(empty);
-    pushHistory(empty);
-  }, [pushHistory]);
 
   return {
     mounted,
@@ -73,6 +106,6 @@ export function useHistory() {
     pushHistory,
     handleUndo,
     handleRedo,
-    clearCanvas,
+    registerRestore,
   };
 }

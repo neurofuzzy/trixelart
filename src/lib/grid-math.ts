@@ -122,6 +122,17 @@ export function getTriVertices(
   }
 }
 
+/** Returns the world-space center of a triangle (centroid) */
+export function triCenter(q: number, r: number, type: TriType): { x: number; y: number } {
+  const bx = q * SIDE + r * (SIDE / 2);
+  const by = r * H;
+  if (type === 'up') {
+    return { x: bx + SIDE / 2, y: by + H / 3 };
+  } else {
+    return { x: bx + SIDE, y: by + 2 * H / 3 };
+  }
+}
+
 /** Generates the SVG path string for a specific triangle */
 export const getTriPath = (q: number, r: number, type: TriType) => {
   const [a, b, c] = getTriVertices(q, r, type);

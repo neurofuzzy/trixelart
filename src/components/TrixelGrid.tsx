@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
-import { useHistory } from "@/hooks/use-history";
+import { useHistory, type ProjectSnapshot } from "@/hooks/use-history";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
@@ -11,12 +11,15 @@ import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
+import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 import { rotateHexCW, remapHex } from "@/lib/hex-flower";
 
+const STORAGE_KEY = "symmetria-save";
+
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
-  const { mounted, painted, setPainted, pushHistory, handleUndo, handleRedo, clearCanvas, history, historyIdx } = useHistory();
+  const { mounted, painted, setPainted, pushHistory, handleUndo, handleRedo, history, historyIdx, registerRestore } = useHistory();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -40,24 +43,78 @@ export default function TrixelGrid() {
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
   const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
 
+  const paintedRef = useRef(painted);
+  paintedRef.current = painted;
+  const gridDivisionsRef = useRef(gridDivisions);
+  gridDivisionsRef.current = gridDivisions;
+  const hexModeRef = useRef(hexMode);
+  hexModeRef.current = hexMode;
+  const flowerRadiusRef = useRef(flowerRadius);
+  flowerRadiusRef.current = flowerRadius;
+  const symmetryRef = useRef(symmetry);
+  symmetryRef.current = symmetry;
+  const selectionsRef = useRef(selections);
+  selectionsRef.current = selections;
+
+  const lastPaintTriBridgeRef = useRef<React.MutableRefObject<TriKey | null> | null>(null);
+
+  const buildSnapshot = useCallback((): ProjectSnapshot => ({
+    painted: paintedRef.current,
+    gridDivisions: gridDivisionsRef.current,
+    hexMode: hexModeRef.current,
+    flowerRadius: flowerRadiusRef.current,
+    symmetry: symmetryRef.current,
+    selections: selectionsRef.current,
+    lastPaintTri: lastPaintTriBridgeRef.current?.current
+      ? triToString(lastPaintTriBridgeRef.current.current)
+      : null,
+  }), []);
+
+  const onCommit = useCallback(() => {
+    pushHistory(buildSnapshot());
+  }, [pushHistory, buildSnapshot]);
+
+  useEffect(() => {
+    registerRestore((snap: ProjectSnapshot) => {
+      if (typeof snap.gridDivisions === "number") setGridDivisions(snap.gridDivisions);
+      if (typeof snap.hexMode === "string") setHexMode(snap.hexMode as HexMode);
+      if (typeof snap.flowerRadius === "number") setFlowerRadius(snap.flowerRadius);
+      if (typeof snap.symmetry === "string") setSymmetry(snap.symmetry as Symmetry);
+      if (Array.isArray(snap.selections)) {
+        setSelections(snap.selections as SelectionSnapshot[]);
+        const head = snap.selections[0] as SelectionSnapshot | undefined;
+        if (head?.trixels && head.N) setActiveSelection(head);
+      }
+      if (lastPaintTriBridgeRef.current) {
+        lastPaintTriBridgeRef.current.current =
+          typeof snap.lastPaintTri === "string"
+            ? stringToTri(snap.lastPaintTri)
+            : null;
+      }
+    });
+  }, [registerRestore]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSnapshot()));
+    } catch { /* ignore */ }
+  }, [buildSnapshot, painted, gridDivisions, hexMode, flowerRadius, symmetry, selections]);
+
   const SETTINGS_KEY = "symmetria-settings";
+  const SELECTIONS_KEY = "symmetria-selections";
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(SETTINGS_KEY);
       if (saved) {
         const data = JSON.parse(saved);
-        if (typeof data.gridDivisions === "number") {
-          setGridDivisions(data.gridDivisions);
-        }
+        if (typeof data.gridDivisions === "number") setGridDivisions(data.gridDivisions);
         if (typeof data.hexMode === "boolean") {
           setHexMode(data.hexMode ? "outlines" : "off");
         } else if (typeof data.hexMode === "string") {
           setHexMode(data.hexMode as HexMode);
         }
-        if (typeof data.flowerRadius === "number") {
-          setFlowerRadius(data.flowerRadius);
-        }
+        if (typeof data.flowerRadius === "number") setFlowerRadius(data.flowerRadius);
         if (typeof data.symmetry60 === "boolean") {
           setSymmetry(data.symmetry60 ? "sym60" : "off");
         } else if (typeof data.symmetry === "string") {
@@ -71,9 +128,6 @@ export default function TrixelGrid() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry }));
   }, [gridDivisions, hexMode, flowerRadius, symmetry]);
 
-  // Selection snapshots persist with the project (separate key so existing
-  // `symmetria-save` imports/exports stay backward-compatible).
-  const SELECTIONS_KEY = "symmetria-selections";
   useEffect(() => {
     try {
       const saved = localStorage.getItem(SELECTIONS_KEY);
@@ -81,8 +135,6 @@ export default function TrixelGrid() {
         const data = JSON.parse(saved);
         if (Array.isArray(data)) {
           setSelections(data);
-          // Restore the most recently captured snapshot as the active stamp so
-          // the stamp tool has something to fire with immediately after load.
           const ok = data[0] && Array.isArray(data[0].trixels) && typeof data[0].N === "number";
           if (ok) setActiveSelection(data[0]);
         }
@@ -100,11 +152,6 @@ export default function TrixelGrid() {
     return () => clearTimeout(timer);
   }, [updateSize]);
 
-  useKeyboardShortcuts(handleUndo, handleRedo, setTool, (c) => {
-    setColorIdx(c);
-    setTool("paint");
-  }, activePalette.length);
-
   const {
     hoverTargets,
     setHoveredTri,
@@ -116,6 +163,7 @@ export default function TrixelGrid() {
     onTouchStart,
     onTouchMove,
     onTouchEnd,
+    lastPaintTriRef,
   } = useInteraction({
     size,
     view,
@@ -134,7 +182,7 @@ export default function TrixelGrid() {
     },
     painted,
     setPainted,
-    pushHistory,
+    onCommit,
     containerRef,
     flowerRadius: effectiveFlowerRadius,
     gridDivisions,
@@ -146,14 +194,24 @@ export default function TrixelGrid() {
     setSelections,
   });
 
+  lastPaintTriBridgeRef.current = lastPaintTriRef;
+
+  const onUndo = useCallback(() => {
+    handleUndo();
+  }, [handleUndo]);
+
+  const onRedo = useCallback(() => {
+    handleRedo();
+  }, [handleRedo]);
+
+  useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
+    setColorIdx(c);
+    setTool("paint");
+  }, activePalette.length);
+
   const handleExport = useCallback(() => {
-    const project = {
-      version: 1,
-      painted,
-      settings: { gridDivisions, hexMode, flowerRadius, symmetry },
-      selections,
-    };
-    const dataStr = JSON.stringify(project, null, 2);
+    const project = buildSnapshot();
+    const dataStr = JSON.stringify({ ...project, version: 1 }, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -163,7 +221,7 @@ export default function TrixelGrid() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [painted, gridDivisions, hexMode, flowerRadius, symmetry, selections]);
+  }, [buildSnapshot]);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -181,11 +239,20 @@ export default function TrixelGrid() {
           const data = JSON.parse(content);
           if (typeof data !== "object" || data === null) return;
 
-          // New format: { version, painted, settings, selections }
           if (data.version === 1 || data.painted) {
-            const grid = data.painted || {};
-            setPainted(grid);
-            pushHistory(grid);
+            const snap: ProjectSnapshot = {
+              painted: data.painted || {},
+              gridDivisions: data.gridDivisions ?? 1,
+              hexMode: typeof data.hexMode === "boolean"
+                ? (data.hexMode ? "outlines" : "off")
+                : (data.hexMode ?? "off"),
+              flowerRadius: data.flowerRadius ?? 0,
+              symmetry: data.symmetry ?? "off",
+              selections: Array.isArray(data.selections) ? data.selections : [],
+              lastPaintTri: typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
+            };
+            setPainted(snap.painted);
+            pushHistory(snap);
 
             if (data.settings) {
               const s = data.settings;
@@ -209,9 +276,17 @@ export default function TrixelGrid() {
               if (ok) setActiveSelection(data.selections[0]);
             }
           } else {
-            // Legacy format: plain painted grid object
+            const snap: ProjectSnapshot = {
+              painted: data,
+              gridDivisions: 1,
+              hexMode: "off",
+              flowerRadius: 0,
+              symmetry: "off",
+              selections: [],
+              lastPaintTri: null,
+            };
             setPainted(data);
-            pushHistory(data);
+            pushHistory(snap);
           }
         } catch (err) {
           console.error("Failed to import", err);
@@ -229,6 +304,22 @@ export default function TrixelGrid() {
     setTool("paint");
   }, [activePalette]);
 
+  const handleClear = useCallback(() => {
+    const snap: ProjectSnapshot = {
+      painted: {},
+      gridDivisions: gridDivisionsRef.current,
+      hexMode: hexModeRef.current,
+      flowerRadius: flowerRadiusRef.current,
+      symmetry: symmetryRef.current,
+      selections: selectionsRef.current,
+      lastPaintTri: lastPaintTriBridgeRef.current?.current
+        ? triToString(lastPaintTriBridgeRef.current.current)
+        : null,
+    };
+    setPainted({});
+    pushHistory(snap);
+  }, [pushHistory]);
+
   const onShiftUp = useCallback(() => {
     setPainted((prev) => {
       let next: Record<string, string>;
@@ -237,7 +328,19 @@ export default function TrixelGrid() {
       } else {
         next = remapGrid(prev, activePaletteIdx, 1);
       }
-      if (next !== prev) pushHistory(next);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
       return next;
     });
   }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
@@ -250,7 +353,19 @@ export default function TrixelGrid() {
       } else {
         next = remapGrid(prev, activePaletteIdx, -1);
       }
-      if (next !== prev) pushHistory(next);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
       return next;
     });
   }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
@@ -259,7 +374,19 @@ export default function TrixelGrid() {
     if (!selectedHex || gridDivisions <= 0) return;
     setPainted((prev) => {
       const next = rotateHexCW(prev, selectedHex.c, selectedHex.k, gridDivisions);
-      if (next !== prev) pushHistory(next);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
       return next;
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
@@ -269,7 +396,6 @@ export default function TrixelGrid() {
   useEffect(() => {
     const onChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
-      // Wait one frame for the new layout, then re-measure.
       requestAnimationFrame(() => requestAnimationFrame(updateSize));
     };
     document.addEventListener("fullscreenchange", onChange);
@@ -303,7 +429,7 @@ export default function TrixelGrid() {
         onToolChange={setTool}
         onExport={handleExport}
         onImportClick={handleImportClick}
-        onClear={clearCanvas}
+        onClear={handleClear}
         onCenterView={onCenterView}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
@@ -377,8 +503,8 @@ export default function TrixelGrid() {
         onFlowerRadiusChange={setFlowerRadius}
         symmetry={symmetry}
         onSymmetryChange={setSymmetry}
-        handleUndo={handleUndo}
-        handleRedo={handleRedo}
+        handleUndo={onUndo}
+        handleRedo={onRedo}
         historyIdx={historyIdx}
         historyLength={history.length}
       />

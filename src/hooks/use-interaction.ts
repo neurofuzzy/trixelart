@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { worldToTri, triToString, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
+import { SIDE, H, worldToTri, triToString, getTrianglesOnLine, triCenter, type TriKey } from "@/lib/grid-math";
 import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, hexCenterTriAxial, captureHexSnapshot, type Symmetry, type SelectionSnapshot } from "@/lib/hex-flower";
 import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
 import { encodeColor, resolveColor } from "@/lib/constants";
@@ -25,7 +25,7 @@ export function useInteraction({
   setColor,
   painted,
   setPainted,
-  pushHistory,
+  onCommit,
   containerRef,
   flowerRadius,
   gridDivisions,
@@ -45,7 +45,7 @@ export function useInteraction({
   setColor: (color: string) => void;
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  pushHistory: (state: Record<string, string>) => void;
+  onCommit: () => void;
   containerRef: { current: HTMLDivElement | null };
   flowerRadius: number;
   gridDivisions: number;
@@ -65,6 +65,9 @@ export function useInteraction({
     lastPos: null,
     lastPaintedWorld: null,
   });
+
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
 
   // Mirrored refs so callbacks don't need dependency on view/size objects
   const viewRef = useRef(view);
@@ -105,6 +108,9 @@ export function useInteraction({
   activeSelectionRef.current = activeSelection;
   const paintedRef = useRef(painted);
   paintedRef.current = painted;
+
+  const lastPaintTriRef = useRef<TriKey | null>(null);
+  const lastEditToolRef = useRef<"paint" | "erase" | null>(null);
 
   // Ghost-preview targets: the hovered trixel + all its flower + symmetry
   // mirrors. Recomputed whenever the hover or any setting changes; rendered
@@ -253,16 +259,12 @@ export function useInteraction({
           lastPaintedWorld: null,
         };
       } else if (tool === "select") {
-        // Tap a trixel to select its enclosing hex AND capture a snapshot of
-        // the hex's painted trixels for re-use via the stamp palette.
         const N = gridDivisionsRef.current;
         const world = screenToWorld(pos.x, pos.y);
         const tri = worldToTri(world.x, world.y);
         if (N > 0) {
           const hex = triToHex(tri.q, tri.r, tri.type, N);
           setSelectedHex(hex);
-          // Snapshot the hex's currently-painted trixels. If the hex is
-          // empty, skip capturing (no point storing an empty stamp).
           const snap = captureHexSnapshot(paintedRef.current, hex.c, hex.k, N);
           if (snap.trixels.length > 0) {
             setSelections((prev) => {
@@ -283,9 +285,6 @@ export function useInteraction({
           lastPaintedWorld: null,
         };
       } else if (tool === "stamp") {
-        // Stamp the active selection's trixels into the hex under the cursor,
-        // aligned center-to-center. Right-click / Ctrl-click erases the
-        // target hex's footprint using the snapshot's local trixel offsets.
         const N = gridDivisionsRef.current;
         const world = screenToWorld(pos.x, pos.y);
         const tri = worldToTri(world.x, world.y);
@@ -314,11 +313,82 @@ export function useInteraction({
             }
             return changed ? next : prev;
           });
-          pushHistory(painted);
         }
 
         interaction.current = {
-          isPainting: false,
+          isPainting: true,
+          isPanning: false,
+          hasMoved: false,
+          startPos: null,
+          lastPos: null,
+          lastPaintedWorld: null,
+        };
+      } else if ((tool === "paint" || tool === "erase") && e.shiftKey) {
+        const world = screenToWorld(pos.x, pos.y);
+        const clickedTri = worldToTri(world.x, world.y);
+
+        if (lastEditToolRef.current !== null && lastEditToolRef.current !== tool) {
+          lastPaintTriRef.current = null;
+        }
+        lastEditToolRef.current = tool;
+
+        const prevTri = lastPaintTriRef.current;
+
+        if (prevTri) {
+          const origin = triCenter(prevTri.q, prevTri.r, prevTri.type);
+          const target = triCenter(clickedTri.q, clickedTri.r, clickedTri.type);
+
+          const axes = [
+            { dx: SIDE, dy: 0 },
+            { dx: SIDE / 2, dy: H },
+            { dx: -SIDE / 2, dy: H },
+          ];
+
+          let bestClosest: { x: number; y: number } | null = null;
+          let bestDist = Infinity;
+
+          for (const axis of axes) {
+            const dx = target.x - origin.x;
+            const dy = target.y - origin.y;
+            const dd = axis.dx * axis.dx + axis.dy * axis.dy;
+            const t = (dx * axis.dx + dy * axis.dy) / dd;
+            const px = origin.x + t * axis.dx;
+            const py = origin.y + t * axis.dy;
+            const dist = Math.hypot(px - target.x, py - target.y);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestClosest = { x: px, y: py };
+            }
+          }
+
+          if (bestClosest) {
+            const lineTris = getTrianglesOnLine(origin.x, origin.y, bestClosest.x, bestClosest.y);
+
+            if (lineTris.length > 0) {
+              lastPaintTriRef.current = lineTris[lineTris.length - 1];
+            }
+
+            setPainted((prev) => {
+              const next = { ...prev };
+              let changed = false;
+              const isErase = tool === "erase";
+              for (const lt of lineTris) {
+                const k = triToString(lt);
+                if (isErase) {
+                  if (k in next) { delete next[k]; changed = true; }
+                } else if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
+                  next[k] = color;
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
+          }
+
+        }
+
+        interaction.current = {
+          isPainting: true,
           isPanning: false,
           hasMoved: false,
           startPos: null,
@@ -338,6 +408,8 @@ export function useInteraction({
         };
 
         const tri = worldToTri(world.x, world.y);
+        lastPaintTriRef.current = tri;
+        lastEditToolRef.current = tool;
         const offsets = flowerOffsetsRef.current;
         const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
@@ -374,7 +446,7 @@ export function useInteraction({
       }
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [tool, color, getRelativePointer, screenToWorld, setPainted, setSelectedHex, painted, pushHistory],
+    [tool, color, getRelativePointer, screenToWorld, setPainted, setSelectedHex],
   );
 
   const onPointerMove = useCallback(
@@ -449,7 +521,7 @@ export function useInteraction({
       }
 
       if (interaction.current.isPainting) {
-        pushHistory(painted);
+        onCommitRef.current();
       }
 
       interaction.current = {
@@ -462,7 +534,7 @@ export function useInteraction({
       };
       e.currentTarget.releasePointerCapture(e.pointerId);
     },
-    [painted, getRelativePointer, screenToWorld, setColor, setTool, pushHistory],
+    [painted, getRelativePointer, screenToWorld, setColor, setTool],
   );
 
   const onWheel = useCallback(
@@ -488,5 +560,6 @@ export function useInteraction({
     onTouchStart,
     onTouchMove,
     onTouchEnd,
+    lastPaintTriRef,
   };
 }

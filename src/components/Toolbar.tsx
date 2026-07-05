@@ -1,6 +1,6 @@
 "use client";
 
-import { MousePointer2, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
+import { Pencil, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function Toolbar({
@@ -33,7 +33,7 @@ export function Toolbar({
           onClick={() => onToolChange("paint")}
           title="Paint (P)"
         >
-          <MousePointer2 className="w-4 h-4" />
+          <Pencil className="w-4 h-4" />
         </Button>
         <Button
           variant={tool === "erase" ? "default" : "ghost"}
