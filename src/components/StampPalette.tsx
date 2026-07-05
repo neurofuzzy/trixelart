@@ -21,11 +21,13 @@ function SelectionSwatch({
   active,
   onClick,
   onDelete,
+  gridRotation = 0,
 }: {
   snap: SelectionSnapshot;
   active: boolean;
   onClick: () => void;
   onDelete: (snap: SelectionSnapshot) => void;
+  gridRotation?: number;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -45,6 +47,8 @@ function SelectionSwatch({
   const pad = 4;
   const viewBox = `${-s - pad} ${-s - pad} ${2 * s + 2 * pad} ${2 * s + 2 * pad}`;
   const tris = snap.trixels;
+  // SVG rotate takes degrees; gridRotation arrives in radians.
+  const rotateDeg = (gridRotation * 180) / Math.PI;
 
   return (
     <>
@@ -63,30 +67,32 @@ function SelectionSwatch({
         )}
       >
         <svg viewBox={viewBox} className="w-full h-full block" preserveAspectRatio="xMidYMid meet">
-          {tris.map((t, i) => {
-            const q = t.dq;
-            const r = t.dr;
-            const bx = q * SIDE + (r * SIDE) / 2;
-            const by = r * H;
-            if (t.type === "up") {
+          <g transform={`rotate(${rotateDeg})`}>
+            {tris.map((t, i) => {
+              const q = t.dq;
+              const r = t.dr;
+              const bx = q * SIDE + (r * SIDE) / 2;
+              const by = r * H;
+              if (t.type === "up") {
+                const [a, b, c] = [
+                  [bx, by],
+                  [bx + SIDE, by],
+                  [bx + SIDE / 2, by + H],
+                ];
+                return (
+                  <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
+                );
+              }
               const [a, b, c] = [
-                [bx, by],
-                [bx + SIDE, by],
                 [bx + SIDE / 2, by + H],
+                [bx + SIDE * 1.5, by + H],
+                [bx + SIDE, by],
               ];
               return (
                 <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
               );
-            }
-            const [a, b, c] = [
-              [bx + SIDE / 2, by + H],
-              [bx + SIDE * 1.5, by + H],
-              [bx + SIDE, by],
-            ];
-            return (
-              <polygon key={i} points={`${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`} fill={resolveColor(t.color)} />
-            );
-          })}
+            })}
+          </g>
         </svg>
       </button>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -116,6 +122,7 @@ export function StampPalette({
   onPointerEnter,
   onDelete,
   onCapture,
+  gridRotation = 0,
 }: {
   selections: SelectionSnapshot[];
   activeSelectionId: string | null;
@@ -123,6 +130,7 @@ export function StampPalette({
   onPointerEnter: () => void;
   onDelete: (snap: SelectionSnapshot) => void;
   onCapture: () => void;
+  gridRotation?: number;
 }) {
   return (
     <div
@@ -140,6 +148,7 @@ export function StampPalette({
           active={s.id === activeSelectionId}
           onClick={() => onSelect(s)}
           onDelete={onDelete}
+          gridRotation={gridRotation}
         />
       ))}
       <button

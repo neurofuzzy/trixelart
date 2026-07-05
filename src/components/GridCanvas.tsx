@@ -20,6 +20,7 @@ export function GridCanvas({
   activeSelection,
   stampFlash,
   captureMode,
+  gridRotation = 0,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -34,6 +35,7 @@ export function GridCanvas({
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
   captureMode?: boolean;
+  gridRotation?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -68,23 +70,39 @@ export function GridCanvas({
 
     ctx.save();
 
+    // Forward canvas transform: screen = center + zoom * R(θ) * (world + view).
+    // The rotation θ lets us display a pointy-top hex grid by rotating the
+    // entire flat-top lattice 90°; all world-space math (tri-axial hex
+    // geometry, symmetry, flower) is unchanged.
     ctx.translate(size.width / 2, size.height / 2);
     ctx.scale(view.zoom, view.zoom);
+    ctx.rotate(gridRotation);
     ctx.translate(view.x, view.y);
 
+    // Visible world bounds: when rotated, the screen's 4 corners map to a
+    // rotated rectangle in world space, so we sample all four corners and
+    // take their envelope to ensure no visible triangle is skipped.
     const buffer = 3;
-    const worldTopLeft = screenToWorld(0, 0);
-    const worldBottomRight = screenToWorld(size.width, size.height);
+    const corners = [
+      screenToWorld(0, 0),
+      screenToWorld(size.width, 0),
+      screenToWorld(0, size.height),
+      screenToWorld(size.width, size.height),
+    ];
+    const minX = Math.min(...corners.map((c) => c.x));
+    const maxX = Math.max(...corners.map((c) => c.x));
+    const minY = Math.min(...corners.map((c) => c.y));
+    const maxY = Math.max(...corners.map((c) => c.y));
 
-    const minR = Math.floor(worldTopLeft.y / H) - buffer;
-    const maxR = Math.ceil(worldBottomRight.y / H) + buffer;
+    const minR = Math.floor(minY / H) - buffer;
+    const maxR = Math.ceil(maxY / H) + buffer;
     const minQ =
       Math.floor(
-        Math.min(worldTopLeft.x, worldBottomRight.x) / SIDE - maxR * 0.5,
+        Math.min(minX, maxX) / SIDE - maxR * 0.5,
       ) - buffer;
     const maxQ =
       Math.ceil(
-        Math.max(worldTopLeft.x, worldBottomRight.x) / SIDE - minR * 0.5,
+        Math.max(minX, maxX) / SIDE - minR * 0.5,
       ) + buffer;
 
     // Filled triangles — group by color for fewer fillStyle changes
@@ -230,10 +248,10 @@ export function GridCanvas({
       const colWidth = 1.5 * s;  // horizontal column pitch
       const rowHeight = 2 * vHalf; // vertical pitch within a column
 
-      const xMinW = Math.min(worldTopLeft.x, worldBottomRight.x);
-      const xMaxW = Math.max(worldTopLeft.x, worldBottomRight.x);
-      const yMinW = Math.min(worldTopLeft.y, worldBottomRight.y);
-      const yMaxW = Math.max(worldTopLeft.y, worldBottomRight.y);
+      const xMinW = minX;
+      const xMaxW = maxX;
+      const yMinW = minY;
+      const yMaxW = maxY;
 
       const cMin = Math.floor(xMinW / colWidth) - 1;
       const cMax = Math.ceil(xMaxW / colWidth) + 1;
@@ -466,7 +484,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation]);
 
   return (
     <canvas

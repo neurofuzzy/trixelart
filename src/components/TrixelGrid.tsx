@@ -10,7 +10,7 @@ import { GridCanvas } from "@/components/GridCanvas";
 import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { StampPalette } from "@/components/StampPalette";
-import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
+import { Footer, type HexMode, type Symmetry, type GridOrientation } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
@@ -37,6 +37,11 @@ export default function TrixelGrid() {
   const [hexMode, setHexMode] = useState<HexMode>("off");
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
+  const [gridOrientation, setGridOrientation] = useState<GridOrientation>("flat-top");
+  // Display-only rotation: pointy-top hexes are flat-top rotated 90°. The
+  // underlying tri-axial lattice, hex geometry, symmetry math, history and
+  // persistence remain untouched — only the screen↔world seam applies it.
+  const gridRotation = gridOrientation === "pointy-top" ? Math.PI / 2 : 0;
   const [selectedHex, setSelectedHex] = useState<{ c: number; k: number } | null>(null);
   const [selections, setSelections] = useState<SelectionSnapshot[]>([]);
   const [activeSelection, setActiveSelection] = useState<SelectionSnapshot | null>(null);
@@ -123,13 +128,16 @@ export default function TrixelGrid() {
         } else if (typeof data.symmetry === "string") {
           setSymmetry(data.symmetry as Symmetry);
         }
+        if (typeof data.gridOrientation === "string") {
+          setGridOrientation(data.gridOrientation as GridOrientation);
+        }
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry }));
-  }, [gridDivisions, hexMode, flowerRadius, symmetry]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation }));
+  }, [gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation]);
 
   useEffect(() => {
     try {
@@ -202,6 +210,7 @@ export default function TrixelGrid() {
     onStampCapture,
     captureMode,
     setCaptureMode,
+    gridRotation,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -598,6 +607,7 @@ export default function TrixelGrid() {
           activeSelection={activeSelection}
           stampFlash={stampFlash}
           captureMode={captureMode}
+          gridRotation={gridRotation}
         />
 
         {tool === "select" ? (
@@ -620,6 +630,7 @@ export default function TrixelGrid() {
             onPointerEnter={() => setHoveredTri(null)}
             onDelete={onDeletePaletteItem}
             onCapture={() => setCaptureMode(true)}
+            gridRotation={gridRotation}
           />
         ) : (
           <ColorPalette
@@ -654,6 +665,8 @@ export default function TrixelGrid() {
         historyLength={history.length}
         tool={tool}
         captureMode={captureMode}
+        gridOrientation={gridOrientation}
+        onGridOrientationChange={setGridOrientation}
       />
     </div>
   );

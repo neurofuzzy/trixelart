@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 
 export type HexMode = "off" | "outlines" | "centers";
 export type Symmetry = "off" | "sym60" | "sym120";
+export type GridOrientation = "flat-top" | "pointy-top";
 
 const HEX_CYCLE: HexMode[] = ["off", "outlines", "centers"];
 
@@ -39,6 +40,8 @@ export function Footer({
   historyLength,
   tool,
   captureMode,
+  gridOrientation,
+  onGridOrientationChange,
 }: {
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
@@ -54,6 +57,8 @@ export function Footer({
   historyLength: number;
   tool?: "paint" | "erase" | "pan" | "select" | "stamp";
   captureMode?: boolean;
+  gridOrientation?: GridOrientation;
+  onGridOrientationChange?: (v: GridOrientation) => void;
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
@@ -188,6 +193,25 @@ export function Footer({
                       onClick={() => onHexModeChange(mode)}
                     >
                       {mode === "off" ? "Off" : mode === "outlines" ? "Outlines" : "Centers"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Orientation</span>
+                <div className="flex gap-1">
+                  {(["flat-top", "pointy-top"] as const).map((o) => (
+                    <button
+                      key={o}
+                      className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                        gridOrientation === o
+                          ? "bg-cyan-500/25 text-cyan-300"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      )}
+                      onClick={() => onGridOrientationChange?.(o)}
+                    >
+                      {o === "flat-top" ? "Flat-top" : "Pointy-top"}
                     </button>
                   ))}
                 </div>

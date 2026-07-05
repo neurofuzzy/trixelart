@@ -44,6 +44,7 @@ export function useInteraction({
   onStampCapture,
   captureMode,
   setCaptureMode,
+  gridRotation = 0,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -67,6 +68,7 @@ export function useInteraction({
   onStampCapture?: (c: number, k: number) => void;
   captureMode?: boolean;
   setCaptureMode?: (v: boolean) => void;
+  gridRotation?: number;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -101,6 +103,13 @@ export function useInteraction({
   viewRef.current = view;
   const sizeRef = useRef(size);
   sizeRef.current = size;
+
+  // Inverse-rotation coefficients for screen->world. Forward canvas
+  // transform is screen = center + zoom * R(θ) * (world + view), so the
+  // inverse is world = R(-θ) * (screen - center) / zoom - view. Computed
+  // once per render so all pointer handlers share the same orientation.
+  const invCos = Math.cos(-gridRotation);
+  const invSin = Math.sin(-gridRotation);
 
   // Two-finger gesture state
   const isTwoFinger = useRef(false);
@@ -219,15 +228,17 @@ export function useInteraction({
     const { x: vx, y: vy, zoom } = viewRef.current;
     const { width, height } = sizeRef.current;
 
+    const ux = (sx - width / 2) / zoom;
+    const uy = (sy - height / 2) / zoom;
     pinch.current = {
       dist,
       startView: { x: vx, y: vy, zoom },
       worldAtMid: {
-        x: (sx - width / 2) / zoom - vx,
-        y: (sy - height / 2) / zoom - vy,
+        x: invCos * ux - invSin * uy - vx,
+        y: invSin * ux + invCos * uy - vy,
       },
     };
-  }, [containerRef]);
+  }, [containerRef, invCos, invSin]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     if (!pinch.current) return;
@@ -261,12 +272,14 @@ export function useInteraction({
     const sy = midY - rect.top;
     const { width, height } = sizeRef.current;
 
+    const ux = (sx - width / 2) / newZoom;
+    const uy = (sy - height / 2) / newZoom;
     setView({
-      x: (sx - width / 2) / newZoom - worldAtMid.x,
-      y: (sy - height / 2) / newZoom - worldAtMid.y,
+      x: invCos * ux - invSin * uy - worldAtMid.x,
+      y: invSin * ux + invCos * uy - worldAtMid.y,
       zoom: newZoom,
     });
-  }, [containerRef, setView]);
+  }, [containerRef, setView, invCos, invSin]);
 
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length < 2) {
@@ -276,11 +289,15 @@ export function useInteraction({
   }, []);
 
   const screenToWorld = useCallback(
-    (sx: number, sy: number) => ({
-      x: (sx - size.width / 2) / view.zoom - view.x,
-      y: (sy - size.height / 2) / view.zoom - view.y,
-    }),
-    [size, view],
+    (sx: number, sy: number) => {
+      const ux = (sx - size.width / 2) / view.zoom;
+      const uy = (sy - size.height / 2) / view.zoom;
+      return {
+        x: invCos * ux - invSin * uy - view.x,
+        y: invSin * ux + invCos * uy - view.y,
+      };
+    },
+    [size, view, invCos, invSin],
   );
 
   const getRelativePointer = useCallback(
@@ -637,8 +654,12 @@ export function useInteraction({
       setHoveredTri(tri);
 
       if (interaction.current.isViewPanning && interaction.current.lastPos) {
-        const dx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
-        const dy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
+        // Screen drag delta; rotate it into world space before applying
+        // so content follows the cursor regardless of grid rotation.
+        const sdx = (e.clientX - interaction.current.lastPos.x) / view.zoom;
+        const sdy = (e.clientY - interaction.current.lastPos.y) / view.zoom;
+        const dx = invCos * sdx - invSin * sdy;
+        const dy = invSin * sdx + invCos * sdy;
 
         const totalDist = Math.hypot(
           e.clientX - (interaction.current.startPos?.x || 0),
@@ -708,7 +729,7 @@ export function useInteraction({
         });
       }
     },
-    [view, setView, tool, color, getRelativePointer, screenToWorld, setPainted],
+    [view, setView, tool, color, getRelativePointer, screenToWorld, setPainted, invCos, invSin],
   );
 
   const onPointerUp = useCallback(
