@@ -13,7 +13,7 @@ import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { rotateHexCW, remapHex } from "@/lib/hex-flower";
+import { rotateHexCW, remapHex, enumerateHexTrixels } from "@/lib/hex-flower";
 
 const STORAGE_KEY = "symmetria-save";
 
@@ -204,10 +204,40 @@ export default function TrixelGrid() {
     handleRedo();
   }, [handleRedo]);
 
+  const clearSelection = useCallback(() => setSelectedHex(null), []);
+
+  const onDeleteSelection = useCallback(() => {
+    if (!selectedHex || gridDivisions <= 0) return;
+    const hexTris = enumerateHexTrixels(selectedHex.c, selectedHex.k, gridDivisions);
+    const prev = paintedRef.current;
+    const next = { ...prev };
+    let changed = false;
+    for (const t of hexTris) {
+      const key = triToString(t);
+      if (key in next) {
+        delete next[key];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    setPainted(next);
+    pushHistory({
+      painted: next,
+      gridDivisions: gridDivisionsRef.current,
+      hexMode: hexModeRef.current,
+      flowerRadius: flowerRadiusRef.current,
+      symmetry: symmetryRef.current,
+      selections: selectionsRef.current,
+      lastPaintTri: lastPaintTriBridgeRef.current?.current
+        ? triToString(lastPaintTriBridgeRef.current.current)
+        : null,
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
   useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
     setColorIdx(c);
     setTool("paint");
-  }, activePalette.length);
+  }, activePalette.length, clearSelection, onDeleteSelection);
 
   const handleExport = useCallback(() => {
     const project = buildSnapshot();

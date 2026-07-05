@@ -7,7 +7,7 @@
 ```bash
 npm run dev      # next dev --turbopack -p 9002
 npm run typecheck  # tsc --noEmit
-npm run lint       # next lint
+npm run lint       # eslint src/
 ```
 
 Validate order: `typecheck` → `lint`. `npm run build` ignores TS/ESLint errors (`next.config.ts`) so is not a reliable correctness gate.
@@ -24,6 +24,7 @@ No tests configured.
 - Dark mode only (`<html className="dark">`). Theme via CSS variables in `src/app/globals.css`
 - State: React `useState` (no external state lib)
 - Undo/redo: manual history stack capped at 50 entries in `useHistory` hook
+  - **GOLDEN RULE**: Every editing action that modifies `painted` state MUST push a `ProjectSnapshot` to history via `pushHistory()` so it is undoable. This includes paint strokes, erase strokes, move-tool translations, stamp placement, palette remapping (`onShiftUp`/`onShiftDown`), selection deletion, and any future editing features. Missing a `pushHistory` call means the user cannot undo that action.
 
 ## Canvas rendering
 
@@ -37,7 +38,7 @@ No tests configured.
 |---|---|---|
 | Paint | `P` | Paint triangles with selected color |
 | Erase | `E` | Erase (clear) triangles |
-| Pan | `H` | Drag to pan the view |
+| Pan | `H` | Drag to translate painted trixels (grid offset); right-click pans view |
 | Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
 | Stamp | `T` | Stamp the active selection snapshot at a target hex (right-click erases) |
 
@@ -58,8 +59,10 @@ No tests configured.
 | `1`–`5` | Select color + switch to Paint |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` | Redo |
+| `Escape` | Clear selection |
+| `Delete` / `Backspace` | Erase selected hex contents |
 
-Shortcuts suppressed when focus is in `<input>` or `<textarea>`.
+Shortcuts suppressed when focus is in `<input>` or `<textarea>` (except `Escape` and undo/redo).
 
 ## Zoom & touch
 
@@ -70,11 +73,11 @@ Shortcuts suppressed when focus is in `<input>` or `<textarea>`.
 
 ## Hex grid system
 
-- **HexMode**: `"off"` | `"outlines"` | `"centers"` — cycled via Footer button (disabled when `gridDivisions=0`)
+- **HexMode**: `"off"` | `"outlines"` | `"centers"` — set via Grid Settings modal (Hex button in Footer)
   - `off`: no hex rendering
   - `outlines`: flat-top honeycomb grid outlines
   - `centers`: outlines + center marker dots
-- **Grid divisions** (N): controls hex lattice spacing; slider in Footer. When `N>0`, draws division guides (horizontal, `/`, `\` diagonals)
+- **Grid divisions** (N): controls hex lattice spacing; slider in Grid Settings modal. When `N>0`, draws division guides (horizontal, `/`, `\` diagonals)
 - **Flower radius** (R): hexagonal flower of trixels around a painted tri, cycled in Footer (disabled when `gridDivisions=0`)
 - **Symmetry**: `"off"` | `"sym60"` | `"sym120"` — rotational symmetry for painting, cycled in Footer
   - `sym60`: 6-fold (60°) rotation
