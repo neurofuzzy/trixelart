@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Grid3x3, Hexagon, Flower, Aperture, Undo2, Redo2 } from "lucide-react";
+import { Hexagon, Expand, Aperture, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 export type HexMode = "off" | "outlines" | "centers";
@@ -49,7 +56,7 @@ export function Footer({
   historyIdx: number;
   historyLength: number;
 }) {
-  const [gridPopoverOpen, setGridPopoverOpen] = useState(false);
+  const [hexDialogOpen, setHexDialogOpen] = useState(false);
   const [flowerPopoverOpen, setFlowerPopoverOpen] = useState(false);
 
   const sliderClass =
@@ -58,6 +65,14 @@ export function Footer({
     "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:-translate-x-[3px] " +
     "[&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-moz-range-track]:h-1.5 " +
     "[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:border-0";
+
+  const modeButtonClass = (mode: HexMode) =>
+    cn(
+      "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+      hexMode === mode
+        ? "bg-cyan-500/25 text-cyan-300"
+        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+    );
 
   return (
     <div className="flex items-center justify-between p-2 border-t bg-card/90 backdrop-blur-md z-30">
@@ -94,25 +109,69 @@ export function Footer({
         )}
       </div>
       <div className="relative flex items-center gap-0.5">
-        <button
-          className={cn(
-            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            hexMode === "outlines" &&
-              gridDivisions > 0 &&
-              "bg-cyan-500/25 text-cyan-300",
-            hexMode === "centers" &&
-              gridDivisions > 0 &&
-              "bg-cyan-500/40 text-cyan-200",
-          )}
-          onClick={() => {
-            const i = HEX_CYCLE.indexOf(hexMode);
-            onHexModeChange(HEX_CYCLE[(i + 1) % HEX_CYCLE.length]);
-          }}
-          disabled={gridDivisions === 0}
-          title={HEX_TITLE[hexMode]}
-        >
-          <Hexagon className="w-4 h-4" />
-        </button>
+        <AlertDialog open={hexDialogOpen} onOpenChange={setHexDialogOpen}>
+          <AlertDialogTrigger asChild>
+            <button
+              className={cn(
+                "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                hexDialogOpen && "bg-accent text-accent-foreground",
+                hexMode === "outlines" &&
+                  gridDivisions > 0 &&
+                  "bg-cyan-500/25 text-cyan-300",
+                hexMode === "centers" &&
+                  gridDivisions > 0 &&
+                  "bg-cyan-500/40 text-cyan-200",
+              )}
+              title={HEX_TITLE[hexMode]}
+            >
+              <Hexagon className="w-4 h-4" />
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="w-72">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Grid Settings</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Display</span>
+                <div className="flex gap-1">
+                  {HEX_CYCLE.map((mode) => (
+                    <button
+                      key={mode}
+                      className={modeButtonClass(mode)}
+                      onClick={() => onHexModeChange(mode)}
+                    >
+                      {mode === "off" ? "Off" : mode === "outlines" ? "Outlines" : "Centers"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Hex size</span>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={12}
+                    value={gridDivisions}
+                    onChange={(e) => onGridDivisionsChange(Number(e.target.value))}
+                    className="flex-1 h-2 accent-cyan-500"
+                  />
+                  <span className="text-xs font-mono text-muted-foreground w-8 text-right">
+                    N={gridDivisions}
+                  </span>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setHexDialogOpen(false)}
+              >
+                Done
+              </Button>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -136,37 +195,6 @@ export function Footer({
           <button
             className={cn(
               "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              gridPopoverOpen && "bg-accent text-accent-foreground",
-            )}
-            onClick={() => {
-              setGridPopoverOpen((v) => !v);
-              setFlowerPopoverOpen(false);
-            }}
-            title="Grid divisions"
-          >
-            <Grid3x3 className="w-4 h-4" />
-          </button>
-          {gridPopoverOpen && (
-            <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={12}
-                value={gridDivisions}
-                onChange={(e) => onGridDivisionsChange(Number(e.target.value))}
-                className={sliderClass}
-                style={{ writingMode: "vertical-lr", direction: "rtl" }}
-              />
-              <span className="text-xs font-mono text-muted-foreground">
-                N={gridDivisions}
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="relative">
-          <button
-            className={cn(
-              "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               flowerRadius > 0 &&
                 hexMode !== "off" &&
                 gridDivisions > 0 &&
@@ -174,12 +202,11 @@ export function Footer({
             )}
             onClick={() => {
               setFlowerPopoverOpen((v) => !v);
-              setGridPopoverOpen(false);
             }}
             disabled={gridDivisions === 0 || hexMode === "off"}
-            title="Flower radius"
+            title="edit nearby hexagons"
           >
-            <Flower className="w-4 h-4" />
+            <Expand className="w-4 h-4" />
           </button>
           {flowerPopoverOpen && (
             <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
@@ -194,7 +221,7 @@ export function Footer({
                 style={{ writingMode: "vertical-lr", direction: "rtl" }}
               />
               <span className="text-xs font-mono text-muted-foreground">
-                R={flowerRadius}
+                {flowerRadius}
               </span>
             </div>
           )}
