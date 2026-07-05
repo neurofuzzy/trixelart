@@ -462,7 +462,15 @@ export function useInteraction({
           }
 
           if (bestClosest) {
-            const lineTris = getTrianglesOnLine(origin.x, origin.y, bestClosest.x, bestClosest.y);
+            let lineTris = getTrianglesOnLine(origin.x, origin.y, bestClosest.x, bestClosest.y);
+            const Nsel = gridDivisionsRef.current;
+            if (selectedHexRef.current && Nsel > 0) {
+              const sel = selectedHexRef.current;
+              lineTris = lineTris.filter((t) => {
+                const h = triToHex(t.q, t.r, t.type, Nsel);
+                return h.c === sel.c && h.k === sel.k;
+              });
+            }
 
             if (lineTris.length > 0) {
               lastPaintTriRef.current = lineTris[lineTris.length - 1];
@@ -525,7 +533,14 @@ export function useInteraction({
         const offsets = flowerOffsetsRef.current;
         const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
-        const targets = paintTargets(tri, N, sym, offsets);
+        let targets = paintTargets(tri, N, sym, offsets);
+        if (selectedHexRef.current && N > 0) {
+          const sel = selectedHexRef.current;
+          targets = targets.filter((t) => {
+            const h = triToHex(t.q, t.r, t.type, N);
+            return h.c === sel.c && h.k === sel.k;
+          });
+        }
         const keys = targets.map(triToString);
 
         setPainted((prev) => {
@@ -614,7 +629,15 @@ export function useInteraction({
           const next = { ...prev };
           let changed = false;
           for (const tri of tris) {
-            const keys = paintTargets(tri, N, sym, offsets).map(triToString);
+            let targets = paintTargets(tri, N, sym, offsets);
+            if (selectedHexRef.current && N > 0) {
+              const sel = selectedHexRef.current;
+              targets = targets.filter((t) => {
+                const h = triToHex(t.q, t.r, t.type, N);
+                return h.c === sel.c && h.k === sel.k;
+              });
+            }
+            const keys = targets.map(triToString);
             for (const k of keys) {
               if (tool === "paint") {
                 if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
@@ -640,31 +663,7 @@ export function useInteraction({
     (e: React.PointerEvent) => {
       if (isTwoFinger.current) return;
       if (interaction.current.isViewPanning && !interaction.current.hasMoved) {
-        if (toolRef.current === "stamp") {
-          const pos = getRelativePointer(e);
-          const world = screenToWorld(pos.x, pos.y);
-          const tri = worldToTri(world.x, world.y);
-          const snap = activeSelectionRef.current;
-          const N = gridDivisionsRef.current;
-          if (snap && N === snap.N) {
-            const destHex = triToHex(tri.q, tri.r, tri.type, N);
-            const { qc, rc } = hexCenterTriAxial(destHex.c, destHex.k, N);
-            setPainted((prev) => {
-              const next = { ...prev };
-              let changed = false;
-              for (const t of snap.trixels) {
-                const key = triToString({
-                  q: qc + t.dq,
-                  r: rc + t.dr,
-                  type: t.type,
-                });
-                if (key in next) { delete next[key]; changed = true; }
-              }
-              return changed ? next : prev;
-            });
-            onCommitRef.current();
-          }
-        } else {
+        if (toolRef.current !== "stamp") {
           const pos = getRelativePointer(e);
           const world = screenToWorld(pos.x, pos.y);
           const key = triToString(worldToTri(world.x, world.y));

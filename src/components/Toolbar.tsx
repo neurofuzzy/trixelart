@@ -2,6 +2,17 @@
 
 import { Pencil, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export function Toolbar({
   tool,
@@ -43,15 +54,36 @@ export function Toolbar({
         >
           <Eraser className="w-4 h-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onClear}
-          className="hover:bg-destructive/10 hover:text-destructive"
-          title="Clear (undo with Ctrl+Z)"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hover:bg-destructive/10 hover:text-destructive"
+              title="Clear canvas"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will remove all drawing data from the grid.
+                You can undo this with Ctrl+Z.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={onClear}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              >
+                Clear Everything
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <Button
           variant={tool === "pan" ? "default" : "ghost"}
           size="icon"

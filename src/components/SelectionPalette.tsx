@@ -34,7 +34,6 @@ export function SelectionPalette({
             e.stopPropagation();
             onShiftUp();
           }}
-          disabled={!hasSelection}
           title="Shift colors lighter"
         >
           <ChevronUp className="w-4 h-4" />
@@ -47,7 +46,6 @@ export function SelectionPalette({
             e.stopPropagation();
             onShiftDown();
           }}
-          disabled={!hasSelection}
           title="Shift colors darker"
         >
           <ChevronDown className="w-4 h-4" />

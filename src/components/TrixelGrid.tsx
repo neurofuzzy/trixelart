@@ -207,6 +207,10 @@ export default function TrixelGrid() {
 
   const clearSelection = useCallback(() => setSelectedHex(null), []);
 
+  useEffect(() => {
+    if (tool === "stamp") setSelectedHex(null);
+  }, [tool]);
+
   const onDeleteSelection = useCallback(() => {
     if (!selectedHex || gridDivisions <= 0) return;
     const hexTris = enumerateHexTrixels(selectedHex.c, selectedHex.k, gridDivisions);
