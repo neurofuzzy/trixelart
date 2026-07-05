@@ -56,7 +56,9 @@ No tests configured.
 | `H` | Pan tool |
 | `S` | Select tool |
 | `T` | Stamp tool |
-| `1`–`5` | Select color + switch to Paint |
+| `R` | Switch to Select and rotate selection 60° CW |
+| `Shift+R` | Switch to Select and rotate selection 60° CCW |
+| `1`–`9` | Select color + switch to Paint |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` | Redo |
 | `↑` | Shift colors lighter (selection palette: per-hex; else: whole grid) |

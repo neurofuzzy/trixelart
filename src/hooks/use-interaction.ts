@@ -392,6 +392,12 @@ export function useInteraction({
           setPainted((prev) => {
             const next = { ...prev };
             let changed = false;
+            if (!erase) {
+              for (const t of enumerateHexTrixels(destHex.c, destHex.k, N)) {
+                const key = triToString(t);
+                if (key in next) { delete next[key]; changed = true; }
+              }
+            }
             for (const t of snap.trixels) {
               const key = triToString({
                 q: qc + t.dq,
@@ -400,7 +406,7 @@ export function useInteraction({
               });
               if (erase) {
                 if (key in next) { delete next[key]; changed = true; }
-              } else if (next[key] !== t.color) {
+              } else {
                 next[key] = t.color;
                 changed = true;
               }

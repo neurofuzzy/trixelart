@@ -14,7 +14,7 @@ import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { rotateHexCW, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
+import { rotateHexCW, rotateHexCCW, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
 
 const STORAGE_KEY = "symmetria-save";
 
@@ -29,9 +29,9 @@ export default function TrixelGrid() {
   const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp">("paint");
   const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
-  const [colorIdx, setColorIdx] = useState(4);
+  const [colorIdx, setColorIdx] = useState(8);
 
-  const colorHex = activePalette[colorIdx] ?? activePalette[4];
+  const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
   const [gridDivisions, setGridDivisions] = useState(1);
   const [hexMode, setHexMode] = useState<HexMode>("off");
@@ -444,10 +444,31 @@ export default function TrixelGrid() {
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
+  const onRotateSelectionCCW = useCallback(() => {
+    if (!selectedHex || gridDivisions <= 0) return;
+    setPainted((prev) => {
+      const next = rotateHexCCW(prev, selectedHex.c, selectedHex.k, gridDivisions);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
+      return next;
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
   useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
     setColorIdx(c);
     setTool("paint");
-  }, activePalette.length, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift);
+  }, activePalette.length, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotateSelection, onRotateSelectionCCW);
 
   const onDeletePaletteItem = useCallback(
     (snap: SelectionSnapshot) => {

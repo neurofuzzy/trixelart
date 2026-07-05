@@ -13,6 +13,8 @@ export function useKeyboardShortcuts(
   onShiftUp?: () => void,
   onShiftDown?: () => void,
   onPaletteShift?: (direction: number) => void,
+  onRotate?: () => void,
+  onRotateCCW?: () => void,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -75,6 +77,14 @@ export function useKeyboardShortcuts(
         setTool("select");
       } else if (e.key.toLowerCase() === "t") {
         setTool("stamp");
+      } else if (e.key.toLowerCase() === "r") {
+        if (e.shiftKey && onRotateCCW) {
+          setTool("select");
+          onRotateCCW();
+        } else if (!e.shiftKey && onRotate) {
+          setTool("select");
+          onRotate();
+        }
       }
 
       const colorIdx = parseInt(e.key) - 1;
@@ -86,5 +96,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW]);
 }
