@@ -40,6 +40,8 @@ export default function TrixelGrid() {
   const [selectedHex, setSelectedHex] = useState<{ c: number; k: number } | null>(null);
   const [selections, setSelections] = useState<SelectionSnapshot[]>([]);
   const [activeSelection, setActiveSelection] = useState<SelectionSnapshot | null>(null);
+  const [stampFlash, setStampFlash] = useState<{ c: number; k: number; opacity: number; seq: number } | null>(null);
+  const [captureMode, setCaptureMode] = useState(false);
   const hexEnabled = gridDivisions > 0 && hexMode !== "off";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
   const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
@@ -153,6 +155,10 @@ export default function TrixelGrid() {
     return () => clearTimeout(timer);
   }, [updateSize]);
 
+  const onStampCapture = useCallback((c: number, k: number) => {
+    setStampFlash((prev) => ({ c, k, opacity: 1, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
+
   const {
     hoverTargets,
     setHoveredTri,
@@ -193,6 +199,9 @@ export default function TrixelGrid() {
     activeSelection,
     setActiveSelection,
     setSelections,
+    onStampCapture,
+    captureMode,
+    setCaptureMode,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -206,6 +215,25 @@ export default function TrixelGrid() {
   }, [handleRedo]);
 
   const clearSelection = useCallback(() => setSelectedHex(null), []);
+
+  useEffect(() => {
+    if (!stampFlash) return;
+    let raf = 0;
+    const start = performance.now();
+    const DURATION = 800;
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const opacity = Math.max(0, 1 - elapsed / DURATION);
+      if (opacity <= 0) {
+        setStampFlash(null);
+        return;
+      }
+      setStampFlash((prev) => prev ? { ...prev, opacity } : null);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [stampFlash?.seq]);
 
   useEffect(() => {
     if (tool === "stamp") setSelectedHex(null);
@@ -568,6 +596,7 @@ export default function TrixelGrid() {
           selectedHex={selectedHex}
           tool={tool}
           activeSelection={activeSelection}
+          stampFlash={stampFlash}
         />
 
         {tool === "select" ? (
@@ -586,6 +615,7 @@ export default function TrixelGrid() {
             onSelect={(s) => setActiveSelection(s)}
             onPointerEnter={() => setHoveredTri(null)}
             onDelete={onDeletePaletteItem}
+            onCapture={() => setCaptureMode(true)}
           />
         ) : (
           <ColorPalette

@@ -115,15 +115,15 @@ export function StampPalette({
   onSelect,
   onPointerEnter,
   onDelete,
+  onCapture,
 }: {
   selections: SelectionSnapshot[];
   activeSelectionId: string | null;
   onSelect: (s: SelectionSnapshot) => void;
   onPointerEnter: () => void;
   onDelete: (snap: SelectionSnapshot) => void;
+  onCapture: () => void;
 }) {
-  if (selections.length === 0) return null;
-
   return (
     <div
       className="absolute z-40 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl cursor-default
@@ -142,6 +142,13 @@ export function StampPalette({
           onDelete={onDelete}
         />
       ))}
+      <button
+        onClick={onCapture}
+        title="Capture a new stamp pattern"
+        className="w-8 h-8 rounded-full border-2 border-dashed border-white/30 hover:border-white/60 hover:scale-110 transition-all flex items-center justify-center text-white/50 hover:text-white/80 text-lg font-bold shrink-0"
+      >
+        +
+      </button>
     </div>
   );
 }

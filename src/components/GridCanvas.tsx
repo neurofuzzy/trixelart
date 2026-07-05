@@ -18,6 +18,7 @@ export function GridCanvas({
   selectedHex,
   tool,
   activeSelection,
+  stampFlash,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -30,6 +31,7 @@ export function GridCanvas({
   selectedHex: { c: number; k: number } | null;
   tool: "paint" | "erase" | "pan" | "select" | "stamp";
   activeSelection: SelectionSnapshot | null;
+  stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -326,45 +328,63 @@ export function GridCanvas({
       ctx.closePath();
       ctx.stroke();
       ctx.restore();
+    }
 
-      // Stamp preview: render the active selection's trixels translated to
-      // the hovered hex, using their real colors so the user sees exactly
-      // what a stamp would land there.
-      if (tool === "stamp" && hoverTargets.length > 0 && activeSelection && gridDivisions === activeSelection.N) {
-        const N = gridDivisions;
-        const hov = hoverTargets[0];
-        const tgt = triToHex(hov.q, hov.r, hov.type, N);
-        const { qc, rc } = hexCenterTriAxial(tgt.c, tgt.k, N);
-
-        // Group snapshot trixels by resolved color so we batch fills.
-        const previewGroups = new Map<string, typeof activeSelection.trixels>();
-        for (const t of activeSelection.trixels) {
-          const hex = resolveColor(t.color);
-          const list = previewGroups.get(hex);
-          if (list) list.push(t);
-          else previewGroups.set(hex, [t]);
-        }
-
-        ctx.save();
-        ctx.globalAlpha = 0.6;
-        for (const [fillColor, list] of previewGroups) {
-          ctx.fillStyle = fillColor;
-          ctx.beginPath();
-          for (const t of list) {
-            const [a, b, c] = getTriVertices(
-              qc + t.dq,
-              rc + t.dr,
-              t.type,
-            );
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.lineTo(c.x, c.y);
-            ctx.closePath();
-          }
-          ctx.fill();
-        }
-        ctx.restore();
+    // Stamp flash — yellow highlight on the source hex that fades out.
+    if (stampFlash && gridDivisions > 0) {
+      ctx.save();
+      ctx.globalAlpha = stampFlash.opacity * 0.4;
+      ctx.fillStyle = "rgb(250, 204, 21)"; // yellow-400
+      const flashTris = enumerateHexTrixels(stampFlash.c, stampFlash.k, gridDivisions);
+      ctx.beginPath();
+      for (const t of flashTris) {
+        const [a, b, c] = getTriVertices(t.q, t.r, t.type);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.closePath();
       }
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Stamp preview: render the active selection's trixels translated to
+    // the hovered hex, using their real colors so the user sees exactly
+    // what a stamp would land there.
+    if (tool === "stamp" && hoverTargets.length > 0 && activeSelection && gridDivisions > 0 && gridDivisions === activeSelection.N) {
+      const N = gridDivisions;
+      const hov = hoverTargets[0];
+      const tgt = triToHex(hov.q, hov.r, hov.type, N);
+      const { qc, rc } = hexCenterTriAxial(tgt.c, tgt.k, N);
+
+      // Group snapshot trixels by resolved color so we batch fills.
+      const previewGroups = new Map<string, typeof activeSelection.trixels>();
+      for (const t of activeSelection.trixels) {
+        const hex = resolveColor(t.color);
+        const list = previewGroups.get(hex);
+        if (list) list.push(t);
+        else previewGroups.set(hex, [t]);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      for (const [fillColor, list] of previewGroups) {
+        ctx.fillStyle = fillColor;
+        ctx.beginPath();
+        for (const t of list) {
+          const [a, b, c] = getTriVertices(
+            qc + t.dq,
+            rc + t.dr,
+            t.type,
+          );
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+        }
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     // Hover outlines — primary + affected (flower/symmetry) ghosts.
@@ -435,7 +455,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash]);
 
   return (
     <canvas

@@ -40,7 +40,7 @@ No tests configured.
 | Erase | `E` | Erase (clear) triangles |
 | Pan | `H` | Drag to translate painted trixels (grid offset); right-click pans view |
 | Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
-| Stamp | `T` | Stamp the active selection snapshot at a target hex (right-click erases) |
+| Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
 
 - Color palette: 5 grayscale colors (`#000`, `#404040`, `#808080`, `#c0c0c0`, `#fff`). Keys `1`–`5` select color and switch to Paint tool
 - Right-click on a painted triangle acts as a color picker (eyedropper)

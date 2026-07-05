@@ -41,6 +41,9 @@ export function useInteraction({
   activeSelection,
   setActiveSelection,
   setSelections,
+  onStampCapture,
+  captureMode,
+  setCaptureMode,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -61,6 +64,9 @@ export function useInteraction({
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
+  onStampCapture?: (c: number, k: number) => void;
+  captureMode?: boolean;
+  setCaptureMode?: (v: boolean) => void;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -80,6 +86,15 @@ export function useInteraction({
 
   const onCommitRef = useRef(onCommit);
   onCommitRef.current = onCommit;
+
+  const onStampCaptureRef = useRef(onStampCapture);
+  onStampCaptureRef.current = onStampCapture;
+
+  const captureModeRef = useRef(captureMode);
+  captureModeRef.current = captureMode;
+
+  const setCaptureModeRef = useRef(setCaptureMode);
+  setCaptureModeRef.current = setCaptureMode;
 
   // Mirrored refs so callbacks don't need dependency on view/size objects
   const viewRef = useRef(view);
@@ -384,7 +399,38 @@ export function useInteraction({
         const tri = worldToTri(world.x, world.y);
         const snap = activeSelectionRef.current;
 
-        if (snap && N === snap.N) {
+        if ((e.altKey || captureModeRef.current) && N > 0) {
+          const hex = triToHex(tri.q, tri.r, tri.type, N);
+          const captured = captureHexSnapshot(paintedRef.current, hex.c, hex.k, N);
+          if (captured.trixels.length > 0) {
+            const key = JSON.stringify(
+              captured.trixels.map((t) => [t.dq, t.dr, t.type, t.color]).sort(),
+            );
+            let activeSnap: SelectionSnapshot | null = null;
+            setSelections((prev) => {
+              const duplicate = prev.find(
+                (s) =>
+                  s.N === captured.N &&
+                  key ===
+                    JSON.stringify(
+                      s.trixels
+                        .map((t) => [t.dq, t.dr, t.type, t.color])
+                        .sort(),
+                    ),
+              );
+              if (duplicate) {
+                activeSnap = duplicate;
+                return prev;
+              }
+              activeSnap = captured;
+              const next = [captured, ...prev.filter((s) => s.id !== captured.id)];
+              return next.slice(0, 5);
+            });
+            if (activeSnap) setActiveSelection(activeSnap);
+            onStampCaptureRef.current?.(hex.c, hex.k);
+            setCaptureModeRef.current?.(false);
+          }
+        } else if (snap && N === snap.N) {
           const destHex = triToHex(tri.q, tri.r, tri.type, N);
           const { qc, rc } = hexCenterTriAxial(destHex.c, destHex.k, N);
           const erase = e.button === 2 || e.ctrlKey;
