@@ -10,6 +10,9 @@ export function useKeyboardShortcuts(
   colorCount: number,
   onClearSelection?: () => void,
   onDeleteSelection?: () => void,
+  onShiftUp?: () => void,
+  onShiftDown?: () => void,
+  onPaletteShift?: (direction: number) => void,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -36,6 +39,32 @@ export function useKeyboardShortcuts(
         return;
       }
 
+      if (e.key === "ArrowUp") {
+        if (onShiftUp && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          onShiftUp();
+          return;
+        }
+      } else if (e.key === "ArrowDown") {
+        if (onShiftDown && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          onShiftDown();
+          return;
+        }
+      } else if (e.key === "ArrowLeft") {
+        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          onPaletteShift(-1);
+          return;
+        }
+      } else if (e.key === "ArrowRight") {
+        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          onPaletteShift(1);
+          return;
+        }
+      }
+
       if (e.key.toLowerCase() === "p") {
         setTool("paint");
       } else if (e.key.toLowerCase() === "e") {
@@ -57,5 +86,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift]);
 }

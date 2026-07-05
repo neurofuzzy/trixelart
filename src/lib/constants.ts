@@ -86,16 +86,33 @@ export function resolveColor(encoded: string): string {
 
 export function remapGrid(
   painted: Record<string, string>,
-  paletteIdx: number,
   direction: 1 | -1,
 ): Record<string, string> {
-  const L = PALETTES[paletteIdx]?.colors.length ?? 5;
+  const L = PALETTES[0].colors.length;
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(painted)) {
     const d = decodeColor(value);
-    if (d && d.paletteIdx === paletteIdx) {
+    if (d) {
       const newIdx = ((d.colorIdx + direction) % L + L) % L;
-      result[key] = encodeColor(paletteIdx, newIdx);
+      result[key] = encodeColor(d.paletteIdx, newIdx);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+export function shiftGridPalettes(
+  painted: Record<string, string>,
+  direction: 1 | -1,
+  paletteCount: number,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(painted)) {
+    const d = decodeColor(value);
+    if (d) {
+      const newPalette = ((d.paletteIdx + direction) % paletteCount + paletteCount) % paletteCount;
+      result[key] = encodeColor(newPalette, d.colorIdx);
     } else {
       result[key] = value;
     }

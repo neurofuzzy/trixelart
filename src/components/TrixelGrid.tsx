@@ -11,10 +11,10 @@ import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { StampPalette } from "@/components/StampPalette";
 import { Footer, type HexMode, type Symmetry } from "@/components/Footer";
-import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid } from "@/lib/constants";
+import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { rotateHexCW, remapHex, enumerateHexTrixels } from "@/lib/hex-flower";
+import { rotateHexCW, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
 
 const STORAGE_KEY = "symmetria-save";
 
@@ -239,11 +239,6 @@ export default function TrixelGrid() {
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
-  useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
-    setColorIdx(c);
-    setTool("paint");
-  }, activePalette.length, clearSelection, onDeleteSelection);
-
   const handleExport = useCallback(() => {
     const project = buildSnapshot();
     const dataStr = JSON.stringify({ ...project, version: 1 }, null, 2);
@@ -339,6 +334,29 @@ export default function TrixelGrid() {
     setTool("paint");
   }, [activePalette]);
 
+  const onPaletteShift = useCallback((direction: number) => {
+    const count = PALETTES.length;
+    setPainted((prev) => {
+      const next = selectedHex && gridDivisions > 0
+        ? shiftHexPalettes(prev, selectedHex.c, selectedHex.k, gridDivisions, direction as 1 | -1, count)
+        : shiftGridPalettes(prev, direction as 1 | -1, count);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
+      return next;
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
   const handleClear = useCallback(() => {
     const snap: ProjectSnapshot = {
       painted: {},
@@ -359,9 +377,9 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next: Record<string, string>;
       if (selectedHex && gridDivisions > 0) {
-        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, activePaletteIdx, 1, activePalette.length);
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, 1, PALETTES[0].colors.length);
       } else {
-        next = remapGrid(prev, activePaletteIdx, 1);
+        next = remapGrid(prev, 1);
       }
       if (next !== prev) {
         pushHistory({
@@ -378,15 +396,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
   const onShiftDown = useCallback(() => {
     setPainted((prev) => {
       let next: Record<string, string>;
       if (selectedHex && gridDivisions > 0) {
-        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, activePaletteIdx, -1, activePalette.length);
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, -1, PALETTES[0].colors.length);
       } else {
-        next = remapGrid(prev, activePaletteIdx, -1);
+        next = remapGrid(prev, -1);
       }
       if (next !== prev) {
         pushHistory({
@@ -403,7 +421,7 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [activePaletteIdx, activePalette.length, selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
   const onRotateSelection = useCallback(() => {
     if (!selectedHex || gridDivisions <= 0) return;
@@ -425,6 +443,11 @@ export default function TrixelGrid() {
       return next;
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
+  useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
+    setColorIdx(c);
+    setTool("paint");
+  }, activePalette.length, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift);
 
   const onDeletePaletteItem = useCallback(
     (snap: SelectionSnapshot) => {
@@ -531,6 +554,7 @@ export default function TrixelGrid() {
             onShiftUp={onShiftUp}
             onShiftDown={onShiftDown}
             onRotate={onRotateSelection}
+            onPaletteShift={onPaletteShift}
             hasSelection={selectedHex !== null}
             onPointerEnter={() => setHoveredTri(null)}
           />

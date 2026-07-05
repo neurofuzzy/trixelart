@@ -59,6 +59,10 @@ No tests configured.
 | `1`–`5` | Select color + switch to Paint |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` | Redo |
+| `↑` | Shift colors lighter (selection palette: per-hex; else: whole grid) |
+| `↓` | Shift colors darker |
+| `←` | Shift palettes of each trixel backward (does not change current palette) |
+| `→` | Shift palettes of each trixel forward (does not change current palette) |
 | `Escape` | Clear selection |
 | `Delete` / `Backspace` | Erase selected hex contents |
 

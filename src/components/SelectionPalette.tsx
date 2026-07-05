@@ -1,18 +1,20 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronUp, ChevronDown, RotateCw } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 
 export function SelectionPalette({
   onShiftUp,
   onShiftDown,
   onRotate,
+  onPaletteShift,
   hasSelection,
   onPointerEnter,
 }: {
   onShiftUp: () => void;
   onShiftDown: () => void;
   onRotate: () => void;
+  onPaletteShift: (dir: number) => void;
   hasSelection: boolean;
   onPointerEnter: () => void;
 }) {
@@ -25,6 +27,32 @@ export function SelectionPalette({
       onPointerMove={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
     >
+      <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPaletteShift(-1);
+          }}
+          title="Shift palettes of each trixel backward"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPaletteShift(1);
+          }}
+          title="Shift palettes of each trixel forward"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </Button>
+      </div>
       <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
         <Button
           variant="ghost"

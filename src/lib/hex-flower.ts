@@ -1,4 +1,5 @@
 import { SIDE, H, worldToTri, triToString, type TriKey, type TriType } from "./grid-math";
+import { encodeColor } from "./constants";
 
 /**
  * Hex coordinates of the home hex containing trixel (q, r, type).
@@ -256,7 +257,6 @@ export function remapHex(
   c: number,
   k: number,
   N: number,
-  paletteIdx: number,
   direction: 1 | -1,
   colorCount: number,
 ): Record<string, string> {
@@ -270,9 +270,34 @@ export function remapHex(
     if (parts.length !== 2) continue;
     const p = Number(parts[0]);
     const i = Number(parts[1]);
-    if (isNaN(p) || isNaN(i) || p !== paletteIdx) continue;
+    if (isNaN(p) || isNaN(i)) continue;
     const newIdx = ((i + direction) % colorCount + colorCount) % colorCount;
-    result[key] = `${paletteIdx},${newIdx}`;
+    result[key] = encodeColor(p, newIdx);
+  }
+  return result;
+}
+
+export function shiftHexPalettes(
+  painted: Record<string, string>,
+  c: number,
+  k: number,
+  N: number,
+  direction: 1 | -1,
+  paletteCount: number,
+): Record<string, string> {
+  const tris = enumerateHexTrixels(c, k, N);
+  const result = { ...painted };
+  for (const t of tris) {
+    const key = triToString(t);
+    const encoded = painted[key];
+    if (!encoded) continue;
+    const parts = encoded.split(",");
+    if (parts.length !== 2) continue;
+    const p = Number(parts[0]);
+    const i = Number(parts[1]);
+    if (isNaN(p) || isNaN(i)) continue;
+    const newPalette = ((p + direction) % paletteCount + paletteCount) % paletteCount;
+    result[key] = encodeColor(newPalette, i);
   }
   return result;
 }
