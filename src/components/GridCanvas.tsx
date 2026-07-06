@@ -241,7 +241,7 @@ export function GridCanvas({
     //   (Q,R) = (cN - kN, cN + 2kN)  (axial)
     // whose world x = 1.5*c*N*SIDE (columns are vertical) and y advances by
     // 2N*H (= s*sqrt(3)) within a column, adjacent columns offset by N*H.
-    if (hexMode !== "off" && gridDivisions > 0) {
+    if (hexMode !== "world" && gridDivisions > 0) {
       const N = gridDivisions;
       const s = N * SIDE;        // hex side = circumradius
       const vHalf = N * H;       // s*sqrt(3)/2 — vertical vertex offset
@@ -284,7 +284,7 @@ export function GridCanvas({
         }
       }
 
-      if (hexMode === "centers") {
+      if (hexMode === "honeycomb") {
         // Center markers — same radius as the origin dot, dimmer.
         const r = Math.max(5 / view.zoom, 2);
         ctx.fillStyle = "rgba(255,255,255,0.4)";

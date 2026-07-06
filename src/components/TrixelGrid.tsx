@@ -10,7 +10,7 @@ import { GridCanvas } from "@/components/GridCanvas";
 import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { StampPalette } from "@/components/StampPalette";
-import { Footer, type HexMode, type Symmetry, type GridOrientation } from "@/components/Footer";
+import { Footer, type HexMode, type Symmetry, type GridOrientation, normalizeHexMode } from "@/components/Footer";
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
@@ -34,7 +34,7 @@ export default function TrixelGrid() {
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
   const [gridDivisions, setGridDivisions] = useState(1);
-  const [hexMode, setHexMode] = useState<HexMode>("off");
+  const [hexMode, setHexMode] = useState<HexMode>("world");
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [gridOrientation, setGridOrientation] = useState<GridOrientation>("flat-top");
@@ -47,9 +47,8 @@ export default function TrixelGrid() {
   const [activeSelection, setActiveSelection] = useState<SelectionSnapshot | null>(null);
   const [stampFlash, setStampFlash] = useState<{ c: number; k: number; opacity: number; seq: number } | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
-  const hexEnabled = gridDivisions > 0 && hexMode !== "off";
+  const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
-  const effectiveSymmetry: Symmetry = hexEnabled ? symmetry : "off";
 
   const paintedRef = useRef(painted);
   paintedRef.current = painted;
@@ -85,7 +84,7 @@ export default function TrixelGrid() {
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
       if (typeof snap.gridDivisions === "number") setGridDivisions(snap.gridDivisions);
-      if (typeof snap.hexMode === "string") setHexMode(snap.hexMode as HexMode);
+      if (typeof snap.hexMode === "string") setHexMode(normalizeHexMode(snap.hexMode));
       if (typeof snap.flowerRadius === "number") setFlowerRadius(snap.flowerRadius);
       if (typeof snap.symmetry === "string") setSymmetry(snap.symmetry as Symmetry);
       if (Array.isArray(snap.selections)) {
@@ -117,11 +116,7 @@ export default function TrixelGrid() {
       if (saved) {
         const data = JSON.parse(saved);
         if (typeof data.gridDivisions === "number") setGridDivisions(data.gridDivisions);
-        if (typeof data.hexMode === "boolean") {
-          setHexMode(data.hexMode ? "outlines" : "off");
-        } else if (typeof data.hexMode === "string") {
-          setHexMode(data.hexMode as HexMode);
-        }
+        if (data.hexMode !== undefined) setHexMode(normalizeHexMode(data.hexMode));
         if (typeof data.flowerRadius === "number") setFlowerRadius(data.flowerRadius);
         if (typeof data.symmetry60 === "boolean") {
           setSymmetry(data.symmetry60 ? "sym60" : "off");
@@ -201,8 +196,9 @@ export default function TrixelGrid() {
     containerRef,
     flowerRadius: effectiveFlowerRadius,
     gridDivisions,
-    symmetry: effectiveSymmetry,
+    symmetry,
     selectedHex,
+    hexEnabled,
     setSelectedHex,
     activeSelection,
     setActiveSelection,
@@ -310,9 +306,7 @@ export default function TrixelGrid() {
             const snap: ProjectSnapshot = {
               painted: data.painted || {},
               gridDivisions: data.gridDivisions ?? 1,
-              hexMode: typeof data.hexMode === "boolean"
-                ? (data.hexMode ? "outlines" : "off")
-                : (data.hexMode ?? "off"),
+              hexMode: normalizeHexMode(data.hexMode),
               flowerRadius: data.flowerRadius ?? 0,
               symmetry: data.symmetry ?? "off",
               selections: Array.isArray(data.selections) ? data.selections : [],
@@ -324,11 +318,7 @@ export default function TrixelGrid() {
             if (data.settings) {
               const s = data.settings;
               if (typeof s.gridDivisions === "number") setGridDivisions(s.gridDivisions);
-              if (typeof s.hexMode === "boolean") {
-                setHexMode(s.hexMode ? "outlines" : "off");
-              } else if (typeof s.hexMode === "string") {
-                setHexMode(s.hexMode as HexMode);
-              }
+              if (s.hexMode !== undefined) setHexMode(normalizeHexMode(s.hexMode));
               if (typeof s.flowerRadius === "number") setFlowerRadius(s.flowerRadius);
               if (typeof s.symmetry60 === "boolean") {
                 setSymmetry(s.symmetry60 ? "sym60" : "off");
@@ -346,7 +336,7 @@ export default function TrixelGrid() {
             const snap: ProjectSnapshot = {
               painted: data,
               gridDivisions: 1,
-              hexMode: "off",
+              hexMode: "world",
               flowerRadius: 0,
               symmetry: "off",
               selections: [],

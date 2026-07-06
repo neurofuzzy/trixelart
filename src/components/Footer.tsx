@@ -12,11 +12,22 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
-export type HexMode = "off" | "outlines" | "centers";
+export type HexMode = "world" | "honeycomb";
 export type Symmetry = "off" | "sym60" | "sym120";
 export type GridOrientation = "flat-top" | "pointy-top";
 
-const HEX_CYCLE: HexMode[] = ["off", "outlines", "centers"];
+/** Maps any external/stored hex-mode value onto the current enum.
+ *  Legacy modes: boolean true (outlines/centers) -> honeycomb; false/off -> world.
+ *  Legacy strings "off"/"outlines"/"centers" are normalized to current names. */
+export function normalizeHexMode(value: unknown): HexMode {
+  if (typeof value === "boolean") return value ? "honeycomb" : "world";
+  if (value === "honeycomb" || value === "world") return value;
+  if (value === "off") return "world";
+  if (value === "outlines" || value === "centers") return "honeycomb";
+  return "world";
+}
+
+const HEX_CYCLE: HexMode[] = ["world", "honeycomb"];
 
 const SYM_CYCLE: Symmetry[] = ["off", "sym60", "sym120"];
 const SYM_LABEL: Record<Symmetry, string> = {
@@ -138,12 +149,12 @@ export function Footer({
           </span>
         ) : (
           <>
-            {hexMode !== "off" && gridDivisions > 0 && (
+            {hexMode === "honeycomb" && gridDivisions > 0 && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/25 text-cyan-300">
-                hex: {hexMode === "centers" ? "\u25CF" : "\u25CB"}
+                hex
               </span>
             )}
-            {symmetry !== "off" && gridDivisions > 0 && hexMode !== "off" && (
+            {symmetry !== "off" && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/25 text-purple-300">
                 {symmetry === "sym60" ? "6-fold" : "3-fold"}
               </span>
@@ -165,10 +176,7 @@ export function Footer({
               className={cn(
                 "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                 hexDialogOpen && "bg-accent text-accent-foreground",
-                hexMode === "outlines" &&
-                  gridDivisions > 0 &&
-                  "bg-cyan-500/25 text-cyan-300",
-                hexMode === "centers" &&
+                hexMode === "honeycomb" &&
                   gridDivisions > 0 &&
                   "bg-cyan-500/40 text-cyan-200",
               )}
@@ -184,7 +192,7 @@ export function Footer({
             </AlertDialogHeader>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <span className="text-xs font-medium text-muted-foreground">Display</span>
+                <span className="text-xs font-medium text-muted-foreground">Origin</span>
                 <div className="flex gap-1">
                   {HEX_CYCLE.map((mode) => (
                     <button
@@ -192,7 +200,7 @@ export function Footer({
                       className={modeButtonClass(mode)}
                       onClick={() => onHexModeChange(mode)}
                     >
-                      {mode === "off" ? "Off" : mode === "outlines" ? "Outlines" : "Centers"}
+                      {mode === "world" ? "World" : "Honeycomb"}
                     </button>
                   ))}
                 </div>
@@ -245,12 +253,8 @@ export function Footer({
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            symmetry === "sym60" &&
-              gridDivisions > 0 &&
-              "bg-purple-500/25 text-purple-300",
-            symmetry === "sym120" &&
-              gridDivisions > 0 &&
-              "bg-purple-500/45 text-purple-200",
+            symmetry === "sym60" && "bg-purple-500/25 text-purple-300",
+            symmetry === "sym120" && "bg-purple-500/45 text-purple-200",
           )}
           onClick={() => {
             const i = SYM_CYCLE.indexOf(symmetry);
@@ -258,7 +262,6 @@ export function Footer({
             onSymmetryChange(next);
             setTooltip(SYM_LABEL[next]);
           }}
-          disabled={gridDivisions === 0 || hexMode === "off"}
           onMouseEnter={() => setTooltip(SYM_LABEL[symmetry])}
           onMouseLeave={clearTooltip}
         >
@@ -269,7 +272,7 @@ export function Footer({
             className={cn(
               "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               flowerRadius > 0 &&
-                hexMode !== "off" &&
+                hexMode === "honeycomb" &&
                 gridDivisions > 0 &&
                 "bg-amber-500/25 text-amber-300",
             )}
@@ -281,7 +284,7 @@ export function Footer({
                 return next;
               });
             }}
-            disabled={gridDivisions === 0 || hexMode === "off"}
+            disabled={gridDivisions === 0 || hexMode === "world"}
             onMouseEnter={() => setTooltip("Edit nearby hexagons")}
             onMouseLeave={clearTooltip}
           >
@@ -296,7 +299,7 @@ export function Footer({
                 value={flowerRadius}
                 onChange={(e) => onFlowerRadiusChange(Number(e.target.value))}
                 className={sliderClass}
-                disabled={hexMode === "off"}
+                disabled={hexMode === "world"}
                 style={{ writingMode: "vertical-lr", direction: "rtl" }}
               />
               <span className="text-xs font-mono text-muted-foreground">

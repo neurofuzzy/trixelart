@@ -200,10 +200,20 @@ export function paintTargets(
 ): TriKey[] {
   const base: TriKey[] = [tri];
 
-  if (symmetry !== "off" && N > 0) {
-    const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
-    const qc = N * (c - k);
-    const rc = N * (c + 2 * k);
+  if (symmetry !== "off") {
+    // Rotation center: hex center when the hex lattice is active (N > 0),
+    // otherwise the absolute world origin (0, 0) so symmetry can be used
+    // without displaying hexagons.
+    let qc: number;
+    let rc: number;
+    if (N > 0) {
+      const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
+      qc = N * (c - k);
+      rc = N * (c + 2 * k);
+    } else {
+      qc = 0;
+      rc = 0;
+    }
     let cur = tri;
     for (let i = 1; i <= 5; i++) {
       cur = rotateTrixelCCW(cur, qc, rc); // now at i * 60°

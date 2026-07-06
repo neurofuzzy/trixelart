@@ -45,6 +45,7 @@ export function useInteraction({
   captureMode,
   setCaptureMode,
   gridRotation = 0,
+  hexEnabled = true,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -69,6 +70,7 @@ export function useInteraction({
   captureMode?: boolean;
   setCaptureMode?: (v: boolean) => void;
   gridRotation?: number;
+  hexEnabled?: boolean;
 }) {
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
   const interaction = useRef<InteractionState>({
@@ -134,6 +136,11 @@ export function useInteraction({
   symmetryRef.current = symmetry;
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
+  // Whether the hex lattice is actually displayed. Symmetry rotation pivots
+  // around the hex center when this is true, otherwise around the world
+  // origin (paintTargets handles N<=0 as origin rotation).
+  const hexEnabledRef = useRef(hexEnabled);
+  hexEnabledRef.current = hexEnabled;
 
   // Selected hex (for stamp tool) — mirrored so click callbacks stay stable.
   const selectedHexRef = useRef(selectedHex);
@@ -153,13 +160,20 @@ export function useInteraction({
   // Ghost-preview targets: the hovered trixel + all its flower + symmetry
   // mirrors. Recomputed whenever the hover or any setting changes; rendered
   // on the canvas so users can see what a paint would land on before clicking.
+  // When the hex lattice is hidden, symmetry rotates around the world origin
+  // instead of a hex center (paintTargets treats N<=0 as origin rotation).
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
     if (tool === "select" || tool === "stamp") return [hoveredTri];
-    if (gridDivisions <= 0) return [hoveredTri];
-    const offsets = flowerOffsets(flowerRadius, gridDivisions);
-    return paintTargets(hoveredTri, gridDivisions, symmetry, offsets);
-  }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry]);
+    // Flower copies require the hex lattice; symmetry works at any N.
+    const offsets = gridDivisions > 0 ? flowerOffsets(flowerRadius, gridDivisions) : [];
+    return paintTargets(
+    hoveredTri,
+    hexEnabledRef.current ? gridDivisions : 0,
+    symmetry,
+    offsets,
+  );
+  }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry, hexEnabledRef]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   // Chrome/Edge/Firefox send wheel + ctrlKey; Safari sends gesture* events.
@@ -602,7 +616,10 @@ export function useInteraction({
         const offsets = flowerOffsetsRef.current;
         const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
-        let targets = paintTargets(tri, N, sym, offsets);
+        // Symmetry pivots around a hex center when the hex lattice is shown,
+        // otherwise around the world origin (paintTargets: N<=0 => origin).
+        const symN = hexEnabledRef.current ? N : 0;
+        let targets = paintTargets(tri, symN, sym, offsets);
         if (selectedHexRef.current && N > 0) {
           const sel = selectedHexRef.current;
           targets = targets.filter((t) => {
@@ -697,12 +714,13 @@ export function useInteraction({
         const offsets = flowerOffsetsRef.current;
         const sym = symmetryRef.current;
         const N = gridDivisionsRef.current;
+        const symN = hexEnabledRef.current ? N : 0;
 
         setPainted((prev) => {
           const next = { ...prev };
           let changed = false;
           for (const tri of tris) {
-            let targets = paintTargets(tri, N, sym, offsets);
+            let targets = paintTargets(tri, symN, sym, offsets);
             if (selectedHexRef.current && N > 0) {
               const sel = selectedHexRef.current;
               targets = targets.filter((t) => {

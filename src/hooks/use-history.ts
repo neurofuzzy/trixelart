@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { normalizeHexMode } from "@/components/Footer";
 
 export interface ProjectSnapshot {
   painted: Record<string, string>;
@@ -38,9 +39,7 @@ export function useHistory() {
             const snap: ProjectSnapshot = {
               painted: data.painted,
               gridDivisions: data.gridDivisions ?? 1,
-              hexMode: typeof data.hexMode === "boolean"
-                ? (data.hexMode ? "outlines" : "off")
-                : (data.hexMode ?? "off"),
+              hexMode: normalizeHexMode(data.hexMode),
               flowerRadius: data.flowerRadius ?? 0,
               symmetry: data.symmetry ?? "off",
               selections: Array.isArray(data.selections) ? data.selections : [],
@@ -54,7 +53,7 @@ export function useHistory() {
             setHistory([{
               painted: data,
               gridDivisions: 1,
-              hexMode: "off",
+              hexMode: "world",
               flowerRadius: 0,
               symmetry: "off",
               selections: [],
