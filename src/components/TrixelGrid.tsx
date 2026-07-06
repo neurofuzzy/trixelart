@@ -83,10 +83,11 @@ export default function TrixelGrid() {
 
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
-      if (typeof snap.gridDivisions === "number") setGridDivisions(snap.gridDivisions);
-      if (typeof snap.hexMode === "string") setHexMode(normalizeHexMode(snap.hexMode));
-      if (typeof snap.flowerRadius === "number") setFlowerRadius(snap.flowerRadius);
-      if (typeof snap.symmetry === "string") setSymmetry(snap.symmetry as Symmetry);
+      // Undo/redo only reverts the *edit* data. View settings (hexMode,
+      // gridDivisions, flowerRadius, symmetry) are persisted separately
+      // (SETTINGS_KEY) and shouldn't be touched by undo — otherwise
+      // changing a setting between edits would get rolled back alongside
+      // the paint when the user hits undo.
       if (Array.isArray(snap.selections)) {
         setSelections(snap.selections as SelectionSnapshot[]);
         const head = snap.selections[0] as SelectionSnapshot | undefined;
