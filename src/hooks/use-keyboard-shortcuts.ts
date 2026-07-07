@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
+import type { Tool } from "@/lib/tools";
 
 export function useKeyboardShortcuts(
   handleUndo: () => void,
   handleRedo: () => void,
-  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn") => void,
+  setTool: (tool: Tool) => void,
   setColorIdx: (idx: number) => void,
   colorCount: number,
   onClearSelection?: () => void,

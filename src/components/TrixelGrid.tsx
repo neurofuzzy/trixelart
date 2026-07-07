@@ -15,6 +15,7 @@ import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shift
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 import { rotateHexCW, rotateHexCCW, flipHexVertical, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
+import type { Tool } from "@/lib/tools";
 
 const STORAGE_KEY = "symmetria-save";
 
@@ -26,7 +27,7 @@ export default function TrixelGrid() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-  const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn">("paint");
+  const [tool, setTool] = useState<Tool>("paint");
   const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
   const [colorIdx, setColorIdx] = useState(8);
