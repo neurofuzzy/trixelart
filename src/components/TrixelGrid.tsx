@@ -624,6 +624,7 @@ export default function TrixelGrid() {
           stampFlash={stampFlash}
           captureMode={captureMode}
           gridRotation={gridRotation}
+          brushSize={brushSize}
         />
 
         {tool === "select" ? (

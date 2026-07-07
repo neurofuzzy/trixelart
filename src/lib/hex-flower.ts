@@ -170,7 +170,7 @@ export function enumerateHexTrixels(
  * falls into. Wedges are 60° sectors of the hex centred at the hex centre,
  * with wedge 0 starting at the vertex on the positive x-axis (0°).
  */
-function wedgeIndexOf(tri: TriKey, c: number, k: number, N: number): number {
+export function hexWedgeIndex(tri: TriKey, c: number, k: number, N: number): number {
   const center = hexCenterWorld(c, k, N);
   const tc = triCenter(tri.q, tri.r, tri.type);
   const dx = tc.x - center.x;
@@ -190,9 +190,9 @@ function wedgeIndexOf(tri: TriKey, c: number, k: number, N: number): number {
 export function getHexWedgeTrixels(tri: TriKey, N: number): TriKey[] {
   if (N <= 0) return [tri];
   const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
-  const wedge = wedgeIndexOf(tri, c, k, N);
+  const wedge = hexWedgeIndex(tri, c, k, N);
   return enumerateHexTrixels(c, k, N).filter(
-    (t) => wedgeIndexOf(t, c, k, N) === wedge,
+    (t) => hexWedgeIndex(t, c, k, N) === wedge,
   );
 }
 

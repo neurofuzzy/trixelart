@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
-import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, type SelectionSnapshot } from "@/lib/hex-flower";
+import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 
@@ -21,6 +21,7 @@ export function GridCanvas({
   stampFlash,
   captureMode,
   gridRotation = 0,
+  brushSize,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -36,6 +37,7 @@ export function GridCanvas({
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
   captureMode?: boolean;
   gridRotation?: number;
+  brushSize?: "single" | "hex";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -409,7 +411,13 @@ export function GridCanvas({
 
     // Hover outlines — primary + affected (flower/symmetry) ghosts.
     // Stamp tool renders a hexagon hover instead of per-trixel triangles.
+    // Hex brush renders a filled wedge polygon instead of individual trixels.
     if (hoverTargets.length > 0) {
+      const isHexBrush =
+        brushSize === "hex" &&
+        gridDivisions > 0 &&
+        tool !== "stamp" &&
+        tool !== "select";
       ctx.lineWidth = Math.max(2 / view.zoom, 1);
 
       if ((tool === "stamp" || tool === "select") && gridDivisions > 0) {
@@ -447,6 +455,66 @@ export function GridCanvas({
           ctx.fill();
           ctx.globalAlpha = 1;
         }
+      } else if (isHexBrush) {
+        // Hex brush: draw clean wedge polygon per hex instead of
+        // per-trixel outlines. Group hoverTargets by home hex so each
+        // hex appears once; flower copies show as additional faded
+        // hexes with the same wedge.
+        const hexesSeen = new Map<
+          string,
+          { c: number; k: number; wedge: number }
+        >();
+        for (const t of hoverTargets) {
+          const { c, k } = triToHex(
+            t.q,
+            t.r,
+            t.type,
+            gridDivisions,
+          );
+          const key = `${c},${k}`;
+          if (!hexesSeen.has(key)) {
+            hexesSeen.set(key, {
+              c,
+              k,
+              wedge: hexWedgeIndex(t, c, k, gridDivisions),
+            });
+          }
+        }
+        const entries = [...hexesSeen.values()];
+
+        for (let i = 0; i < entries.length; i++) {
+          const { c, k, wedge } = entries[i];
+          const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
+          const hs = gridDivisions * SIDE;
+          const hv = gridDivisions * H;
+          const V = [
+            { x: hx + hs, y: hy },
+            { x: hx + hs / 2, y: hy + hv },
+            { x: hx - hs / 2, y: hy + hv },
+            { x: hx - hs, y: hy },
+            { x: hx - hs / 2, y: hy - hv },
+            { x: hx + hs / 2, y: hy - hv },
+          ];
+          const alpha = i === 0 ? 0.25 : 0.1;
+
+          ctx.fillStyle = "white";
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.moveTo(hx, hy);
+          ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
+          ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = "white";
+          ctx.globalAlpha = alpha * 2;
+          ctx.beginPath();
+          ctx.moveTo(V[0].x, V[0].y);
+          for (let v = 1; v < 6; v++) ctx.lineTo(V[v].x, V[v].y);
+          ctx.closePath();
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
       } else {
         ctx.strokeStyle = "white";
         const [pa, pb, pc] = getTriVertices(
@@ -484,7 +552,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize]);
 
   return (
     <canvas
