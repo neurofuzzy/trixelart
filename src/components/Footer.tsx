@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Hexagon, Expand, Aperture, Undo2, Redo2 } from "lucide-react";
+import { Hexagon, Expand, Aperture, Undo2, Redo2, Paintbrush } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 export type HexMode = "world" | "honeycomb";
 export type Symmetry = "off" | "sym60" | "sym120";
 export type GridOrientation = "flat-top" | "pointy-top";
+export type BrushSize = "single" | "hex";
 
 /** Maps any external/stored hex-mode value onto the current enum.
  *  Legacy modes: boolean true (outlines/centers) -> honeycomb; false/off -> world.
@@ -53,6 +54,8 @@ export function Footer({
   captureMode,
   gridOrientation,
   onGridOrientationChange,
+  brushSize,
+  onBrushSizeChange,
 }: {
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
@@ -70,6 +73,8 @@ export function Footer({
   captureMode?: boolean;
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
+  brushSize?: BrushSize;
+  onBrushSizeChange?: (v: BrushSize) => void;
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
@@ -266,6 +271,31 @@ export function Footer({
           onMouseLeave={clearTooltip}
         >
           <Aperture className="w-4 h-4" />
+        </button>
+        <button
+          className={cn(
+            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            brushSize === "hex" &&
+              hexMode === "honeycomb" &&
+              gridDivisions > 0 &&
+              "bg-lime-500/25 text-lime-300",
+          )}
+          onClick={() => {
+            const next = brushSize === "hex" ? "single" : "hex";
+            onBrushSizeChange?.(next);
+            setTooltip(
+              next === "hex" ? "Brush: hex wedge" : "Brush: single",
+            );
+          }}
+          disabled={gridDivisions === 0 || hexMode === "world"}
+          onMouseEnter={() =>
+            setTooltip(
+              brushSize === "hex" ? "Brush: hex wedge" : "Brush: single",
+            )
+          }
+          onMouseLeave={clearTooltip}
+        >
+          <Paintbrush className="w-4 h-4" />
         </button>
         <div className="relative">
           <button

@@ -75,7 +75,7 @@ export function makeEditTool(
 
       ctx.lastPaintTriRef.current = tri;
       ctx.lastEditToolRef.current = ctx.tool;
-      const targets = ctx.expandTargets(tri);
+      const targets = ctx.brushExpand(tri);
       const clickKeys = targets.map(triToString);
       ctx.drag.current = {
         kind: "edit",
@@ -105,7 +105,7 @@ export function makeEditTool(
         // setPainted so the updater is pure (React StrictMode replays it).
         const candidates = new Set<string>();
         for (const tri of tris) {
-          for (const t of ctx.expandTargets(tri)) {
+          for (const t of ctx.brushExpand(tri)) {
             const k = triToString(t);
             if (!drag.visited.has(k)) candidates.add(k);
           }
@@ -127,7 +127,7 @@ export function makeEditTool(
           const next = { ...prev };
           let changed = false;
           for (const tri of tris) {
-            for (const t of ctx.expandTargets(tri)) {
+            for (const t of ctx.brushExpand(tri)) {
               changed = keyOp(next, triToString(t), ctx) || changed;
             }
           }

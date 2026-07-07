@@ -38,6 +38,7 @@ export default function TrixelGrid() {
   const [hexMode, setHexMode] = useState<HexMode>("world");
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
+  const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
   const [gridOrientation, setGridOrientation] = useState<GridOrientation>("flat-top");
   // Display-only rotation: pointy-top hexes are flat-top rotated 90°. The
   // underlying tri-axial lattice, hex geometry, symmetry math, history and
@@ -128,13 +129,14 @@ export default function TrixelGrid() {
         if (typeof data.gridOrientation === "string") {
           setGridOrientation(data.gridOrientation as GridOrientation);
         }
+        if (data.brushSize === "hex") setBrushSize("hex");
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation }));
-  }, [gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize }));
+  }, [gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize]);
 
   useEffect(() => {
     try {
@@ -209,6 +211,7 @@ export default function TrixelGrid() {
     captureMode,
     setCaptureMode,
     gridRotation,
+    brushSize,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -672,6 +675,8 @@ export default function TrixelGrid() {
         onFlowerRadiusChange={setFlowerRadius}
         symmetry={symmetry}
         onSymmetryChange={setSymmetry}
+        brushSize={brushSize}
+        onBrushSizeChange={setBrushSize}
         handleUndo={onUndo}
         handleRedo={onRedo}
         historyIdx={historyIdx}

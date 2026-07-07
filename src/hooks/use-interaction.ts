@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { worldToTri, type TriKey } from "@/lib/grid-math";
+import { worldToTri, triToString, type TriKey } from "@/lib/grid-math";
 import {
   flowerOffsets,
   paintTargets,
   triToHex,
+  getHexWedgeTrixels,
   type Symmetry,
   type SelectionSnapshot,
 } from "@/lib/hex-flower";
@@ -45,6 +46,7 @@ interface UseInteractionArgs {
   setCaptureMode?: (v: boolean) => void;
   gridRotation?: number;
   hexEnabled?: boolean;
+  brushSize?: "single" | "hex";
 }
 
 export function useInteraction(args: UseInteractionArgs) {
@@ -73,6 +75,7 @@ export function useInteraction(args: UseInteractionArgs) {
     setCaptureMode,
     gridRotation = 0,
     hexEnabled = true,
+    brushSize = "single",
   } = args;
 
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
@@ -100,6 +103,8 @@ export function useInteraction(args: UseInteractionArgs) {
   selectedHexRef.current = selectedHex;
   const activeSelectionRef = useRef(activeSelection);
   activeSelectionRef.current = activeSelection;
+  const brushSizeRef = useRef(brushSize);
+  brushSizeRef.current = brushSize;
 
   const lastPaintTriRef = useRef<TriKey | null>(null);
   const lastEditToolRef = useRef<Tool | null>(null);
@@ -129,21 +134,29 @@ export function useInteraction(args: UseInteractionArgs) {
     }
   }, [flowerRadius, gridDivisions]);
 
-  // Ghost-preview targets: the hovered trixel + all its flower + symmetry
-  // mirrors. Recomputed whenever the hover or any setting changes; rendered
-  // on the canvas so users can see what a paint would land on before clicking.
+  // Ghost-preview targets: the hovered trixel expanded through brush size,
+  // flower, and symmetry. Recomputed whenever the hover or any setting
+  // changes; rendered on the canvas so users can see what a paint would
+  // land on before clicking.
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
     if (tool === "select" || tool === "stamp") return [hoveredTri];
+    const N = gridDivisions;
     const offsets =
-      gridDivisions > 0 ? flowerOffsets(flowerRadius, gridDivisions) : [];
-    return paintTargets(
-      hoveredTri,
-      hexEnabledRef.current ? gridDivisions : 0,
-      symmetry,
-      offsets,
-    );
-  }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry, hexEnabledRef]);
+      N > 0 ? flowerOffsets(flowerRadius, N) : [];
+    const symN = hexEnabledRef.current ? N : 0;
+    const seeds =
+      brushSize === "hex" && N > 0
+        ? getHexWedgeTrixels(hoveredTri, N)
+        : [hoveredTri];
+    const out = new Map<string, TriKey>();
+    for (const seed of seeds) {
+      for (const t of paintTargets(seed, symN, symmetry, offsets)) {
+        out.set(triToString(t), t);
+      }
+    }
+    return [...out.values()];
+  }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry, hexEnabledRef, brushSize]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
   useEffect(() => {
@@ -195,15 +208,30 @@ export function useInteraction(args: UseInteractionArgs) {
     [containerRef],
   );
 
-  // Shared expandTargets: flower + symmetry + selectedHex clipping. Bound
-  // once per render and passed to every tool via ToolContext.
-  const expandTargets = useCallback(
+  // brushExpand: brush-size expansion (hex-wedge) → flower + symmetry +
+  // selectedHex clipping. Bound once per render, passed to tools via
+  // ToolContext. Only edit tools (paint/erase/dodge/burn) use this;
+  // select/stamp operate on single trixels directly.
+  const brushExpand = useCallback(
     (tri: TriKey): TriKey[] => {
+      const N = gridDivisionsRef.current;
+      const seeds =
+        brushSizeRef.current === "hex" && N > 0 && hexEnabledRef.current
+          ? getHexWedgeTrixels(tri, N)
+          : [tri];
       const offsets = flowerOffsetsRef.current;
       const sym = symmetryRef.current;
-      const N = gridDivisionsRef.current;
       const symN = hexEnabledRef.current ? N : 0;
-      let targets = paintTargets(tri, symN, sym, offsets);
+      const out = new Map<string, TriKey>();
+      for (const seed of seeds) {
+        for (const t of paintTargets(seed, symN, sym, offsets)) {
+          out.set(triToString(t), t);
+        }
+      }
+      let targets = [...out.values()];
+      // selectedHex clipping: selection is a stronger constraint than brush
+      // size — painting outside a selected hex yields nothing, consistent
+      // with single-brush behaviour.
       if (selectedHexRef.current && N > 0) {
         const sel = selectedHexRef.current;
         targets = targets.filter((t) => {
@@ -242,7 +270,7 @@ export function useInteraction(args: UseInteractionArgs) {
     drag,
     lastPaintTriRef,
     lastEditToolRef,
-    expandTargets,
+    brushExpand,
     activeSelection,
     setActiveSelection,
     setSelections,

@@ -1,4 +1,4 @@
-import { SIDE, H, worldToTri, triToString, type TriKey, type TriType } from "./grid-math";
+import { SIDE, H, worldToTri, triToString, triCenter, type TriKey, type TriType } from "./grid-math";
 import { encodeColor } from "./constants";
 
 /**
@@ -163,6 +163,37 @@ export function enumerateHexTrixels(
     }
   }
   return out;
+}
+
+/**
+ * Returns which of the 6 angular wedges (0-5) of hex (c,k,N) the trixel
+ * falls into. Wedges are 60° sectors of the hex centred at the hex centre,
+ * with wedge 0 starting at the vertex on the positive x-axis (0°).
+ */
+function wedgeIndexOf(tri: TriKey, c: number, k: number, N: number): number {
+  const center = hexCenterWorld(c, k, N);
+  const tc = triCenter(tri.q, tri.r, tri.type);
+  const dx = tc.x - center.x;
+  const dy = tc.y - center.y;
+  const angle = Math.atan2(dy, dx);
+  const deg = ((angle * 180) / Math.PI + 360) % 360;
+  return Math.floor(deg / 60);
+}
+
+/**
+ * Returns all trixels in the same 60° angular wedge of trixel `tri`'s home
+ * hex (lattice spacing N). Each hex is divided into 6 equilateral-triangle
+ * wedges meeting at the hex centre; a wedge contains N² trixels.
+ *
+ * Falls back to `[tri]` when N <= 0 (hex lattice disabled).
+ */
+export function getHexWedgeTrixels(tri: TriKey, N: number): TriKey[] {
+  if (N <= 0) return [tri];
+  const { c, k } = triToHex(tri.q, tri.r, tri.type, N);
+  const wedge = wedgeIndexOf(tri, c, k, N);
+  return enumerateHexTrixels(c, k, N).filter(
+    (t) => wedgeIndexOf(t, c, k, N) === wedge,
+  );
 }
 
 /**

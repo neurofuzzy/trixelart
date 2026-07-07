@@ -70,7 +70,7 @@ export interface ToolContext {
   drag: React.MutableRefObject<DragState>;
   lastPaintTriRef: React.MutableRefObject<TriKey | null>;
   lastEditToolRef: React.MutableRefObject<Tool | null>;
-  expandTargets: (tri: TriKey) => TriKey[];
+  brushExpand: (tri: TriKey) => TriKey[];
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
