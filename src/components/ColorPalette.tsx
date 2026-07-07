@@ -46,18 +46,18 @@ export function ColorPalette({
           style={{ backgroundColor: c }}
         />
       ))}
-      <div className="relative ml-1 lg:ml-0 lg:mt-1">
+      <div className="relative ml-4 lg:ml-0 lg:mt-4">
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 rounded-full"
+          className="h-8 w-8 rounded-full [&_svg]:size-6"
           onClick={(e) => {
             e.stopPropagation();
             setPickerOpen((v) => !v);
           }}
           title="Change palette"
         >
-          <Palette className="w-4 h-4" />
+          <Palette />
         </Button>
         <PalettePicker
           isOpen={pickerOpen}

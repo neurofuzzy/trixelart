@@ -592,6 +592,14 @@ export default function TrixelGrid() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
         hasSelection={selections.length > 0}
+        symmetry={symmetry}
+        onSymmetryChange={setSymmetry}
+        brushSize={brushSize}
+        onBrushSizeChange={setBrushSize}
+        flowerRadius={flowerRadius}
+        onFlowerRadiusChange={setFlowerRadius}
+        hexMode={hexMode}
+        gridDivisions={gridDivisions}
       />
 
       <div
@@ -672,12 +680,6 @@ export default function TrixelGrid() {
         onGridDivisionsChange={setGridDivisions}
         hexMode={hexMode}
         onHexModeChange={setHexMode}
-        flowerRadius={flowerRadius}
-        onFlowerRadiusChange={setFlowerRadius}
-        symmetry={symmetry}
-        onSymmetryChange={setSymmetry}
-        brushSize={brushSize}
-        onBrushSizeChange={setBrushSize}
         handleUndo={onUndo}
         handleRedo={onRedo}
         historyIdx={historyIdx}
