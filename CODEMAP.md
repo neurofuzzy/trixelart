@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-05 23:15:43
+# Last updated: 2026-07-07 06:03:04
 # Files: 22
-# Lines of code: ~4063
+# Lines of code: ~4309
 ```
 - **/app**
   - **/lib**
@@ -25,6 +25,7 @@
     - Type: `HexMode`
     - Type: `Symmetry`
     - Type: `GridOrientation`
+    - Function: `normalizeHexMode` - Maps any external/stored hex-mode value onto th...
     - Function: `Footer`
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
@@ -61,6 +62,8 @@
     - Function: `decodeColor`
     - Function: `resolveColor`
     - Function: `remapGrid`
+    - Function: `dodgeColor`
+    - Function: `burnColor`
     - Function: `shiftGridPalettes`
   - [grid-math.ts](../src/lib/grid-math.ts) - Triangular Grid Mathematics
     - Variable: `SIDE` - Triangular Grid Mathematics Uses a coordinate s...
@@ -90,6 +93,7 @@
     - Function: `paintTargets` - Expands a single painted trixel into the full s...
     - Function: `rotateHexCW`
     - Function: `rotateHexCCW`
+    - Function: `flipHexVertical`
     - Function: `remapHex`
     - Function: `shiftHexPalettes`
   - [utils.ts](../src/lib/utils.ts)

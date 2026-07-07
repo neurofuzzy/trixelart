@@ -1,10 +1,39 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { SIDE, H, worldToTri, triToString, stringToTri, getTrianglesOnLine, triCenter, type TriKey } from "@/lib/grid-math";
-import { flowerOffsets, paintTargets, triToHex, enumerateHexTrixels, hexTranslation, hexCenterTriAxial, captureHexSnapshot, type Symmetry, type SelectionSnapshot } from "@/lib/hex-flower";
-import { ZOOM_MIN, ZOOM_MAX, WHEEL_DIVISOR, PINCH_SENSITIVITY } from "@/lib/config";
-import { encodeColor, resolveColor } from "@/lib/constants";
+import {
+  SIDE,
+  H,
+  worldToTri,
+  triToString,
+  stringToTri,
+  getTrianglesOnLine,
+  triCenter,
+  type TriKey,
+} from "@/lib/grid-math";
+import {
+  flowerOffsets,
+  paintTargets,
+  triToHex,
+  enumerateHexTrixels,
+  hexTranslation,
+  hexCenterTriAxial,
+  captureHexSnapshot,
+  type Symmetry,
+  type SelectionSnapshot,
+} from "@/lib/hex-flower";
+import {
+  ZOOM_MIN,
+  ZOOM_MAX,
+  WHEEL_DIVISOR,
+  PINCH_SENSITIVITY,
+} from "@/lib/config";
+import {
+  encodeColor,
+  resolveColor,
+  dodgeColor,
+  burnColor,
+} from "@/lib/constants";
 
 interface InteractionState {
   isPainting: boolean;
@@ -19,6 +48,8 @@ interface InteractionState {
   moveDq: number;
   moveDr: number;
   moveOriginPainted: Record<string, string> | null;
+  dodgeBurnVisited: Set<string>;
+  clickKeys: string[] | null;
 }
 
 export function useInteraction({
@@ -49,9 +80,13 @@ export function useInteraction({
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
-  setView: React.Dispatch<React.SetStateAction<{ x: number; y: number; zoom: number }>>;
-  tool: "paint" | "erase" | "pan" | "select" | "stamp";
-  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void;
+  setView: React.Dispatch<
+    React.SetStateAction<{ x: number; y: number; zoom: number }>
+  >;
+  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn";
+  setTool: (
+    tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn",
+  ) => void;
   color: string;
   setColor: (color: string) => void;
   painted: Record<string, string>;
@@ -86,6 +121,8 @@ export function useInteraction({
     moveDq: 0,
     moveDr: 0,
     moveOriginPainted: null,
+    dodgeBurnVisited: new Set(),
+    clickKeys: null,
   });
 
   const onCommitRef = useRef(onCommit);
@@ -153,9 +190,13 @@ export function useInteraction({
   paintedRef.current = painted;
   const toolRef = useRef(tool);
   toolRef.current = tool;
+  const colorRef = useRef(color);
+  colorRef.current = color;
 
   const lastPaintTriRef = useRef<TriKey | null>(null);
-  const lastEditToolRef = useRef<"paint" | "erase" | null>(null);
+  const lastEditToolRef = useRef<"paint" | "erase" | "dodge" | "burn" | null>(
+    null,
+  );
 
   // Ghost-preview targets: the hovered trixel + all its flower + symmetry
   // mirrors. Recomputed whenever the hover or any setting changes; rendered
@@ -166,13 +207,14 @@ export function useInteraction({
     if (!hoveredTri) return [];
     if (tool === "select" || tool === "stamp") return [hoveredTri];
     // Flower copies require the hex lattice; symmetry works at any N.
-    const offsets = gridDivisions > 0 ? flowerOffsets(flowerRadius, gridDivisions) : [];
+    const offsets =
+      gridDivisions > 0 ? flowerOffsets(flowerRadius, gridDivisions) : [];
     return paintTargets(
-    hoveredTri,
-    hexEnabledRef.current ? gridDivisions : 0,
-    symmetry,
-    offsets,
-  );
+      hoveredTri,
+      hexEnabledRef.current ? gridDivisions : 0,
+      symmetry,
+      offsets,
+    );
   }, [hoveredTri, tool, gridDivisions, flowerRadius, symmetry, hexEnabledRef]);
 
   // Prevent browser zoom from trackpad pinch globally (document-level).
@@ -209,91 +251,100 @@ export function useInteraction({
     return () => el.removeEventListener("wheel", prevent);
   }, [containerRef]);
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length !== 2) return;
-    e.preventDefault();
+  const onTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
 
-    isTwoFinger.current = true;
-    interaction.current.isPainting = false;
-    interaction.current.isPanning = false;
-    interaction.current.isViewPanning = false;
+      isTwoFinger.current = true;
+      interaction.current.isPainting = false;
+      interaction.current.isPanning = false;
+      interaction.current.isViewPanning = false;
 
-    const t1 = e.touches[0];
-    const t2 = e.touches[1];
-    let cx1 = t1.clientX;
-    let cy1 = t1.clientY;
-    let cx2 = t2.clientX;
-    let cy2 = t2.clientY;
-    if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
-      const dpr = window.devicePixelRatio || 1;
-      cx1 /= dpr;
-      cy1 /= dpr;
-      cx2 /= dpr;
-      cy2 /= dpr;
-    }
-    const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
-    const midX = (cx1 + cx2) / 2;
-    const midY = (cy1 + cy2) / 2;
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      let cx1 = t1.clientX;
+      let cy1 = t1.clientY;
+      let cx2 = t2.clientX;
+      let cy2 = t2.clientY;
+      if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
+        const dpr = window.devicePixelRatio || 1;
+        cx1 /= dpr;
+        cy1 /= dpr;
+        cx2 /= dpr;
+        cy2 /= dpr;
+      }
+      const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+      const midX = (cx1 + cx2) / 2;
+      const midY = (cy1 + cy2) / 2;
 
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = midX - rect.left;
-    const sy = midY - rect.top;
-    const { x: vx, y: vy, zoom } = viewRef.current;
-    const { width, height } = sizeRef.current;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sx = midX - rect.left;
+      const sy = midY - rect.top;
+      const { x: vx, y: vy, zoom } = viewRef.current;
+      const { width, height } = sizeRef.current;
 
-    const ux = (sx - width / 2) / zoom;
-    const uy = (sy - height / 2) / zoom;
-    pinch.current = {
-      dist,
-      startView: { x: vx, y: vy, zoom },
-      worldAtMid: {
-        x: invCos * ux - invSin * uy - vx,
-        y: invSin * ux + invCos * uy - vy,
-      },
-    };
-  }, [containerRef, invCos, invSin]);
+      const ux = (sx - width / 2) / zoom;
+      const uy = (sy - height / 2) / zoom;
+      pinch.current = {
+        dist,
+        startView: { x: vx, y: vy, zoom },
+        worldAtMid: {
+          x: invCos * ux - invSin * uy - vx,
+          y: invSin * ux + invCos * uy - vy,
+        },
+      };
+    },
+    [containerRef, invCos, invSin],
+  );
 
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!pinch.current) return;
-    if (e.touches.length < 2) return;
-    e.preventDefault();
+  const onTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!pinch.current) return;
+      if (e.touches.length < 2) return;
+      e.preventDefault();
 
-    const t1 = e.touches[0];
-    const t2 = e.touches[1];
-    let cx1 = t1.clientX;
-    let cy1 = t1.clientY;
-    let cx2 = t2.clientX;
-    let cy2 = t2.clientY;
-    if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
-      const dpr = window.devicePixelRatio || 1;
-      cx1 /= dpr;
-      cy1 /= dpr;
-      cx2 /= dpr;
-      cy2 /= dpr;
-    }
-    const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      let cx1 = t1.clientX;
+      let cy1 = t1.clientY;
+      let cx2 = t2.clientX;
+      let cy2 = t2.clientY;
+      if (cx1 > window.innerWidth * 1.5 || cy1 > window.innerHeight * 1.5) {
+        const dpr = window.devicePixelRatio || 1;
+        cx1 /= dpr;
+        cy1 /= dpr;
+        cx2 /= dpr;
+        cy2 /= dpr;
+      }
+      const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
 
-    const { dist: initDist, startView, worldAtMid } = pinch.current;
-    const scale = 1 + (dist / initDist - 1) * PINCH_SENSITIVITY;
-    const newZoom = Math.min(Math.max(startView.zoom * scale, ZOOM_MIN), ZOOM_MAX);
+      const { dist: initDist, startView, worldAtMid } = pinch.current;
+      const scale = 1 + (dist / initDist - 1) * PINCH_SENSITIVITY;
+      const newZoom = Math.min(
+        Math.max(startView.zoom * scale, ZOOM_MIN),
+        ZOOM_MAX,
+      );
 
-    const midX = (cx1 + cx2) / 2;
-    const midY = (cy1 + cy2) / 2;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = midX - rect.left;
-    const sy = midY - rect.top;
-    const { width, height } = sizeRef.current;
+      const midX = (cx1 + cx2) / 2;
+      const midY = (cy1 + cy2) / 2;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sx = midX - rect.left;
+      const sy = midY - rect.top;
+      const { width, height } = sizeRef.current;
 
-    const ux = (sx - width / 2) / newZoom;
-    const uy = (sy - height / 2) / newZoom;
-    setView({
-      x: invCos * ux - invSin * uy - worldAtMid.x,
-      y: invSin * ux + invCos * uy - worldAtMid.y,
-      zoom: newZoom,
-    });
-  }, [containerRef, setView, invCos, invSin]);
+      const ux = (sx - width / 2) / newZoom;
+      const uy = (sy - height / 2) / newZoom;
+      setView({
+        x: invCos * ux - invSin * uy - worldAtMid.x,
+        y: invSin * ux + invCos * uy - worldAtMid.y,
+        zoom: newZoom,
+      });
+    },
+    [containerRef, setView, invCos, invSin],
+  );
 
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length < 2) {
@@ -353,6 +404,8 @@ export function useInteraction({
           lastPaintedWorld: null,
           moveStartWorld: null,
           moveOriginPainted: null,
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
           moveStartView: null,
           moveDq: 0,
           moveDr: 0,
@@ -372,6 +425,8 @@ export function useInteraction({
           moveDq: 0,
           moveDr: 0,
           moveOriginPainted: { ...paintedRef.current },
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
         };
       } else if (tool === "select") {
         const N = gridDivisionsRef.current;
@@ -420,6 +475,8 @@ export function useInteraction({
           lastPaintedWorld: null,
           moveStartWorld: null,
           moveOriginPainted: null,
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
           moveStartView: null,
           moveDq: 0,
           moveDr: 0,
@@ -432,7 +489,12 @@ export function useInteraction({
 
         if ((e.altKey || captureModeRef.current) && N > 0) {
           const hex = triToHex(tri.q, tri.r, tri.type, N);
-          const captured = captureHexSnapshot(paintedRef.current, hex.c, hex.k, N);
+          const captured = captureHexSnapshot(
+            paintedRef.current,
+            hex.c,
+            hex.k,
+            N,
+          );
           if (captured.trixels.length > 0) {
             const key = JSON.stringify(
               captured.trixels.map((t) => [t.dq, t.dr, t.type, t.color]).sort(),
@@ -454,7 +516,10 @@ export function useInteraction({
                 return prev;
               }
               activeSnap = captured;
-              const next = [captured, ...prev.filter((s) => s.id !== captured.id)];
+              const next = [
+                captured,
+                ...prev.filter((s) => s.id !== captured.id),
+              ];
               return next.slice(0, 5);
             });
             if (activeSnap) setActiveSelection(activeSnap);
@@ -472,7 +537,10 @@ export function useInteraction({
             if (!erase) {
               for (const t of enumerateHexTrixels(destHex.c, destHex.k, N)) {
                 const key = triToString(t);
-                if (key in next) { delete next[key]; changed = true; }
+                if (key in next) {
+                  delete next[key];
+                  changed = true;
+                }
               }
             }
             for (const t of snap.trixels) {
@@ -482,7 +550,10 @@ export function useInteraction({
                 type: t.type,
               });
               if (erase) {
-                if (key in next) { delete next[key]; changed = true; }
+                if (key in next) {
+                  delete next[key];
+                  changed = true;
+                }
               } else {
                 next[key] = t.color;
                 changed = true;
@@ -502,15 +573,26 @@ export function useInteraction({
           lastPaintedWorld: null,
           moveStartWorld: null,
           moveOriginPainted: null,
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
           moveStartView: null,
           moveDq: 0,
           moveDr: 0,
         };
-      } else if ((tool === "paint" || tool === "erase") && e.shiftKey) {
+      } else if (
+        (tool === "paint" ||
+          tool === "erase" ||
+          tool === "dodge" ||
+          tool === "burn") &&
+        e.shiftKey
+      ) {
         const world = screenToWorld(pos.x, pos.y);
         const clickedTri = worldToTri(world.x, world.y);
 
-        if (lastEditToolRef.current !== null && lastEditToolRef.current !== tool) {
+        if (
+          lastEditToolRef.current !== null &&
+          lastEditToolRef.current !== tool
+        ) {
           lastPaintTriRef.current = null;
         }
         lastEditToolRef.current = tool;
@@ -545,7 +627,12 @@ export function useInteraction({
           }
 
           if (bestClosest) {
-            let lineTris = getTrianglesOnLine(origin.x, origin.y, bestClosest.x, bestClosest.y);
+            let lineTris = getTrianglesOnLine(
+              origin.x,
+              origin.y,
+              bestClosest.x,
+              bestClosest.y,
+            );
             const Nsel = gridDivisionsRef.current;
             if (selectedHexRef.current && Nsel > 0) {
               const sel = selectedHexRef.current;
@@ -563,11 +650,26 @@ export function useInteraction({
               const next = { ...prev };
               let changed = false;
               const isErase = tool === "erase";
+              const isDodge = tool === "dodge";
+              const isBurn = tool === "burn";
               for (const lt of lineTris) {
                 const k = triToString(lt);
                 if (isErase) {
-                  if (k in next) { delete next[k]; changed = true; }
-                } else if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
+                  if (k in next) {
+                    delete next[k];
+                    changed = true;
+                  }
+                } else if (isDodge || isBurn) {
+                  const existing = next[k];
+                  if (existing) {
+                    next[k] = isDodge
+                      ? dodgeColor(existing)
+                      : burnColor(existing);
+                    changed = true;
+                  }
+                } else if (
+                  resolveColor(next[k] ?? "") !== resolveColor(color)
+                ) {
                   next[k] = color;
                   changed = true;
                 }
@@ -575,7 +677,6 @@ export function useInteraction({
               return changed ? next : prev;
             });
           }
-
         }
 
         interaction.current = {
@@ -588,6 +689,8 @@ export function useInteraction({
           lastPaintedWorld: null,
           moveStartWorld: null,
           moveOriginPainted: null,
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
           moveStartView: null,
           moveDq: 0,
           moveDr: 0,
@@ -605,6 +708,8 @@ export function useInteraction({
           lastPaintedWorld: { x: world.x, y: world.y },
           moveStartWorld: null,
           moveOriginPainted: null,
+          dodgeBurnVisited: new Set(),
+          clickKeys: null,
           moveStartView: null,
           moveDq: 0,
           moveDr: 0,
@@ -628,38 +733,18 @@ export function useInteraction({
           });
         }
         const keys = targets.map(triToString);
-
-        setPainted((prev) => {
-          const next = { ...prev };
-          if (tool === "paint" && targets.length === 1) {
-            if (resolveColor(prev[keys[0]] ?? "") === resolveColor(color)) {
-              delete next[keys[0]];
-            } else {
-              next[keys[0]] = color;
-            }
-          } else {
-            let changed = false;
-            for (const k of keys) {
-              if (tool === "paint") {
-                if (resolveColor(next[k] ?? "") !== resolveColor(color)) {
-                  next[k] = color;
-                  changed = true;
-                }
-              } else {
-                if (k in next) {
-                  delete next[k];
-                  changed = true;
-                }
-              }
-            }
-            if (!changed) return prev;
-          }
-          return next;
-        });
+        interaction.current.clickKeys = keys;
       }
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [tool, color, getRelativePointer, screenToWorld, setPainted, setSelectedHex],
+    [
+      tool,
+      color,
+      getRelativePointer,
+      screenToWorld,
+      setPainted,
+      setSelectedHex,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -686,7 +771,10 @@ export function useInteraction({
 
         setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
         interaction.current.lastPos = { x: e.clientX, y: e.clientY };
-      } else if (interaction.current.isPanning && interaction.current.moveStartWorld) {
+      } else if (
+        interaction.current.isPanning &&
+        interaction.current.moveStartWorld
+      ) {
         const ms = interaction.current.moveStartWorld;
         const dr = Math.round((world.y - ms.y) / H);
         const dq = Math.round((world.x - ms.x) / SIDE - dr * 0.5);
@@ -696,11 +784,17 @@ export function useInteraction({
 
         if (dq !== 0 || dr !== 0) interaction.current.hasMoved = true;
 
-        if (interaction.current.hasMoved && interaction.current.moveOriginPainted) {
+        if (
+          interaction.current.hasMoved &&
+          interaction.current.moveOriginPainted
+        ) {
           const next: Record<string, string> = {};
-          for (const [key, value] of Object.entries(interaction.current.moveOriginPainted)) {
+          for (const [key, value] of Object.entries(
+            interaction.current.moveOriginPainted,
+          )) {
             const t = stringToTri(key);
-            next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] = value;
+            next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] =
+              value;
           }
           setPainted(next);
         }
@@ -708,7 +802,14 @@ export function useInteraction({
         const lastWorld = interaction.current.lastPaintedWorld;
         if (!lastWorld) return;
 
-        const tris = getTrianglesOnLine(lastWorld.x, lastWorld.y, world.x, world.y);
+        interaction.current.hasMoved = true;
+
+        const tris = getTrianglesOnLine(
+          lastWorld.x,
+          lastWorld.y,
+          world.x,
+          world.y,
+        );
         interaction.current.lastPaintedWorld = { x: world.x, y: world.y };
 
         const offsets = flowerOffsetsRef.current;
@@ -735,6 +836,17 @@ export function useInteraction({
                   next[k] = color;
                   changed = true;
                 }
+              } else if (tool === "dodge" || tool === "burn") {
+                if (interaction.current.dodgeBurnVisited.has(k)) continue;
+                const existing = next[k];
+                if (existing) {
+                  next[k] =
+                    tool === "dodge"
+                      ? dodgeColor(existing)
+                      : burnColor(existing);
+                  interaction.current.dodgeBurnVisited.add(k);
+                  changed = true;
+                }
               } else {
                 if (k in next) {
                   delete next[k];
@@ -747,7 +859,17 @@ export function useInteraction({
         });
       }
     },
-    [view, setView, tool, color, getRelativePointer, screenToWorld, setPainted, invCos, invSin],
+    [
+      view,
+      setView,
+      tool,
+      color,
+      getRelativePointer,
+      screenToWorld,
+      setPainted,
+      invCos,
+      invSin,
+    ],
   );
 
   const onPointerUp = useCallback(
@@ -775,7 +897,11 @@ export function useInteraction({
             const dr = interaction.current.moveDr;
             const dwx = (dq + dr * 0.5) * SIDE;
             const dwy = dr * H;
-            setView({ x: sv.x - dwx, y: sv.y - dwy, zoom: viewRef.current.zoom });
+            setView({
+              x: sv.x - dwx,
+              y: sv.y - dwy,
+              zoom: viewRef.current.zoom,
+            });
           }
           lastPaintTriRef.current = null;
           lastEditToolRef.current = null;
@@ -789,7 +915,8 @@ export function useInteraction({
             const next: Record<string, string> = {};
             for (const [key, value] of Object.entries(painted)) {
               const t = stringToTri(key);
-              next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] = value;
+              next[triToString({ q: t.q + dq, r: t.r + dr, type: t.type })] =
+                value;
             }
             const dwx = (dq + dr * 0.5) * SIDE;
             const dwy = dr * H;
@@ -802,6 +929,53 @@ export function useInteraction({
       }
 
       if (interaction.current.isPainting) {
+        const t = toolRef.current;
+        const shouldClick = !interaction.current.hasMoved || t === "dodge" || t === "burn" || t === "erase";
+        if (shouldClick) {
+          const ck = interaction.current.clickKeys;
+          if (ck && ck.length > 0) {
+            const clr = colorRef.current;
+            setPainted((prev) => {
+              const next = { ...prev };
+              if (t === "paint" && ck.length === 1) {
+                if (resolveColor(prev[ck[0]] ?? "") === resolveColor(clr)) {
+                  delete next[ck[0]];
+                } else {
+                  next[ck[0]] = clr;
+                }
+              } else if (t === "paint") {
+                let changed = false;
+                for (const k of ck) {
+                  if (resolveColor(next[k] ?? "") !== resolveColor(clr)) {
+                    next[k] = clr;
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+              } else if (t === "erase") {
+                let changed = false;
+                for (const k of ck) {
+                  if (k in next) {
+                    delete next[k];
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+              } else if (t === "dodge" || t === "burn") {
+                let changed = false;
+                for (const k of ck) {
+                  const existing = next[k];
+                  if (existing) {
+                    next[k] = t === "dodge" ? dodgeColor(existing) : burnColor(existing);
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+              }
+              return next;
+            });
+          }
+        }
         onCommitRef.current();
       }
 
@@ -818,6 +992,8 @@ export function useInteraction({
         moveDq: 0,
         moveDr: 0,
         moveOriginPainted: null,
+        dodgeBurnVisited: new Set(),
+        clickKeys: null,
       };
       e.currentTarget.releasePointerCapture(e.pointerId);
     },

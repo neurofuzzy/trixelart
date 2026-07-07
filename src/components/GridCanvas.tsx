@@ -31,7 +31,7 @@ export function GridCanvas({
   gridDivisions: number;
   hexMode: HexMode;
   selectedHex: { c: number; k: number } | null;
-  tool: "paint" | "erase" | "pan" | "select" | "stamp";
+  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn";
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
   captureMode?: boolean;

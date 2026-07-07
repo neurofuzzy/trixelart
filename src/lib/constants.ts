@@ -238,6 +238,23 @@ export function remapGrid(
   return result;
 }
 
+export function dodgeColor(encoded: string): string {
+  const d = decodeColor(encoded);
+  if (!d) return encoded;
+  const colors = PALETTES[d.paletteIdx]?.colors ?? PALETTES[0].colors;
+  const newIdx = (d.colorIdx + 1) % colors.length;
+  return encodeColor(d.paletteIdx, newIdx);
+}
+
+export function burnColor(encoded: string): string {
+  const d = decodeColor(encoded);
+  if (!d) return encoded;
+  const colors = PALETTES[d.paletteIdx]?.colors ?? PALETTES[0].colors;
+  const L = colors.length;
+  const newIdx = ((d.colorIdx - 1) % L + L) % L;
+  return encodeColor(d.paletteIdx, newIdx);
+}
+
 export function shiftGridPalettes(
   painted: Record<string, string>,
   direction: 1 | -1,

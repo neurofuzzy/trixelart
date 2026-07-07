@@ -5,7 +5,7 @@ import { useEffect } from "react";
 export function useKeyboardShortcuts(
   handleUndo: () => void,
   handleRedo: () => void,
-  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void,
+  setTool: (tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn") => void,
   setColorIdx: (idx: number) => void,
   colorCount: number,
   onClearSelection?: () => void,
@@ -77,6 +77,10 @@ export function useKeyboardShortcuts(
         setTool("select");
       } else if (e.key.toLowerCase() === "t") {
         setTool("stamp");
+      } else if (e.key.toLowerCase() === "d") {
+        setTool("dodge");
+      } else if (e.key.toLowerCase() === "b") {
+        setTool("burn");
       } else if (e.key.toLowerCase() === "r") {
         if (e.shiftKey && onRotateCCW) {
           setTool("select");

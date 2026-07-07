@@ -26,7 +26,7 @@ export default function TrixelGrid() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-  const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp">("paint");
+  const [tool, setTool] = useState<"paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn">("paint");
   const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
   const [colorIdx, setColorIdx] = useState(8);
@@ -657,8 +657,6 @@ export default function TrixelGrid() {
               setColorIdx(colors.length - 1);
               setTool("paint");
             }}
-            onShiftUp={onShiftUp}
-            onShiftDown={onShiftDown}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}

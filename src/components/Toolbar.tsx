@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp } from "lucide-react";
+import { Pencil, Eraser, Move, Trash2, Download, Upload, Crosshair, Maximize, Minimize, SquareDashed, Stamp, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -25,8 +25,8 @@ export function Toolbar({
   onToggleFullscreen,
   hasSelection,
 }: {
-  tool: "paint" | "erase" | "pan" | "select" | "stamp";
-  onToolChange: (tool: "paint" | "erase" | "pan" | "select" | "stamp") => void;
+  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn";
+  onToolChange: (tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn") => void;
   onExport: () => void;
   onImportClick: () => void;
   onClear: () => void;
@@ -53,6 +53,22 @@ export function Toolbar({
           title="Erase (E)"
         >
           <Eraser className="w-4 h-4" />
+        </Button>
+        <Button
+          variant={tool === "dodge" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => onToolChange("dodge")}
+          title="Dodge (D)"
+        >
+          <Sun className="w-4 h-4" />
+        </Button>
+        <Button
+          variant={tool === "burn" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => onToolChange("burn")}
+          title="Burn (B)"
+        >
+          <Moon className="w-4 h-4" />
         </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
