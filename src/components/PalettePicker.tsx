@@ -30,7 +30,7 @@ export function PalettePicker({
     <>
       <div className="fixed inset-0 z-50 bg-black/20" onClick={onClose} />
       <div
-        className="fixed z-50 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl space-y-3 w-72 max-w-[calc(100vw-2rem)]"
+        className="fixed z-50 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl space-y-3 w-[32rem] max-w-[calc(100vw-2rem)]"
         style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
         onPointerDown={(e) => e.stopPropagation()}
         onPointerMove={(e) => e.stopPropagation()}
@@ -47,7 +47,7 @@ export function PalettePicker({
         </Button>
       </div>
 
-      <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
         {PALETTES.map((pal) => (
           <button
             key={pal.name}
@@ -55,18 +55,18 @@ export function PalettePicker({
               onSelect(pal.colors);
               onClose();
             }}
-            className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-accent transition-colors text-left"
+            className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent transition-colors text-left"
           >
             <div className="flex gap-0.5 flex-1">
               {pal.colors.map((c) => (
                 <div
                   key={c}
-                  className="flex-1 h-6 rounded first:rounded-l last:rounded-r border border-white/10"
+                  className="flex-1 h-5 rounded first:rounded-l last:rounded-r border border-white/10"
                   style={{ backgroundColor: c }}
                 />
               ))}
             </div>
-            <span className="text-xs text-muted-foreground w-16 text-right">
+            <span className="text-xs text-muted-foreground w-14 text-right">
               {pal.name}
             </span>
           </button>
