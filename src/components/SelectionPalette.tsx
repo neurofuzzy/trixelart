@@ -1,22 +1,27 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, FlipVertical, FlipHorizontal } from "lucide-react";
+import type { GridOrientation } from "@/components/Footer";
 
 export function SelectionPalette({
   onShiftUp,
   onShiftDown,
   onRotate,
+  onFlip,
   onPaletteShift,
   hasSelection,
   onPointerEnter,
+  gridOrientation,
 }: {
   onShiftUp: () => void;
   onShiftDown: () => void;
   onRotate: () => void;
+  onFlip: () => void;
   onPaletteShift: (dir: number) => void;
   hasSelection: boolean;
   onPointerEnter: () => void;
+  gridOrientation: GridOrientation;
 }) {
   return (
     <div
@@ -91,6 +96,23 @@ export function SelectionPalette({
         title="Rotate selection 60° CW"
       >
         <RotateCw className="w-4 h-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFlip();
+        }}
+        disabled={!hasSelection}
+        title={gridOrientation === "pointy-top" ? "Flip horizontal" : "Flip vertical"}
+      >
+        {gridOrientation === "pointy-top" ? (
+          <FlipHorizontal className="w-4 h-4" />
+        ) : (
+          <FlipVertical className="w-4 h-4" />
+        )}
       </Button>
     </div>
   );

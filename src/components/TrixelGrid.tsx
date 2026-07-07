@@ -14,7 +14,7 @@ import { Footer, type HexMode, type Symmetry, type GridOrientation, normalizeHex
 import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { rotateHexCW, rotateHexCCW, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
+import { rotateHexCW, rotateHexCCW, flipHexVertical, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
 
 const STORAGE_KEY = "symmetria-save";
 
@@ -493,6 +493,27 @@ export default function TrixelGrid() {
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
+  const onFlipSelection = useCallback(() => {
+    if (!selectedHex || gridDivisions <= 0) return;
+    setPainted((prev) => {
+      const next = flipHexVertical(prev, selectedHex.c, selectedHex.k, gridDivisions);
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
+      return next;
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
   useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
     setColorIdx(c);
     setTool("paint");
@@ -606,9 +627,11 @@ export default function TrixelGrid() {
             onShiftUp={onShiftUp}
             onShiftDown={onShiftDown}
             onRotate={onRotateSelection}
+            onFlip={onFlipSelection}
             onPaletteShift={onPaletteShift}
             hasSelection={selectedHex !== null}
             onPointerEnter={() => setHoveredTri(null)}
+            gridOrientation={gridOrientation}
           />
         ) : tool === "stamp" ? (
           <StampPalette
