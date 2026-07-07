@@ -4,9 +4,9 @@ import {
   captureHexSnapshot,
   enumerateHexTrixels,
   hexCenterTriAxial,
-  type SelectionSnapshot,
 } from "@/lib/hex-flower";
 import type { ToolHandler } from "./types";
+import { upsertSelectionSnapshot } from "./selection-utils";
 
 export const stampTool: ToolHandler = {
   onDown(ctx, e, pos) {
@@ -24,33 +24,7 @@ export const stampTool: ToolHandler = {
         N,
       );
       if (captured.trixels.length > 0) {
-        const key = JSON.stringify(
-          captured.trixels.map((t) => [t.dq, t.dr, t.type, t.color]).sort(),
-        );
-        let activeSnap: SelectionSnapshot | null = null;
-        ctx.setSelections((prev) => {
-          const duplicate = prev.find(
-            (s) =>
-              s.N === captured.N &&
-              key ===
-                JSON.stringify(
-                  s.trixels
-                    .map((t) => [t.dq, t.dr, t.type, t.color])
-                    .sort(),
-                ),
-          );
-          if (duplicate) {
-            activeSnap = duplicate;
-            return prev;
-          }
-          activeSnap = captured;
-          const next = [
-            captured,
-            ...prev.filter((s) => s.id !== captured.id),
-          ];
-          return next.slice(0, 5);
-        });
-        if (activeSnap) ctx.setActiveSelection(activeSnap);
+        upsertSelectionSnapshot(ctx.setSelections, ctx.setActiveSelection, captured);
         ctx.onStampCapture?.(hex.c, hex.k);
         ctx.setCaptureMode(false);
       }
@@ -74,10 +48,6 @@ export const stampTool: ToolHandler = {
             r: rc + t.dr,
             type: t.type,
           });
-          if (key in next) {
-            delete next[key];
-            changed = true;
-          }
           next[key] = t.color;
           changed = true;
         }

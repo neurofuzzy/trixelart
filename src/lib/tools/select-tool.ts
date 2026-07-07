@@ -1,10 +1,7 @@
 import { worldToTri } from "@/lib/grid-math";
-import {
-  triToHex,
-  captureHexSnapshot,
-  type SelectionSnapshot,
-} from "@/lib/hex-flower";
+import { triToHex, captureHexSnapshot } from "@/lib/hex-flower";
 import type { ToolHandler } from "./types";
+import { upsertSelectionSnapshot } from "./selection-utils";
 
 export const selectTool: ToolHandler = {
   onDown(ctx, e, pos) {
@@ -16,30 +13,7 @@ export const selectTool: ToolHandler = {
       ctx.setSelectedHex(hex);
       const snap = captureHexSnapshot(ctx.paintedRef.current, hex.c, hex.k, N);
       if (snap.trixels.length > 0) {
-        const key = JSON.stringify(
-          snap.trixels.map((t) => [t.dq, t.dr, t.type, t.color]).sort(),
-        );
-        let activeSnap: SelectionSnapshot | null = null;
-        ctx.setSelections((prev) => {
-          const duplicate = prev.find(
-            (s) =>
-              s.N === snap.N &&
-              key ===
-                JSON.stringify(
-                  s.trixels
-                    .map((t) => [t.dq, t.dr, t.type, t.color])
-                    .sort(),
-                ),
-          );
-          if (duplicate) {
-            activeSnap = duplicate;
-            return prev;
-          }
-          activeSnap = snap;
-          const next = [snap, ...prev.filter((s) => s.id !== snap.id)];
-          return next.slice(0, 5);
-        });
-        if (activeSnap) ctx.setActiveSelection(activeSnap);
+        upsertSelectionSnapshot(ctx.setSelections, ctx.setActiveSelection, snap);
       }
     } else {
       ctx.setSelectedHex(null);
