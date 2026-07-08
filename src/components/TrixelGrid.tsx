@@ -711,6 +711,8 @@ export default function TrixelGrid() {
     onRotateSelection,
     onRotateSelectionCCW,
     selectedHex !== null,
+    handleExport,
+    handleImportClick,
   );
 
   const onDeletePaletteItem = useCallback(

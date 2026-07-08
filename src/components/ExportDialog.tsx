@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Download } from "lucide-react";
+import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -39,6 +39,22 @@ export function ExportDialog({
 
   const previewSvg = useMemo(() => stripSvgDimensions(svg), [svg]);
 
+  const handlePrint = () => {
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.write(`<!DOCTYPE html>
+<html><head><style>
+  html,body{margin:0;padding:0;height:100%}
+  @media print{@page{size:letter;margin:.5in}}
+  body{display:flex;align-items:center;justify-content:center;height:100vh}
+  svg{max-width:100%;max-height:100%;height:auto;width:auto}
+</style></head><body>${svg}</body></html>`);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 200);
+    }
+  };
+
   const handleDownload = () => {
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
@@ -51,6 +67,8 @@ export function ExportDialog({
     URL.revokeObjectURL(url);
     onOpenChange(false);
   };
+
+  if (!open) return null;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -96,6 +114,10 @@ export function ExportDialog({
         <AlertDialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
+          </Button>
+          <Button variant="ghost" onClick={handlePrint} className="gap-1.5">
+            <Printer className="w-4 h-4" />
+            Print
           </Button>
           <Button onClick={handleDownload} className="gap-1.5">
             <Download className="w-4 h-4" />

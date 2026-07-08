@@ -17,6 +17,8 @@ export function useKeyboardShortcuts(
   onRotate?: () => void,
   onRotateCCW?: () => void,
   hasSelection?: boolean,
+  onSaveProject?: () => void,
+  onLoadProject?: () => void,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -24,6 +26,18 @@ export function useKeyboardShortcuts(
         e.preventDefault();
         if (e.shiftKey) handleRedo();
         else handleUndo();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        onSaveProject?.();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        onLoadProject?.();
         return;
       }
 
@@ -104,5 +118,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW, hasSelection]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW, hasSelection, onSaveProject, onLoadProject]);
 }
