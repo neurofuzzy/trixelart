@@ -43,6 +43,7 @@ export function Footer({
   captureMode,
   gridOrientation,
   onGridOrientationChange,
+  tooltip,
 }: {
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
@@ -56,6 +57,7 @@ export function Footer({
   captureMode?: boolean;
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
+  tooltip?: string | null;
 }) {
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
 
@@ -90,7 +92,11 @@ export function Footer({
         </Button>
       </div>
       <div className="flex items-center gap-1.5 min-w-0">
-        {tool === "paint" ? (
+        {tooltip ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            {tooltip}
+          </span>
+        ) : tool === "paint" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             click to paint
           </span>

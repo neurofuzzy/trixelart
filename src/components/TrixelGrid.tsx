@@ -39,6 +39,7 @@ export default function TrixelGrid() {
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
+  const [tooltip, setTooltip] = useState<string | null>(null);
   const [gridOrientation, setGridOrientation] = useState<GridOrientation>("flat-top");
   // Display-only rotation: pointy-top hexes are flat-top rotated 90°. The
   // underlying tri-axial lattice, hex geometry, symmetry math, history and
@@ -600,6 +601,8 @@ export default function TrixelGrid() {
         onFlowerRadiusChange={setFlowerRadius}
         hexMode={hexMode}
         gridDivisions={gridDivisions}
+        tooltip={tooltip}
+        onSetTooltip={setTooltip}
       />
 
       <div
@@ -633,6 +636,7 @@ export default function TrixelGrid() {
           captureMode={captureMode}
           gridRotation={gridRotation}
           brushSize={brushSize}
+          symmetry={symmetry}
         />
 
         {tool === "select" ? (
@@ -688,6 +692,7 @@ export default function TrixelGrid() {
         captureMode={captureMode}
         gridOrientation={gridOrientation}
         onGridOrientationChange={setGridOrientation}
+        tooltip={tooltip}
       />
     </div>
   );

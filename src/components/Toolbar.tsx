@@ -19,7 +19,7 @@ import {
   FilePlus,
   Aperture,
   Paintbrush,
-  Expand,
+  Snowflake,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +52,12 @@ const editTools = [
 ] as const;
 
 const isEditTool = (t: string): boolean =>
-  t === "paint" || t === "erase" || t === "dodge" || t === "burn" || t === "stamp" || t === "pan";
+  t === "paint" ||
+  t === "erase" ||
+  t === "dodge" ||
+  t === "burn" ||
+  t === "stamp" ||
+  t === "pan";
 
 const SYM_CYCLE: Symmetry[] = ["off", "sym60", "sym120"];
 const SYM_LABEL: Record<Symmetry, string> = {
@@ -86,6 +91,8 @@ export function Toolbar({
   onFlowerRadiusChange,
   hexMode,
   gridDivisions,
+  tooltip,
+  onSetTooltip,
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -104,6 +111,8 @@ export function Toolbar({
   onFlowerRadiusChange: (n: number) => void;
   hexMode: HexMode;
   gridDivisions: number;
+  tooltip: string | null;
+  onSetTooltip: (t: string | null) => void;
 }) {
   const activeEdit = editTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
@@ -139,7 +148,7 @@ export function Toolbar({
               }}
             >
               <Download className="w-4 h-4" />
-              <span>Import JSON</span>
+              <span>Load Project</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -148,7 +157,7 @@ export function Toolbar({
               }}
             >
               <Upload className="w-4 h-4" />
-              <span>Export JSON</span>
+              <span>Save Project</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -193,9 +202,15 @@ export function Toolbar({
           onClick={() => {
             const next = brushSize === "hex" ? "single" : "hex";
             onBrushSizeChange(next);
+            onSetTooltip(next === "hex" ? "Brush: hex wedge" : "Brush: single");
           }}
           disabled={hexDisabled}
-          title={brushSize === "hex" ? "Brush: hex wedge" : "Brush: single"}
+          onMouseEnter={() =>
+            onSetTooltip(
+              brushSize === "hex" ? "Brush: hex wedge" : "Brush: single",
+            )
+          }
+          onMouseLeave={() => onSetTooltip(null)}
         >
           <Paintbrush className="w-4 h-4" />
         </button>
@@ -203,7 +218,8 @@ export function Toolbar({
           variant={tool === "select" ? "default" : "ghost"}
           size="icon"
           onClick={() => onToolChange("select")}
-          title="Select hex (S)"
+          onMouseEnter={() => onSetTooltip("Selection: single hexagon")}
+          onMouseLeave={() => onSetTooltip(null)}
         >
           <SquareDashed className="w-4 h-4" />
         </Button>
@@ -218,25 +234,30 @@ export function Toolbar({
             const i = SYM_CYCLE.indexOf(symmetry);
             const next = SYM_CYCLE[(i + 1) % SYM_CYCLE.length];
             onSymmetryChange(next);
+            onSetTooltip(SYM_LABEL[next]);
           }}
-          title={SYM_LABEL[symmetry]}
+          onMouseEnter={() => onSetTooltip(SYM_LABEL[symmetry])}
+          onMouseLeave={() => onSetTooltip(null)}
         >
           <Aperture className="w-4 h-4" />
         </button>
         <div className="relative">
           <button
             className={cn(
-              "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              flowerRadius > 0 && !hexDisabled && "bg-amber-500/25 text-amber-300",
+              "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-5",
+              flowerRadius > 0 &&
+                !hexDisabled &&
+                "bg-amber-500/25 text-amber-300",
             )}
             onClick={() => setFlowerOpen((v) => !v)}
             disabled={hexDisabled}
-            title="Fan-out"
+            onMouseEnter={() => onSetTooltip("Fan-out")}
+            onMouseLeave={() => onSetTooltip(null)}
           >
-            <Expand className="w-4 h-4" />
+            <Snowflake className="w-4 h-4" />
           </button>
           {flowerOpen && (
-            <div className="absolute bottom-full right-0 mb-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2" style={{ top: 'auto', bottom: '100%' }}>
+            <div className="absolute top-full left-0 mt-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
               <input
                 type="range"
                 min={0}
@@ -270,7 +291,11 @@ export function Toolbar({
           onClick={onToggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
-          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+          {isFullscreen ? (
+            <Minimize className="w-4 h-4" />
+          ) : (
+            <Maximize className="w-4 h-4" />
+          )}
         </Button>
       </div>
 
@@ -279,8 +304,8 @@ export function Toolbar({
           <AlertDialogHeader>
             <AlertDialogTitle>New Project</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove all drawing data from the grid.
-              You can undo this with Ctrl+Z.
+              This will remove all drawing data from the grid. You can undo this
+              with Ctrl+Z.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

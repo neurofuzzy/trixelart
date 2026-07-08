@@ -22,6 +22,7 @@ export function GridCanvas({
   captureMode,
   gridRotation = 0,
   brushSize,
+  symmetry,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -38,6 +39,7 @@ export function GridCanvas({
   captureMode?: boolean;
   gridRotation?: number;
   brushSize?: "single" | "hex";
+  symmetry?: "off" | "sym60" | "sym120";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -456,34 +458,27 @@ export function GridCanvas({
           ctx.globalAlpha = 1;
         }
       } else if (isHexBrush) {
-        // Hex brush: draw clean wedge polygon per hex instead of
-        // per-trixel outlines. Group hoverTargets by home hex so each
-        // hex appears once; flower copies show as additional faded
-        // hexes with the same wedge.
-        const hexesSeen = new Map<
-          string,
-          { c: number; k: number; wedge: number }
-        >();
+        // Hex brush: group hoverTargets by hex. If a hex has only one
+        // wedge, draw that wedge polygon. If symmetry spreads the brush
+        // across multiple wedges of the same hex, draw a full hex fill.
+        const hexWedges = new Map<string, Set<number>>();
         for (const t of hoverTargets) {
-          const { c, k } = triToHex(
-            t.q,
-            t.r,
-            t.type,
-            gridDivisions,
-          );
+          const { c, k } = triToHex(t.q, t.r, t.type, gridDivisions);
           const key = `${c},${k}`;
-          if (!hexesSeen.has(key)) {
-            hexesSeen.set(key, {
-              c,
-              k,
-              wedge: hexWedgeIndex(t, c, k, gridDivisions),
-            });
+          let set = hexWedges.get(key);
+          if (!set) {
+            set = new Set();
+            hexWedges.set(key, set);
           }
+          set.add(hexWedgeIndex(t, c, k, gridDivisions));
         }
-        const entries = [...hexesSeen.values()];
+        const entries = [...hexWedges.entries()];
 
         for (let i = 0; i < entries.length; i++) {
-          const { c, k, wedge } = entries[i];
+          const [key, wedges] = entries[i];
+          const [cStr, kStr] = key.split(",");
+          const c = Number(cStr);
+          const k = Number(kStr);
           const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
           const hs = gridDivisions * SIDE;
           const hv = gridDivisions * H;
@@ -497,14 +492,29 @@ export function GridCanvas({
           ];
           const alpha = i === 0 ? 0.25 : 0.1;
 
-          ctx.fillStyle = "white";
-          ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          ctx.moveTo(hx, hy);
-          ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
-          ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
-          ctx.closePath();
-          ctx.fill();
+          if (wedges.size === 1) {
+            const wedge = [...wedges][0];
+            ctx.fillStyle = "white";
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.moveTo(hx, hy);
+            ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
+            ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            // Multiple wedges (symmetry) — draw each wedge polygon
+            ctx.fillStyle = "white";
+            ctx.globalAlpha = alpha;
+            for (const wedge of wedges) {
+              ctx.beginPath();
+              ctx.moveTo(hx, hy);
+              ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
+              ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
 
           ctx.strokeStyle = "white";
           ctx.globalAlpha = alpha * 2;
@@ -552,7 +562,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize, symmetry]);
 
   return (
     <canvas
