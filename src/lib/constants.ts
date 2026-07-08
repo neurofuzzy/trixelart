@@ -23,6 +23,8 @@ export interface PaletteDef {
   name: string;
   hue: number;
   saturation: number;
+  colorHues?: number[];
+  lightnesses?: number[];
 }
 
 export const PALETTE_DEFS: PaletteDef[] = [
@@ -36,6 +38,34 @@ export const PALETTE_DEFS: PaletteDef[] = [
   { name: "Ocean", hue: 200, saturation: 60 },
   { name: "Violets", hue: 260, saturation: 50 },
   { name: "Elderberry", hue: 330, saturation: 55 },
+  {
+    name: "Ember",
+    hue: 0,
+    saturation: 70,
+    colorHues: [348, 352, 356, 2, 8, 16, 22, 28, 36],
+    lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
+  },
+  {
+    name: "Glacier",
+    hue: 0,
+    saturation: 55,
+    colorHues: [225, 220, 214, 208, 202, 196, 190, 185, 180],
+    lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
+  },
+  {
+    name: "Spring",
+    hue: 0,
+    saturation: 50,
+    colorHues: [135, 128, 120, 112, 104, 96, 85, 70, 55],
+    lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
+  },
+  {
+    name: "Bloom",
+    hue: 0,
+    saturation: 60,
+    colorHues: [285, 292, 300, 308, 316, 324, 332, 340, 350],
+    lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
+  },
 ];
 
 let _hueOffset = 0;
@@ -53,13 +83,16 @@ export function computePaletteColors(
 ): { name: string; colors: string[] }[] {
   return defs.map((def) => ({
     name: def.name,
-    colors: PALETTE_LIGHTNESSES.map((l) =>
-      hslToHex(
-        ((def.hue + hueOffset) % 360 + 360) % 360,
+    colors: (def.lightnesses ?? PALETTE_LIGHTNESSES).map((l, i) => {
+      const h = def.colorHues
+        ? def.colorHues[i]
+        : def.hue;
+      return hslToHex(
+        ((h + hueOffset) % 360 + 360) % 360,
         Math.max(0, Math.min(100, def.saturation + satOffset)),
         l,
-      ),
-    ),
+      );
+    }),
   }));
 }
 
@@ -82,10 +115,14 @@ export function resolveColor(encoded: string): string {
   const d = decodeColor(encoded);
   if (d && PALETTE_DEFS[d.paletteIdx]) {
     const def = PALETTE_DEFS[d.paletteIdx];
-    const l = PALETTE_LIGHTNESSES[d.colorIdx];
+    const lightnesses = def.lightnesses ?? PALETTE_LIGHTNESSES;
+    const l = lightnesses[d.colorIdx];
     if (l === undefined) return encoded;
+    const h = def.colorHues
+      ? def.colorHues[d.colorIdx]
+      : def.hue;
     return hslToHex(
-      ((def.hue + _hueOffset) % 360 + 360) % 360,
+      ((h + _hueOffset) % 360 + 360) % 360,
       Math.max(0, Math.min(100, def.saturation + _satOffset)),
       l,
     );

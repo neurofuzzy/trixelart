@@ -538,7 +538,7 @@ export default function TrixelGrid() {
   useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
     setColorIdx(c);
     setTool("paint");
-  }, COLOR_COUNT, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotateSelection, onRotateSelectionCCW);
+  }, COLOR_COUNT, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotateSelection, onRotateSelectionCCW, selectedHex !== null);
 
   const onDeletePaletteItem = useCallback(
     (snap: SelectionSnapshot) => {

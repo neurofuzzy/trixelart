@@ -16,6 +16,7 @@ export function useKeyboardShortcuts(
   onPaletteShift?: (direction: number) => void,
   onRotate?: () => void,
   onRotateCCW?: () => void,
+  hasSelection?: boolean,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -43,25 +44,25 @@ export function useKeyboardShortcuts(
       }
 
       if (e.key === "ArrowUp") {
-        if (onShiftUp && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (onShiftUp && !e.metaKey && !e.ctrlKey && !e.altKey && hasSelection) {
           e.preventDefault();
           onShiftUp();
           return;
         }
       } else if (e.key === "ArrowDown") {
-        if (onShiftDown && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (onShiftDown && !e.metaKey && !e.ctrlKey && !e.altKey && hasSelection) {
           e.preventDefault();
           onShiftDown();
           return;
         }
       } else if (e.key === "ArrowLeft") {
-        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey && hasSelection) {
           e.preventDefault();
           onPaletteShift(-1);
           return;
         }
       } else if (e.key === "ArrowRight") {
-        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (onPaletteShift && !e.metaKey && !e.ctrlKey && !e.altKey && hasSelection) {
           e.preventDefault();
           onPaletteShift(1);
           return;
@@ -101,5 +102,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW, hasSelection]);
 }
