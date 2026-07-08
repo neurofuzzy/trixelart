@@ -108,9 +108,9 @@ Shortcuts suppressed when focus is in `<input>` or `<textarea>` (except `Escape`
 
 | Key | Stores | Hook/Component |
 |---|---|---|
-| `symmetria-save` | Painted trixel grid (`Record<string,string>`) + undo/redo history stack | `useHistory` |
-| `symmetria-settings` | `{ gridDivisions, hexMode, flowerRadius, symmetry }` | `TrixelGrid` |
-| `symmetria-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
+| `trixel-save` | Painted trixel grid (`Record<string,string>`) + undo/redo history stack | `useHistory` |
+| `trixel-settings` | `{ gridDivisions, hexMode, flowerRadius, symmetry }` | `TrixelGrid` |
+| `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 - Legacy migration: boolean `hexMode` → string `HexMode`, boolean `symmetry60` → string `Symmetry`
 

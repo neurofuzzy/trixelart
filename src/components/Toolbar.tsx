@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Menu,
   FilePlus,
+  ImageDown,
   Aperture,
   Paintbrush,
   Snowflake,
@@ -80,6 +81,7 @@ export function Toolbar({
   tool,
   onToolChange,
   onExport,
+  onExportSVG,
   onImportClick,
   onClear,
   onCenterView,
@@ -100,6 +102,7 @@ export function Toolbar({
   tool: Tool;
   onToolChange: (tool: Tool) => void;
   onExport: () => void;
+  onExportSVG: () => void;
   onImportClick: () => void;
   onClear: () => void;
   onCenterView: () => void;
@@ -161,6 +164,15 @@ export function Toolbar({
             >
               <Upload className="w-4 h-4" />
               <span>Save Project</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExportSVG();
+              }}
+            >
+              <ImageDown className="w-4 h-4" />
+              <span>Export Project</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

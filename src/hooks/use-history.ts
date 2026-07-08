@@ -13,7 +13,7 @@ export interface ProjectSnapshot {
   lastPaintTri: string | null;
 }
 
-const STORAGE_KEY = "symmetria-save";
+const STORAGE_KEY = "trixel-save";
 const MAX_HISTORY = 50;
 
 export function useHistory() {
@@ -24,10 +24,9 @@ export function useHistory() {
 
   const restoreRef = useRef<(s: ProjectSnapshot) => void>(() => {});
 
-  const registerRestore = useCallback(
-    (fn: (s: ProjectSnapshot) => void) => { restoreRef.current = fn; },
-    [],
-  );
+  const registerRestore = useCallback((fn: (s: ProjectSnapshot) => void) => {
+    restoreRef.current = fn;
+  }, []);
 
   useEffect(() => {
     try {
@@ -43,27 +42,34 @@ export function useHistory() {
               flowerRadius: data.flowerRadius ?? 0,
               symmetry: data.symmetry ?? "off",
               selections: Array.isArray(data.selections) ? data.selections : [],
-              lastPaintTri: typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
+              lastPaintTri:
+                typeof data.lastPaintTri === "string"
+                  ? data.lastPaintTri
+                  : null,
             };
             setPainted(snap.painted);
             setHistory([snap]);
             setHistoryIdx(0);
           } else {
             setPainted(data);
-            setHistory([{
-              painted: data,
-              gridDivisions: 1,
-              hexMode: "world",
-              flowerRadius: 0,
-              symmetry: "off",
-              selections: [],
-              lastPaintTri: null,
-            }]);
+            setHistory([
+              {
+                painted: data,
+                gridDivisions: 1,
+                hexMode: "world",
+                flowerRadius: 0,
+                symmetry: "off",
+                selections: [],
+                lastPaintTri: null,
+              },
+            ]);
             setHistoryIdx(0);
           }
         }
       }
-    } catch { /* ignore parse errors */ }
+    } catch {
+      /* ignore parse errors */
+    }
     setMounted(true);
   }, []);
 
