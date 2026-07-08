@@ -5,20 +5,29 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PalettePicker } from "@/components/PalettePicker";
 import { Palette } from "lucide-react";
-import { PALETTES } from "@/lib/constants";
 
 export function ColorPalette({
   color,
   palette,
+  palettes,
   onColorChange,
   onPaletteChange,
   onPointerEnter,
+  hueOffset,
+  onHueOffsetChange,
+  saturationOffset,
+  onSaturationOffsetChange,
 }: {
   color: string;
   palette: string[];
+  palettes: { name: string; colors: string[] }[];
   onColorChange: (color: string) => void;
   onPaletteChange: (colors: string[], idx: number) => void;
   onPointerEnter: () => void;
+  hueOffset?: number;
+  onHueOffsetChange?: (v: number) => void;
+  saturationOffset?: number;
+  onSaturationOffsetChange?: (v: number) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -60,13 +69,18 @@ export function ColorPalette({
           <Palette />
         </Button>
         <PalettePicker
+          palettes={palettes}
           isOpen={pickerOpen}
           onClose={() => setPickerOpen(false)}
           onSelect={(colors) => {
-            const idx = PALETTES.findIndex((p) => p.colors === colors);
+            const idx = palettes.findIndex((p) => p.colors === colors);
             onPaletteChange(colors, idx >= 0 ? idx : 0);
             setPickerOpen(false);
           }}
+          hueOffset={hueOffset}
+          onHueOffsetChange={onHueOffsetChange}
+          saturationOffset={saturationOffset}
+          onSaturationOffsetChange={onSaturationOffsetChange}
         />
       </div>
     </div>

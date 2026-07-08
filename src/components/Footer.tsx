@@ -206,6 +206,7 @@ export function Footer({
                   </span>
                 </div>
               </div>
+
               <Button
                 variant="ghost"
                 size="sm"

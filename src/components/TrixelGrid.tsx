@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
 import { useHistory, type ProjectSnapshot } from "@/hooks/use-history";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -11,7 +11,7 @@ import { ColorPalette } from "@/components/ColorPalette";
 import { SelectionPalette } from "@/components/SelectionPalette";
 import { StampPalette } from "@/components/StampPalette";
 import { Footer, type HexMode, type Symmetry, type GridOrientation, normalizeHexMode } from "@/components/Footer";
-import { GRAYSCALE_PALETTE, PALETTES, encodeColor, decodeColor, remapGrid, shiftGridPalettes } from "@/lib/constants";
+import { PALETTE_DEFS, COLOR_COUNT, computePaletteColors, encodeColor, decodeColor, remapGrid, shiftGridPalettes, setPaletteOffsets } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 import { rotateHexCW, rotateHexCCW, flipHexVertical, remapHex, shiftHexPalettes, enumerateHexTrixels } from "@/lib/hex-flower";
@@ -28,8 +28,20 @@ export default function TrixelGrid() {
 
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<Tool>("paint");
-  const [activePalette, setActivePalette] = useState(GRAYSCALE_PALETTE);
+  const [hueOffset, setHueOffset] = useState(0);
+  const [satOffset, setSatOffset] = useState(0);
+
+  const computedPalettes = useMemo(
+    () => computePaletteColors(PALETTE_DEFS, hueOffset, satOffset),
+    [hueOffset, satOffset],
+  );
+
+  useEffect(() => {
+    setPaletteOffsets(hueOffset, satOffset);
+  }, [hueOffset, satOffset]);
+
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
+  const activePalette = computedPalettes[activePaletteIdx]?.colors ?? computedPalettes[0].colors;
   const [colorIdx, setColorIdx] = useState(8);
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
@@ -131,13 +143,18 @@ export default function TrixelGrid() {
           setGridOrientation(data.gridOrientation as GridOrientation);
         }
         if (data.brushSize === "hex") setBrushSize("hex");
+        if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
+        if (typeof data.saturationOffset === "number") setSatOffset(data.saturationOffset);
       }
     } catch { /* ignore parse errors */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize }));
-  }, [gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize,
+      hueOffset, saturationOffset: satOffset,
+    }));
+  }, [gridDivisions, hexMode, flowerRadius, symmetry, gridOrientation, brushSize, hueOffset, satOffset]);
 
   useEffect(() => {
     try {
@@ -188,9 +205,8 @@ export default function TrixelGrid() {
     color: paintKey,
     setColor: (encoded) => {
       const d = decodeColor(encoded);
-      if (d && PALETTES[d.paletteIdx]) {
+      if (d && PALETTE_DEFS[d.paletteIdx]) {
         setActivePaletteIdx(d.paletteIdx);
-        setActivePalette(PALETTES[d.paletteIdx].colors);
         setColorIdx(d.colorIdx);
         setTool("paint");
       }
@@ -368,7 +384,7 @@ export default function TrixelGrid() {
   }, [activePalette]);
 
   const onPaletteShift = useCallback((direction: number) => {
-    const count = PALETTES.length;
+    const count = PALETTE_DEFS.length;
     setPainted((prev) => {
       const next = selectedHex && gridDivisions > 0
         ? shiftHexPalettes(prev, selectedHex.c, selectedHex.k, gridDivisions, direction as 1 | -1, count)
@@ -410,7 +426,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next: Record<string, string>;
       if (selectedHex && gridDivisions > 0) {
-        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, 1, PALETTES[0].colors.length);
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, 1, COLOR_COUNT);
       } else {
         next = remapGrid(prev, 1);
       }
@@ -435,7 +451,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next: Record<string, string>;
       if (selectedHex && gridDivisions > 0) {
-        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, -1, PALETTES[0].colors.length);
+        next = remapHex(prev, selectedHex.c, selectedHex.k, gridDivisions, -1, COLOR_COUNT);
       } else {
         next = remapGrid(prev, -1);
       }
@@ -522,7 +538,7 @@ export default function TrixelGrid() {
   useKeyboardShortcuts(onUndo, onRedo, setTool, (c) => {
     setColorIdx(c);
     setTool("paint");
-  }, activePalette.length, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotateSelection, onRotateSelectionCCW);
+  }, COLOR_COUNT, clearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotateSelection, onRotateSelectionCCW);
 
   const onDeletePaletteItem = useCallback(
     (snap: SelectionSnapshot) => {
@@ -637,6 +653,8 @@ export default function TrixelGrid() {
           gridRotation={gridRotation}
           brushSize={brushSize}
           symmetry={symmetry}
+          hueOffset={hueOffset}
+          saturationOffset={satOffset}
         />
 
         {tool === "select" ? (
@@ -667,14 +685,18 @@ export default function TrixelGrid() {
           <ColorPalette
             color={colorHex}
             palette={activePalette}
+            palettes={computedPalettes}
             onColorChange={onColorChange}
             onPaletteChange={(colors, idx) => {
-              setActivePalette(colors);
               setActivePaletteIdx(idx);
               setColorIdx(colors.length - 1);
               setTool("paint");
             }}
             onPointerEnter={() => setHoveredTri(null)}
+            hueOffset={hueOffset}
+            onHueOffsetChange={setHueOffset}
+            saturationOffset={satOffset}
+            onSaturationOffsetChange={setSatOffset}
           />
         )}
       </div>

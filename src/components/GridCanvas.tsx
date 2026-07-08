@@ -23,6 +23,8 @@ export function GridCanvas({
   gridRotation = 0,
   brushSize,
   symmetry,
+  hueOffset,
+  saturationOffset,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -40,6 +42,8 @@ export function GridCanvas({
   gridRotation?: number;
   brushSize?: "single" | "hex";
   symmetry?: "off" | "sym60" | "sym120";
+  hueOffset?: number;
+  saturationOffset?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -562,7 +566,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize, symmetry]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
 
   return (
     <canvas

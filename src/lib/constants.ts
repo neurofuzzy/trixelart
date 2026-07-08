@@ -1,147 +1,67 @@
-export const GRAYSCALE_PALETTE = [
-  "#000000",
-  "#202020",
-  "#404040",
-  "#606060",
-  "#808080",
-  "#a0a0a0",
-  "#c0c0c0",
-  "#dfdfdf",
-  "#ffffff",
+function hslToHex(h: number, s: number, l: number): string {
+  s = Math.max(0, Math.min(100, s));
+  l = Math.max(0, Math.min(100, l));
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  return `#${[r, g, b].map(v => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+export const PALETTE_LIGHTNESSES = [3, 12, 22, 32, 42, 52, 62, 74, 88];
+export const COLOR_COUNT = PALETTE_LIGHTNESSES.length;
+
+export interface PaletteDef {
+  name: string;
+  hue: number;
+  saturation: number;
+}
+
+export const PALETTE_DEFS: PaletteDef[] = [
+  { name: "Grayscale", hue: 0, saturation: 0 },
+  { name: "Sand", hue: 35, saturation: 25 },
+  { name: "Oxide", hue: 15, saturation: 65 },
+  { name: "Sienna", hue: 28, saturation: 65 },
+  { name: "Mustard", hue: 48, saturation: 75 },
+  { name: "Forest", hue: 120, saturation: 45 },
+  { name: "Mint", hue: 170, saturation: 65 },
+  { name: "Ocean", hue: 200, saturation: 60 },
+  { name: "Violets", hue: 260, saturation: 50 },
+  { name: "Elderberry", hue: 330, saturation: 55 },
 ];
 
-export const PALETTES = [
-  {
-    name: "Grayscale",
-    colors: GRAYSCALE_PALETTE,
-  },
-  {
-    name: "Sand",
-    colors: [
-      "#14100a",
-      "#282018",
-      "#3c3024",
-      "#504430",
-      "#645840",
-      "#7c7054",
-      "#988c6c",
-      "#b4a888",
-      "#d4c8a8",
-    ],
-  },
-  {
-    name: "Oxide",
-    colors: [
-      "#1c0802",
-      "#3b1006",
-      "#5c1a0c",
-      "#7e2814",
-      "#a13820",
-      "#c44c30",
-      "#da6848",
-      "#e8906e",
-      "#f4bca0",
-    ],
-  },
-  {
-    name: "Sienna",
-    colors: [
-      "#1a0e02",
-      "#381c06",
-      "#582c0c",
-      "#784014",
-      "#98561e",
-      "#b8702c",
-      "#d08c40",
-      "#e4ac60",
-      "#f0cc90",
-    ],
-  },
-  {
-    name: "Mustard",
-    colors: [
-      "#1a1400",
-      "#332a02",
-      "#4d4006",
-      "#66580c",
-      "#807014",
-      "#9a8c20",
-      "#b4a830",
-      "#cec648",
-      "#e8e468",
-    ],
-  },
-  {
-    name: "Forest",
-    colors: [
-      "#0b1f0f",
-      "#15351e",
-      "#1e4a2c",
-      "#2e6235",
-      "#3d7a3e",
-      "#548c44",
-      "#6a9e4a",
-      "#98bb71",
-      "#c5d898",
-    ],
-  },
-  {
-    name: "Mint",
-    colors: [
-      "#0a1a18",
-      "#0f332e",
-      "#164d44",
-      "#1e685c",
-      "#288474",
-      "#36a08c",
-      "#4cbca4",
-      "#6cd4bc",
-      "#90ecd4",
-    ],
-  },
-  {
-    name: "Ocean",
-    colors: [
-      "#0a192f",
-      "#112a47",
-      "#173a5e",
-      "#236085",
-      "#2e86ab",
-      "#46a3c2",
-      "#5ebfd9",
-      "#94d8e9",
-      "#caf0f8",
-    ],
-  },
-  {
-    name: "Violets",
-    colors: [
-      "#10051e",
-      "#1e0d38",
-      "#2e1852",
-      "#40256e",
-      "#54348a",
-      "#6c48a6",
-      "#8864be",
-      "#a888d4",
-      "#ccb0e8",
-    ],
-  },
-  {
-    name: "Elderberry",
-    colors: [
-      "#1e0410",
-      "#380a1e",
-      "#521230",
-      "#6c1e44",
-      "#862e5a",
-      "#a04474",
-      "#b8608e",
-      "#ce84aa",
-      "#e4b0c8",
-    ],
-  },
-];
+let _hueOffset = 0;
+let _satOffset = 0;
+
+export function setPaletteOffsets(hue: number, sat: number) {
+  _hueOffset = hue;
+  _satOffset = sat;
+}
+
+export function computePaletteColors(
+  defs: PaletteDef[],
+  hueOffset: number,
+  satOffset: number,
+): { name: string; colors: string[] }[] {
+  return defs.map((def) => ({
+    name: def.name,
+    colors: PALETTE_LIGHTNESSES.map((l) =>
+      hslToHex(
+        ((def.hue + hueOffset) % 360 + 360) % 360,
+        Math.max(0, Math.min(100, def.saturation + satOffset)),
+        l,
+      ),
+    ),
+  }));
+}
 
 export function encodeColor(paletteIdx: number, colorIdx: number): string {
   return `${paletteIdx},${colorIdx}`;
@@ -160,12 +80,15 @@ export function decodeColor(
 
 export function resolveColor(encoded: string): string {
   const d = decodeColor(encoded);
-  if (
-    d &&
-    PALETTES[d.paletteIdx] &&
-    PALETTES[d.paletteIdx].colors[d.colorIdx]
-  ) {
-    return PALETTES[d.paletteIdx].colors[d.colorIdx];
+  if (d && PALETTE_DEFS[d.paletteIdx]) {
+    const def = PALETTE_DEFS[d.paletteIdx];
+    const l = PALETTE_LIGHTNESSES[d.colorIdx];
+    if (l === undefined) return encoded;
+    return hslToHex(
+      ((def.hue + _hueOffset) % 360 + 360) % 360,
+      Math.max(0, Math.min(100, def.saturation + _satOffset)),
+      l,
+    );
   }
   return encoded;
 }
@@ -174,7 +97,7 @@ export function remapGrid(
   painted: Record<string, string>,
   direction: 1 | -1,
 ): Record<string, string> {
-  const L = PALETTES[0].colors.length;
+  const L = COLOR_COUNT;
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(painted)) {
     const d = decodeColor(value);
@@ -191,8 +114,7 @@ export function remapGrid(
 export function dodgeColor(encoded: string): string {
   const d = decodeColor(encoded);
   if (!d) return encoded;
-  const colors = PALETTES[d.paletteIdx]?.colors ?? PALETTES[0].colors;
-  if (d.colorIdx >= colors.length - 1) return encoded;
+  if (d.colorIdx >= COLOR_COUNT - 1) return encoded;
   return encodeColor(d.paletteIdx, d.colorIdx + 1);
 }
 
