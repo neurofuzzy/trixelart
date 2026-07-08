@@ -108,6 +108,7 @@ export function useInteraction(args: UseInteractionArgs) {
 
   const lastPaintTriRef = useRef<TriKey | null>(null);
   const lastEditToolRef = useRef<Tool | null>(null);
+  const lastHoveredTriRef = useRef<TriKey | null>(null);
 
   // Inverse-rotation coefficients for screen->world. Forward canvas
   // transform is screen = center + zoom * R(θ) * (world + view), so the
@@ -387,7 +388,11 @@ export function useInteraction(args: UseInteractionArgs) {
       const pos = getRelativePointer(e);
       const world = screenToWorld(pos.x, pos.y);
       const tri = worldToTri(world.x, world.y);
-      setHoveredTri(tri);
+      const last = lastHoveredTriRef.current;
+      if (!last || last.q !== tri.q || last.r !== tri.r || last.type !== tri.type) {
+        setHoveredTri(tri);
+        lastHoveredTriRef.current = tri;
+      }
 
       const d = drag.current;
       const handler =
