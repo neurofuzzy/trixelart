@@ -5,6 +5,7 @@ import { makeDodgeBurnTool } from "./dodge-burn-tool";
 import { panTool } from "./pan-tool";
 import { selectTool } from "./select-tool";
 import { stampTool } from "./stamp-tool";
+import { eyedropperTool } from "./eyedropper-tool";
 
 export type { Tool, ToolHandler, ToolContext, DragState } from "./types";
 export { viewPanTool } from "./view-pan-tool";
@@ -20,4 +21,5 @@ export const toolMap: Record<Tool, ToolHandler> = {
   pan: panTool,
   select: selectTool,
   stamp: stampTool,
+  eyedropper: eyedropperTool,
 };

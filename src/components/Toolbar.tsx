@@ -20,6 +20,7 @@ import {
   Aperture,
   Paintbrush,
   Snowflake,
+  Pipette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +49,7 @@ const editTools = [
   { tool: "dodge" as Tool, icon: Sun, label: "Dodge", shortcut: "D" },
   { tool: "burn" as Tool, icon: Moon, label: "Burn", shortcut: "B" },
   { tool: "stamp" as Tool, icon: Stamp, label: "Stamp", shortcut: "T" },
+  { tool: "eyedropper" as Tool, icon: Pipette, label: "Eyedropper", shortcut: "I" },
   { tool: "pan" as Tool, icon: Move, label: "Move", shortcut: "H" },
 ] as const;
 
@@ -57,6 +59,7 @@ const isEditTool = (t: string): boolean =>
   t === "dodge" ||
   t === "burn" ||
   t === "stamp" ||
+  t === "eyedropper" ||
   t === "pan";
 
 const SYM_CYCLE: Symmetry[] = ["off", "sym60", "sym120"];

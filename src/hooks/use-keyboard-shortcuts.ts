@@ -83,6 +83,8 @@ export function useKeyboardShortcuts(
         setTool("dodge");
       } else if (e.key.toLowerCase() === "b") {
         setTool("burn");
+      } else if (e.key.toLowerCase() === "i") {
+        setTool("eyedropper");
       } else if (e.key.toLowerCase() === "r") {
         if (e.shiftKey && onRotateCCW) {
           setTool("select");

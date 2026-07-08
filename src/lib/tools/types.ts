@@ -9,7 +9,8 @@ export type Tool =
   | "select"
   | "stamp"
   | "dodge"
-  | "burn";
+  | "burn"
+  | "eyedropper";
 
 export interface View {
   x: number;

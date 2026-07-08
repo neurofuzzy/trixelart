@@ -53,7 +53,7 @@ export function Footer({
   handleRedo: () => void;
   historyIdx: number;
   historyLength: number;
-  tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn";
+  tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn" | "eyedropper";
   captureMode?: boolean;
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
@@ -117,6 +117,10 @@ export function Footer({
             {captureMode
               ? "click on an area to create a stamp"
               : "click on an area to place a stamp"}
+          </span>
+        ) : tool === "eyedropper" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            click to pick a color and switch to paint
           </span>
         ) : (
           <>

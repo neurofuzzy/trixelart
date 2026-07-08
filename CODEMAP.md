@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-07 06:03:04
-# Files: 22
-# Lines of code: ~4309
+# Last updated: 2026-07-08 06:16:46
+# Files: 36
+# Lines of code: ~4785
 ```
 - **/app**
   - **/lib**
@@ -17,6 +17,7 @@
     - [alert-dialog.tsx](../src/components/ui/alert-dialog.tsx)
     - [button.tsx](../src/components/ui/button.tsx)
       - Interface: `ButtonProps`
+    - [dropdown-menu.tsx](../src/components/ui/dropdown-menu.tsx)
   - [AbcDisplay.tsx](../src/components/AbcDisplay.tsx)
     - Function: `AbcDisplay`
   - [ColorPalette.tsx](../src/components/ColorPalette.tsx)
@@ -25,6 +26,7 @@
     - Type: `HexMode`
     - Type: `Symmetry`
     - Type: `GridOrientation`
+    - Type: `BrushSize`
     - Function: `normalizeHexMode` - Maps any external/stored hex-mode value onto th...
     - Function: `Footer`
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
@@ -50,14 +52,50 @@
   - [use-keyboard-shortcuts.ts](../src/hooks/use-keyboard-shortcuts.ts)
     - Function: `useKeyboardShortcuts`
 - **/lib**
+  - **/tools**
+    - [dodge-burn-tool.ts](../src/lib/tools/dodge-burn-tool.ts)
+      - Function: `makeDodgeBurnTool`
+    - [edit-tool.ts](../src/lib/tools/edit-tool.ts)
+      - Function: `makeEditTool` - Shared shell for paint / erase / dodge / burn. ...
+    - [erase-tool.ts](../src/lib/tools/erase-tool.ts)
+      - Variable: `eraseTool`
+    - [index.ts](../src/lib/tools/index.ts)
+      - Variable: `toolMap`
+    - [line-draw.ts](../src/lib/tools/line-draw.ts)
+      - Function: `bestAxisClosest`
+      - Function: `clippedLine`
+    - [paint-tool.ts](../src/lib/tools/paint-tool.ts)
+      - Variable: `paintTool`
+    - [pan-tool.ts](../src/lib/tools/pan-tool.ts)
+      - Variable: `panTool`
+    - [select-tool.ts](../src/lib/tools/select-tool.ts)
+      - Variable: `selectTool`
+    - [selection-utils.ts](../src/lib/tools/selection-utils.ts)
+      - Function: `snapshotKey`
+      - Function: `upsertSelectionSnapshot`
+    - [stamp-tool.ts](../src/lib/tools/stamp-tool.ts)
+      - Variable: `stampTool`
+    - [types.ts](../src/lib/tools/types.ts)
+      - Type: `Tool`
+      - Interface: `View`
+      - Interface: `Pt`
+      - Type: `DragState`
+      - Interface: `ToolContext`
+      - Interface: `ToolHandler`
+    - [view-pan-tool.ts](../src/lib/tools/view-pan-tool.ts)
+      - Variable: `viewPanTool`
   - [config.ts](../src/lib/config.ts)
     - Variable: `ZOOM_MIN`
     - Variable: `ZOOM_MAX`
     - Variable: `WHEEL_DIVISOR`
     - Variable: `PINCH_SENSITIVITY`
   - [constants.ts](../src/lib/constants.ts)
-    - Variable: `GRAYSCALE_PALETTE`
-    - Variable: `PALETTES`
+    - Variable: `PALETTE_LIGHTNESSES`
+    - Variable: `COLOR_COUNT`
+    - Interface: `PaletteDef`
+    - Variable: `PALETTE_DEFS`
+    - Function: `setPaletteOffsets`
+    - Function: `computePaletteColors`
     - Function: `encodeColor`
     - Function: `decodeColor`
     - Function: `resolveColor`
@@ -89,6 +127,8 @@
     - Interface: `HexCoord`
     - Function: `hexCenterWorld` - World-space center of the hex (c, k) at lattice...
     - Function: `enumerateHexTrixels` - Enumerates all trixels whose centroid lies insi...
+    - Function: `hexWedgeIndex` - Returns which of the 6 angular wedges (0-5) of ...
+    - Function: `getHexWedgeTrixels` - Returns all trixels in the same 60° angular wed...
     - Function: `hexTranslation` - Tri-axial translation (dq, dr) that maps trixel...
     - Function: `paintTargets` - Expands a single painted trixel into the full s...
     - Function: `rotateHexCW`
@@ -96,5 +136,8 @@
     - Function: `flipHexVertical`
     - Function: `remapHex`
     - Function: `shiftHexPalettes`
+  - [touch-utils.ts](../src/lib/touch-utils.ts) - Safari on some devices reports pointer/touch co...
+    - Function: `normPoint` - Safari on some devices reports pointer/touch co...
+    - Function: `normTouchPair`
   - [utils.ts](../src/lib/utils.ts)
     - Function: `cn`
