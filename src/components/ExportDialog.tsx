@@ -16,7 +16,7 @@ function stripSvgDimensions(svg: string): string {
   return svg.replace(
     /<svg([^>]*)>/,
     (_, attrs) =>
-      `<svg${attrs.replace(/\s*width="[^"]*"|\s*height="[^"]*"/g, "")}>`,
+      `<svg${attrs.replace(/\s*width="[^"]*"|\s*height="[^"]*"/g, "")} width="100%">`,
   );
 }
 
@@ -60,7 +60,7 @@ export function ExportDialog({
         </AlertDialogHeader>
 
         <div className="flex flex-col gap-4">
-          <div className="border rounded-lg bg-[repeating-conic-gradient(rgba(255,255,255,0.05)_0%_25%,_transparent_0%_50%)_50%_/_16px_16px] overflow-hidden max-h-[250px] w-full">
+          <div className="border rounded-lg bg-[repeating-conic-gradient(rgba(255,255,255,0.05)_0%_25%,_transparent_0%_50%)_50%_/_16px_16px] overflow-hidden max-h-[250px] w-full flex items-center justify-center">
             <div
               className="p-4"
               dangerouslySetInnerHTML={{ __html: previewSvg }}
