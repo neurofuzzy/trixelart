@@ -441,36 +441,41 @@ export function GridCanvas({
     // the offset is established by the first click.
     if (tool === "clone" && cloneSource && hoverTargets.length > 0) {
       const h = hoverTargets[0];
-      const hbx = h.q * SIDE + h.r * (SIDE / 2);
-      const hby = h.r * H;
-      const hcX = h.type === "up" ? hbx + SIDE / 2 : hbx + SIDE;
-      const hcY = h.type === "up" ? hby + H / 3 : hby + (2 * H) / 3;
 
-      let srcX: number;
-      let srcY: number;
-
-      if (cloneOffset) {
-        srcX = hcX + cloneOffset.x;
-        srcY = hcY + cloneOffset.y;
+      if (!cloneOffset && h.type !== cloneSource.type) {
+        // skip: offset not yet established and types don't match
       } else {
-        srcX = cloneSource.x;
-        srcY = cloneSource.y;
+        const hbx = h.q * SIDE + h.r * (SIDE / 2);
+        const hby = h.r * H;
+        const hcX = h.type === "up" ? hbx + SIDE / 2 : hbx + SIDE;
+        const hcY = h.type === "up" ? hby + H / 3 : hby + (2 * H) / 3;
+
+        let srcX: number;
+        let srcY: number;
+
+        if (cloneOffset) {
+          srcX = hcX + cloneOffset.x;
+          srcY = hcY + cloneOffset.y;
+        } else {
+          srcX = cloneSource.x;
+          srcY = cloneSource.y;
+        }
+
+        const srcTri = worldToTri(srcX, srcY);
+
+        ctx.save();
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = "rgb(74, 222, 128)";
+        ctx.lineWidth = Math.max(2 / view.zoom, 1);
+        const [a, b, c] = getTriVertices(srcTri.q, srcTri.r, srcTri.type);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
       }
-
-      const srcTri = worldToTri(srcX, srcY);
-
-      ctx.save();
-      ctx.globalAlpha = 0.8;
-      ctx.strokeStyle = "rgb(74, 222, 128)";
-      ctx.lineWidth = Math.max(2 / view.zoom, 1);
-      const [a, b, c] = getTriVertices(srcTri.q, srcTri.r, srcTri.type);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(c.x, c.y);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
     }
 
     // Hover outlines — primary + affected (flower/symmetry) ghosts.

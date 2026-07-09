@@ -46,6 +46,7 @@ export const cloneTool: ToolHandler = {
     // Establish the persistent offset on first click after alt-click
     if (!gCloneOffset) {
       if (!ctx.cloneSource) return;
+      if (tri.type !== ctx.cloneSource.type) return;
       const clickCenter = triCenter(tri.q, tri.r, tri.type);
       gCloneOffset = {
         x: ctx.cloneSource.x - clickCenter.x,
