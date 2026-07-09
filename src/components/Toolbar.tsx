@@ -180,35 +180,56 @@ export function Toolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant={isEditTool(tool) ? "default" : "ghost"}
-              size="sm"
-              className="gap-1"
-              title="Drawing tools"
-            >
-              <ActiveIcon className="w-4 h-4" />
-              <ChevronDown className="w-2.5 h-2.5 ml-0" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={6}>
-            {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
-              <DropdownMenuItem
-                key={t}
-                onClick={() => onToolChange(t)}
-                disabled={t === "stamp" ? !hasSelection : undefined}
-                className={tool === t ? "bg-accent" : undefined}
+        <div className="lg:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={isEditTool(tool) ? "default" : "ghost"}
+                size="sm"
+                className="gap-1"
+                title="Drawing tools"
               >
-                <Icon className="w-4 h-4" />
-                <span className="flex-1">{label}</span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {shortcut}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <ActiveIcon className="w-4 h-4" />
+                <ChevronDown className="w-2.5 h-2.5 ml-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" sideOffset={6}>
+              {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
+                <DropdownMenuItem
+                  key={t}
+                  onClick={() => onToolChange(t)}
+                  disabled={t === "stamp" ? !hasSelection : undefined}
+                  className={tool === t ? "bg-accent" : undefined}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="flex-1">{label}</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {shortcut}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <div className="hidden lg:flex lg:items-center lg:gap-0.5">
+          {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
+            <Button
+              key={t}
+              variant={tool === t ? "default" : "ghost"}
+              size="icon"
+              onClick={() => onToolChange(t)}
+              disabled={t === "stamp" ? !hasSelection : undefined}
+              title={`${label} (${shortcut})`}
+              onMouseEnter={() => onSetTooltip(label)}
+              onMouseLeave={() => onSetTooltip(null)}
+            >
+              <Icon className="w-4 h-4" />
+            </Button>
+          ))}
+        </div>
+
+        <div className="hidden lg:block w-px h-6 bg-border mx-0.5 self-center" />
 
         <button
           className={cn(
