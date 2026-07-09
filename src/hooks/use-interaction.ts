@@ -36,8 +36,8 @@ interface UseInteractionArgs {
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;
-  selectedHex: { c: number; k: number } | null;
-  setSelectedHex: (h: { c: number; k: number } | null) => void;
+  selectedHexes: { c: number; k: number }[];
+  setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
@@ -69,8 +69,8 @@ export function useInteraction(args: UseInteractionArgs) {
     flowerRadius,
     gridDivisions,
     symmetry,
-    selectedHex,
-    setSelectedHex,
+    selectedHexes,
+    setSelectedHexes,
     activeSelection,
     setActiveSelection,
     setSelections,
@@ -107,8 +107,8 @@ export function useInteraction(args: UseInteractionArgs) {
   gridDivisionsRef.current = gridDivisions;
   const hexEnabledRef = useRef(hexEnabled);
   hexEnabledRef.current = hexEnabled;
-  const selectedHexRef = useRef(selectedHex);
-  selectedHexRef.current = selectedHex;
+  const selectedHexesRef = useRef(selectedHexes);
+  selectedHexesRef.current = selectedHexes;
   const activeSelectionRef = useRef(activeSelection);
   activeSelectionRef.current = activeSelection;
   const brushSizeRef = useRef(brushSize);
@@ -239,13 +239,14 @@ export function useInteraction(args: UseInteractionArgs) {
       }
       let targets = [...out.values()];
       // selectedHex clipping: selection is a stronger constraint than brush
-      // size — painting outside a selected hex yields nothing, consistent
-      // with single-brush behaviour.
-      if (selectedHexRef.current && N > 0) {
-        const sel = selectedHexRef.current;
+      // size — painting outside selected hexes yields nothing.
+      if (selectedHexesRef.current.length > 0 && N > 0) {
+        const hexSet = new Set(
+          selectedHexesRef.current.map((h) => `${h.c},${h.k}`),
+        );
         targets = targets.filter((t) => {
           const h = triToHex(t.q, t.r, t.type, N);
-          return h.c === sel.c && h.k === sel.k;
+          return hexSet.has(`${h.c},${h.k}`);
         });
       }
       return targets;
@@ -271,7 +272,7 @@ export function useInteraction(args: UseInteractionArgs) {
     flowerRadius,
     gridDivisions,
     symmetry,
-    selectedHex,
+    selectedHexes,
     hexEnabled,
     gridRotation,
     invCos,
@@ -290,7 +291,7 @@ export function useInteraction(args: UseInteractionArgs) {
     onCloneOffset,
     captureMode: captureMode ?? false,
     setCaptureMode: setCaptureMode ?? (() => {}),
-    setSelectedHex,
+    setSelectedHexes,
   };
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;

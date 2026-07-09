@@ -94,10 +94,9 @@ export default function TrixelGrid() {
   // underlying tri-axial lattice, hex geometry, symmetry math, history and
   // persistence remain untouched — only the screen↔world seam applies it.
   const gridRotation = gridOrientation === "pointy-top" ? Math.PI / 2 : 0;
-  const [selectedHex, setSelectedHex] = useState<{
-    c: number;
-    k: number;
-  } | null>(null);
+  const [selectedHexes, setSelectedHexes] = useState<
+    { c: number; k: number }[]
+  >([]);
   const [selections, setSelections] = useState<SelectionSnapshot[]>([]);
   const [activeSelection, setActiveSelection] =
     useState<SelectionSnapshot | null>(null);
@@ -338,9 +337,9 @@ export default function TrixelGrid() {
     flowerRadius: effectiveFlowerRadius,
     gridDivisions,
     symmetry,
-    selectedHex,
+    selectedHexes,
     hexEnabled,
-    setSelectedHex,
+    setSelectedHexes,
     activeSelection,
     setActiveSelection,
     setSelections,
@@ -365,7 +364,7 @@ export default function TrixelGrid() {
     handleRedo();
   }, [handleRedo]);
 
-  const clearSelection = useCallback(() => setSelectedHex(null), []);
+  const clearSelection = useCallback(() => setSelectedHexes([]), []);
 
   useEffect(() => {
     if (!stampFlash) return;
@@ -406,11 +405,11 @@ export default function TrixelGrid() {
   }, [cloneFlash?.seq]);
 
   useEffect(() => {
-    if (tool === "stamp") setSelectedHex(null);
+    if (tool === "stamp") setSelectedHexes([]);
   }, [tool]);
 
   useEffect(() => {
-    if (tool === "clone") setSelectedHex(null);
+    if (tool === "clone") setSelectedHexes([]);
     else {
       setCloneSource(null);
       setCloneOffset(null);
@@ -418,20 +417,18 @@ export default function TrixelGrid() {
   }, [tool]);
 
   const onDeleteSelection = useCallback(() => {
-    if (!selectedHex || gridDivisions <= 0) return;
-    const hexTris = enumerateHexTrixels(
-      selectedHex.c,
-      selectedHex.k,
-      gridDivisions,
-    );
+    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
     const prev = paintedRef.current;
     const next = { ...prev };
     let changed = false;
-    for (const t of hexTris) {
-      const key = triToString(t);
-      if (key in next) {
-        delete next[key];
-        changed = true;
+    for (const sel of selectedHexes) {
+      const hexTris = enumerateHexTrixels(sel.c, sel.k, gridDivisions);
+      for (const t of hexTris) {
+        const key = triToString(t);
+        if (key in next) {
+          delete next[key];
+          changed = true;
+        }
       }
     }
     if (!changed) return;
@@ -447,7 +444,7 @@ export default function TrixelGrid() {
         ? triToString(lastPaintTriBridgeRef.current.current)
         : null,
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const handleExport = useCallback(() => {
     const project = buildSnapshot();
@@ -567,17 +564,21 @@ export default function TrixelGrid() {
     (direction: number) => {
       const count = PALETTE_DEFS.length;
       setPainted((prev) => {
-        const next =
-          selectedHex && gridDivisions > 0
-            ? shiftHexPalettes(
-                prev,
-                selectedHex.c,
-                selectedHex.k,
-                gridDivisions,
-                direction as 1 | -1,
-                count,
-              )
-            : shiftGridPalettes(prev, direction as 1 | -1, count);
+        let next = prev;
+        if (selectedHexes.length > 0 && gridDivisions > 0) {
+          for (const sel of selectedHexes) {
+            next = shiftHexPalettes(
+              next,
+              sel.c,
+              sel.k,
+              gridDivisions,
+              direction as 1 | -1,
+              count,
+            );
+          }
+        } else {
+          next = shiftGridPalettes(next, direction as 1 | -1, count);
+        }
         if (next !== prev) {
           pushHistory({
             painted: next,
@@ -594,7 +595,7 @@ export default function TrixelGrid() {
         return next;
       });
     },
-    [selectedHex, gridDivisions, setPainted, pushHistory],
+    [selectedHexes, gridDivisions, setPainted, pushHistory],
   );
 
   const handleClear = useCallback(() => {
@@ -615,16 +616,11 @@ export default function TrixelGrid() {
 
   const onShiftUp = useCallback(() => {
     setPainted((prev) => {
-      let next: Record<string, string>;
-      if (selectedHex && gridDivisions > 0) {
-        next = remapHex(
-          prev,
-          selectedHex.c,
-          selectedHex.k,
-          gridDivisions,
-          1,
-          COLOR_COUNT,
-        );
+      let next = prev;
+      if (selectedHexes.length > 0 && gridDivisions > 0) {
+        for (const sel of selectedHexes) {
+          next = remapHex(next, sel.c, sel.k, gridDivisions, 1, COLOR_COUNT);
+        }
       } else {
         next = remapGrid(prev, 1);
       }
@@ -643,20 +639,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const onShiftDown = useCallback(() => {
     setPainted((prev) => {
-      let next: Record<string, string>;
-      if (selectedHex && gridDivisions > 0) {
-        next = remapHex(
-          prev,
-          selectedHex.c,
-          selectedHex.k,
-          gridDivisions,
-          -1,
-          COLOR_COUNT,
-        );
+      let next = prev;
+      if (selectedHexes.length > 0 && gridDivisions > 0) {
+        for (const sel of selectedHexes) {
+          next = remapHex(next, sel.c, sel.k, gridDivisions, -1, COLOR_COUNT);
+        }
       } else {
         next = remapGrid(prev, -1);
       }
@@ -675,17 +666,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const onRotateSelection = useCallback(() => {
-    if (!selectedHex || gridDivisions <= 0) return;
+    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
     setPainted((prev) => {
-      const next = rotateHexCW(
-        prev,
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
+      let next = prev;
+      for (const sel of selectedHexes) {
+        next = rotateHexCW(next, sel.c, sel.k, gridDivisions);
+      }
       if (next !== prev) {
         pushHistory({
           painted: next,
@@ -701,17 +690,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const onRotateSelectionCCW = useCallback(() => {
-    if (!selectedHex || gridDivisions <= 0) return;
+    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
     setPainted((prev) => {
-      const next = rotateHexCCW(
-        prev,
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
+      let next = prev;
+      for (const sel of selectedHexes) {
+        next = rotateHexCCW(next, sel.c, sel.k, gridDivisions);
+      }
       if (next !== prev) {
         pushHistory({
           painted: next,
@@ -727,17 +714,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const onFlipSelection = useCallback(() => {
-    if (!selectedHex || gridDivisions <= 0) return;
+    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
     setPainted((prev) => {
-      const next = flipHexVertical(
-        prev,
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
+      let next = prev;
+      for (const sel of selectedHexes) {
+        next = flipHexVertical(next, sel.c, sel.k, gridDivisions);
+      }
       if (next !== prev) {
         pushHistory({
           painted: next,
@@ -753,17 +738,15 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const onFlipHorizontal = useCallback(() => {
-    if (!selectedHex || gridDivisions <= 0) return;
+    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
     setPainted((prev) => {
-      const next = flipHexHorizontal(
-        prev,
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
+      let next = prev;
+      for (const sel of selectedHexes) {
+        next = flipHexHorizontal(next, sel.c, sel.k, gridDivisions);
+      }
       if (next !== prev) {
         pushHistory({
           painted: next,
@@ -779,7 +762,7 @@ export default function TrixelGrid() {
       }
       return next;
     });
-  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+  }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   useKeyboardShortcuts(
     onUndo,
@@ -797,7 +780,7 @@ export default function TrixelGrid() {
     onPaletteShift,
     onRotateSelection,
     onRotateSelectionCCW,
-    selectedHex !== null,
+    selectedHexes.length > 0,
     handleExport,
     handleImportClick,
   );
@@ -914,7 +897,7 @@ export default function TrixelGrid() {
           screenToWorld={screenToWorld}
           gridDivisions={gridDivisions}
           hexMode={hexMode}
-          selectedHex={selectedHex}
+          selectedHexes={selectedHexes}
           tool={tool}
           activeSelection={activeSelection}
           stampFlash={stampFlash}
@@ -937,7 +920,7 @@ export default function TrixelGrid() {
             onFlip={onFlipSelection}
             onFlipHorizontal={onFlipHorizontal}
             onPaletteShift={onPaletteShift}
-            hasSelection={selectedHex !== null}
+            hasSelection={selectedHexes.length > 0}
             onPointerEnter={() => setHoveredTri(null)}
             gridOrientation={gridOrientation}
           />

@@ -51,10 +51,14 @@ export type DragState =
   | {
       kind: "selectMove";
       hasMoved: boolean;
-      sourceHex: { c: number; k: number };
-      lastHex: { c: number; k: number };
+      anchorHex: { c: number; k: number };
+      lastDelta: { dc: number; dk: number };
+      lastShiftKey: boolean;
       originPainted: Record<string, string>;
-      snapshotTrixels: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
+      items: Array<{
+        sourceHex: { c: number; k: number };
+        snapshot: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
+      }>;
       N: number;
     };
 
@@ -73,7 +77,7 @@ export interface ToolContext {
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;
-  selectedHex: { c: number; k: number } | null;
+  selectedHexes: { c: number; k: number }[];
   hexEnabled: boolean;
   gridRotation: number;
   invCos: number;
@@ -92,7 +96,7 @@ export interface ToolContext {
   onCloneOffset?: (o: { x: number; y: number } | null) => void;
   captureMode: boolean;
   setCaptureMode: (v: boolean) => void;
-  setSelectedHex: (h: { c: number; k: number } | null) => void;
+  setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
 }
 
 export interface ToolHandler {

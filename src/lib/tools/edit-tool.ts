@@ -48,7 +48,7 @@ export function makeEditTool(
           const lineTris = clippedLine(
             prevTri,
             tri,
-            ctx.selectedHex,
+            ctx.selectedHexes,
             ctx.gridDivisions,
           );
           if (lineTris.length > 0) {

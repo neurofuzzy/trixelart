@@ -31,7 +31,7 @@ export function bestAxisClosest(
 export function clippedLine(
   fromTri: TriKey,
   toTri: TriKey,
-  selectedHex: { c: number; k: number } | null,
+  selectedHexes: { c: number; k: number }[],
   N: number,
 ): TriKey[] {
   const origin = triCenter(fromTri.q, fromTri.r, fromTri.type);
@@ -39,10 +39,11 @@ export function clippedLine(
   const closest = bestAxisClosest(origin, target);
   if (!closest) return [];
   let lineTris = getTrianglesOnLine(origin.x, origin.y, closest.x, closest.y);
-  if (selectedHex && N > 0) {
+  if (selectedHexes.length > 0 && N > 0) {
+    const hexSet = new Set(selectedHexes.map((h) => `${h.c},${h.k}`));
     lineTris = lineTris.filter((t) => {
       const h = triToHex(t.q, t.r, t.type, N);
-      return h.c === selectedHex.c && h.k === selectedHex.k;
+      return hexSet.has(`${h.c},${h.k}`);
     });
   }
   return lineTris;

@@ -77,7 +77,7 @@ export const cloneTool: ToolHandler = {
         const lineTris = clippedLine(
           prevTri,
           tri,
-          ctx.selectedHex,
+          ctx.selectedHexes,
           ctx.gridDivisions,
         );
         if (lineTris.length > 0) {

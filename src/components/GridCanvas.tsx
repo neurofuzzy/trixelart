@@ -15,7 +15,7 @@ export function GridCanvas({
   screenToWorld,
   gridDivisions,
   hexMode,
-  selectedHex,
+  selectedHexes,
   tool,
   activeSelection,
   stampFlash,
@@ -37,7 +37,7 @@ export function GridCanvas({
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
   hexMode: HexMode;
-  selectedHex: { c: number; k: number } | null;
+  selectedHexes: { c: number; k: number }[];
   tool: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
@@ -57,7 +57,7 @@ export function GridCanvas({
   // Marching-ants animation tick (8 px/s equivalent in screen px). Stops
   // when there's no selection so we don't repaint forever.
   useEffect(() => {
-    if (!selectedHex) return;
+    if (selectedHexes.length === 0) return;
     let raf = 0;
     const start = performance.now();
     const tick = (now: number) => {
@@ -66,7 +66,7 @@ export function GridCanvas({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [selectedHex]);
+  }, [selectedHexes]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -315,53 +315,52 @@ export function GridCanvas({
     ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
     ctx.fill();
 
-    // Selection overlay — cyan/blue tint on the selected hex's trixels, with a
-    // marching-ants hex outline. Only shown when hex lattice is active.
-    if (selectedHex && gridDivisions > 0) {
+    // Selection overlay — cyan/blue tint on each selected hex's trixels,
+    // with a marching-ants hex outline. Only shown when hex lattice is active.
+    if (selectedHexes.length > 0 && gridDivisions > 0) {
       const s = gridDivisions * SIDE;
       const vHalf = gridDivisions * H;
-      const { x: cx, y: cy } = hexCenterWorld(
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
 
-      // Cyan tint on the selected trixels.
-      ctx.save();
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = "rgb(34, 211, 238)"; // cyan-400
-      const tris = enumerateHexTrixels(
-        selectedHex.c,
-        selectedHex.k,
-        gridDivisions,
-      );
-      ctx.beginPath();
-      for (const t of tris) {
-        const [a, b, c] = getTriVertices(t.q, t.r, t.type);
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
+      for (const sel of selectedHexes) {
+        const { x: cx, y: cy } = hexCenterWorld(
+          sel.c,
+          sel.k,
+          gridDivisions,
+        );
+
+        // Cyan tint on the selected trixels.
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = "rgb(34, 211, 238)"; // cyan-400
+        const tris = enumerateHexTrixels(sel.c, sel.k, gridDivisions);
+        ctx.beginPath();
+        for (const t of tris) {
+          const [a, b, c] = getTriVertices(t.q, t.r, t.type);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+        }
+        ctx.fill();
+        ctx.restore();
+
+        // Hex outline with marching-ants dash.
+        ctx.save();
+        ctx.strokeStyle = "rgb(34, 211, 238)";
+        ctx.lineWidth = Math.max(2 / view.zoom, 1.5);
+        ctx.setLineDash([8, 6]);
+        ctx.lineDashOffset = -antPhase / view.zoom;
+        ctx.beginPath();
+        ctx.moveTo(cx + s, cy);
+        ctx.lineTo(cx + s / 2, cy + vHalf);
+        ctx.lineTo(cx - s / 2, cy + vHalf);
+        ctx.lineTo(cx - s, cy);
+        ctx.lineTo(cx - s / 2, cy - vHalf);
+        ctx.lineTo(cx + s / 2, cy - vHalf);
         ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.fill();
-      ctx.restore();
-
-      // Hex outline with marching-ants dash.
-      ctx.save();
-      ctx.strokeStyle = "rgb(34, 211, 238)";
-      ctx.lineWidth = Math.max(2 / view.zoom, 1.5);
-      ctx.setLineDash([8, 6]);
-      ctx.lineDashOffset = -antPhase / view.zoom;
-      ctx.beginPath();
-      ctx.moveTo(cx + s, cy);
-      ctx.lineTo(cx + s / 2, cy + vHalf);
-      ctx.lineTo(cx - s / 2, cy + vHalf);
-      ctx.lineTo(cx - s, cy);
-      ctx.lineTo(cx - s / 2, cy - vHalf);
-      ctx.lineTo(cx + s / 2, cy - vHalf);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
     }
 
     // Stamp flash — yellow highlight on the source hex that fades out.
@@ -631,7 +630,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
 
   return (
     <canvas
