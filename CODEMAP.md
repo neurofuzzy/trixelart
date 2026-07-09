@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-08 06:16:46
-# Files: 36
-# Lines of code: ~4785
+# Last updated: 2026-07-09 06:53:58
+# Files: 39
+# Lines of code: ~5398
 ```
 - **/app**
   - **/lib**
@@ -22,6 +22,8 @@
     - Function: `AbcDisplay`
   - [ColorPalette.tsx](../src/components/ColorPalette.tsx)
     - Function: `ColorPalette`
+  - [ExportDialog.tsx](../src/components/ExportDialog.tsx)
+    - Function: `ExportDialog`
   - [Footer.tsx](../src/components/Footer.tsx)
     - Type: `HexMode`
     - Type: `Symmetry`
@@ -59,6 +61,8 @@
       - Function: `makeEditTool` - Shared shell for paint / erase / dodge / burn. ...
     - [erase-tool.ts](../src/lib/tools/erase-tool.ts)
       - Variable: `eraseTool`
+    - [eyedropper-tool.ts](../src/lib/tools/eyedropper-tool.ts)
+      - Variable: `eyedropperTool`
     - [index.ts](../src/lib/tools/index.ts)
       - Variable: `toolMap`
     - [line-draw.ts](../src/lib/tools/line-draw.ts)
@@ -136,6 +140,13 @@
     - Function: `flipHexVertical`
     - Function: `remapHex`
     - Function: `shiftHexPalettes`
+  - [svg-export.ts](../src/lib/svg-export.ts)
+    - Interface: `TriangleData`
+    - Interface: `MergedPathData`
+    - Interface: `SVGExportOptions`
+    - Function: `generateTriangles`
+    - Function: `mergeTrianglesByColor`
+    - Function: `generateSVG`
   - [touch-utils.ts](../src/lib/touch-utils.ts) - Safari on some devices reports pointer/touch co...
     - Function: `normPoint` - Safari on some devices reports pointer/touch co...
     - Function: `normTouchPair`

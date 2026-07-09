@@ -33,6 +33,7 @@ import {
   rotateHexCW,
   rotateHexCCW,
   flipHexVertical,
+  flipHexHorizontal,
   remapHex,
   shiftHexPalettes,
   enumerateHexTrixels,
@@ -694,6 +695,32 @@ export default function TrixelGrid() {
     });
   }, [selectedHex, gridDivisions, setPainted, pushHistory]);
 
+  const onFlipHorizontal = useCallback(() => {
+    if (!selectedHex || gridDivisions <= 0) return;
+    setPainted((prev) => {
+      const next = flipHexHorizontal(
+        prev,
+        selectedHex.c,
+        selectedHex.k,
+        gridDivisions,
+      );
+      if (next !== prev) {
+        pushHistory({
+          painted: next,
+          gridDivisions: gridDivisionsRef.current,
+          hexMode: hexModeRef.current,
+          flowerRadius: flowerRadiusRef.current,
+          symmetry: symmetryRef.current,
+          selections: selectionsRef.current,
+          lastPaintTri: lastPaintTriBridgeRef.current?.current
+            ? triToString(lastPaintTriBridgeRef.current.current)
+            : null,
+        });
+      }
+      return next;
+    });
+  }, [selectedHex, gridDivisions, setPainted, pushHistory]);
+
   useKeyboardShortcuts(
     onUndo,
     onRedo,
@@ -845,6 +872,7 @@ export default function TrixelGrid() {
             onShiftDown={onShiftDown}
             onRotate={onRotateSelection}
             onFlip={onFlipSelection}
+            onFlipHorizontal={onFlipHorizontal}
             onPaletteShift={onPaletteShift}
             hasSelection={selectedHex !== null}
             onPointerEnter={() => setHoveredTri(null)}

@@ -352,6 +352,37 @@ export function flipHexVertical(
   return result;
 }
 
+export function flipHexHorizontal(
+  painted: Record<string, string>,
+  c: number,
+  k: number,
+  N: number,
+): Record<string, string> {
+  const { x: cx, y: cy } = hexCenterWorld(c, k, N);
+  const tris = enumerateHexTrixels(c, k, N);
+  const result = { ...painted };
+
+  const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
+  for (const t of tris) {
+    const key = triToString(t);
+    const color = painted[key];
+    if (color) {
+      delete result[key];
+      const bx = t.q * SIDE + t.r * (SIDE / 2);
+      const by = t.r * H;
+      const centX = t.type === "up" ? bx + SIDE / 2 : bx + SIDE;
+      const centY = t.type === "up" ? by + H / 3 : by + (2 * H) / 3;
+      const dx = centX - cx;
+      const flipped = worldToTri(cx - dx, centY);
+      moved.push({ q: flipped.q, r: flipped.r, type: flipped.type, color });
+    }
+  }
+  for (const m of moved) {
+    result[triToString({ q: m.q, r: m.r, type: m.type })] = m.color;
+  }
+  return result;
+}
+
 export function remapHex(
   painted: Record<string, string>,
   c: number,

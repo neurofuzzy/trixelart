@@ -9,6 +9,7 @@ export function SelectionPalette({
   onShiftDown,
   onRotate,
   onFlip,
+  onFlipHorizontal,
   onPaletteShift,
   hasSelection,
   onPointerEnter,
@@ -18,6 +19,7 @@ export function SelectionPalette({
   onShiftDown: () => void;
   onRotate: () => void;
   onFlip: () => void;
+  onFlipHorizontal: () => void;
   onPaletteShift: (dir: number) => void;
   hasSelection: boolean;
   onPointerEnter: () => void;
@@ -112,6 +114,23 @@ export function SelectionPalette({
           <FlipHorizontal className="w-4 h-4" />
         ) : (
           <FlipVertical className="w-4 h-4" />
+        )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFlipHorizontal();
+        }}
+        disabled={!hasSelection}
+        title={gridOrientation === "pointy-top" ? "Flip vertical" : "Flip horizontal"}
+      >
+        {gridOrientation === "pointy-top" ? (
+          <FlipVertical className="w-4 h-4" />
+        ) : (
+          <FlipHorizontal className="w-4 h-4" />
         )}
       </Button>
     </div>
