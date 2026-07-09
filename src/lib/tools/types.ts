@@ -8,6 +8,7 @@ export type Tool =
   | "pan"
   | "select"
   | "stamp"
+  | "clone"
   | "dodge"
   | "burn"
   | "eyedropper";
@@ -76,6 +77,10 @@ export interface ToolContext {
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
   onStampCapture?: (c: number, k: number) => void;
+  cloneSource: { x: number; y: number; q: number; r: number; type: string } | null;
+  onCloneCapture?: (x: number, y: number, c: number, k: number, q: number, r: number, type: string) => void;
+  cloneOffset: { x: number; y: number } | null;
+  onCloneOffset?: (o: { x: number; y: number } | null) => void;
   captureMode: boolean;
   setCaptureMode: (v: boolean) => void;
   setSelectedHex: (h: { c: number; k: number } | null) => void;

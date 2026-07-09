@@ -22,6 +22,7 @@ import {
   Paintbrush,
   Snowflake,
   Pipette,
+  GitCompareArrows,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +51,7 @@ const editTools = [
   { tool: "dodge" as Tool, icon: Sun, label: "Dodge", shortcut: "D" },
   { tool: "burn" as Tool, icon: Moon, label: "Burn", shortcut: "B" },
   { tool: "stamp" as Tool, icon: Stamp, label: "Stamp", shortcut: "T" },
+  { tool: "clone" as Tool, icon: GitCompareArrows, label: "Clone", shortcut: "C" },
   { tool: "eyedropper" as Tool, icon: Pipette, label: "Eyedropper", shortcut: "I" },
   { tool: "pan" as Tool, icon: Move, label: "Move", shortcut: "H" },
 ] as const;
@@ -60,6 +62,7 @@ const isEditTool = (t: string): boolean =>
   t === "dodge" ||
   t === "burn" ||
   t === "stamp" ||
+  t === "clone" ||
   t === "eyedropper" ||
   t === "pan";
 

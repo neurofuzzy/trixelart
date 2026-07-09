@@ -358,7 +358,7 @@ export function flipHexHorizontal(
   k: number,
   N: number,
 ): Record<string, string> {
-  const { x: cx, y: cy } = hexCenterWorld(c, k, N);
+  const { x: cx } = hexCenterWorld(c, k, N);
   const tris = enumerateHexTrixels(c, k, N);
   const result = { ...painted };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { SIDE, H, getTriVertices, type TriKey } from "@/lib/grid-math";
+import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
@@ -19,6 +19,9 @@ export function GridCanvas({
   tool,
   activeSelection,
   stampFlash,
+  cloneFlash,
+  cloneSource,
+  cloneOffset,
   captureMode,
   gridRotation = 0,
   brushSize,
@@ -35,9 +38,12 @@ export function GridCanvas({
   gridDivisions: number;
   hexMode: HexMode;
   selectedHex: { c: number; k: number } | null;
-  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn" | "eyedropper";
+  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
+  cloneFlash?: { c: number; k: number; q: number; r: number; type: string; opacity: number; seq: number } | null;
+  cloneSource?: { x: number; y: number; q: number; r: number; type: string } | null;
+  cloneOffset?: { x: number; y: number } | null;
   captureMode?: boolean;
   gridRotation?: number;
   brushSize?: "single" | "hex";
@@ -376,6 +382,21 @@ export function GridCanvas({
       ctx.restore();
     }
 
+    // Clone flash — green highlight on the source triangle that fades out.
+    if (cloneFlash && gridDivisions > 0) {
+      ctx.save();
+      ctx.globalAlpha = cloneFlash.opacity * 0.5;
+      ctx.fillStyle = "rgb(74, 222, 128)"; // green-400
+      const [a, b, c] = getTriVertices(cloneFlash.q, cloneFlash.r, cloneFlash.type as TriType);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
     // Stamp preview: render the active selection's trixels translated to
     // the hovered hex, using their real colors so the user sees exactly
     // what a stamp would land there. Skip when in capture mode.
@@ -412,6 +433,43 @@ export function GridCanvas({
         }
         ctx.fill();
       }
+      ctx.restore();
+    }
+
+    // Clone source cursor — green triangle outline that follows the cursor
+    // at the persistent clone offset, or stays at the source point until
+    // the offset is established by the first click.
+    if (tool === "clone" && cloneSource && hoverTargets.length > 0) {
+      const h = hoverTargets[0];
+      const hbx = h.q * SIDE + h.r * (SIDE / 2);
+      const hby = h.r * H;
+      const hcX = h.type === "up" ? hbx + SIDE / 2 : hbx + SIDE;
+      const hcY = h.type === "up" ? hby + H / 3 : hby + (2 * H) / 3;
+
+      let srcX: number;
+      let srcY: number;
+
+      if (cloneOffset) {
+        srcX = hcX + cloneOffset.x;
+        srcY = hcY + cloneOffset.y;
+      } else {
+        srcX = cloneSource.x;
+        srcY = cloneSource.y;
+      }
+
+      const srcTri = worldToTri(srcX, srcY);
+
+      ctx.save();
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = "rgb(74, 222, 128)";
+      ctx.lineWidth = Math.max(2 / view.zoom, 1);
+      const [a, b, c] = getTriVertices(srcTri.q, srcTri.r, srcTri.type);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -566,7 +624,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
+  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHex, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
 
   return (
     <canvas

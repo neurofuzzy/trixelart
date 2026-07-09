@@ -42,6 +42,10 @@ interface UseInteractionArgs {
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
   onStampCapture?: (c: number, k: number) => void;
+  cloneSource: { x: number; y: number; q: number; r: number; type: string } | null;
+  onCloneCapture?: (x: number, y: number, c: number, k: number, q: number, r: number, type: string) => void;
+  cloneOffset: { x: number; y: number } | null;
+  onCloneOffset?: (o: { x: number; y: number } | null) => void;
   captureMode?: boolean;
   setCaptureMode?: (v: boolean) => void;
   gridRotation?: number;
@@ -71,6 +75,10 @@ export function useInteraction(args: UseInteractionArgs) {
     setActiveSelection,
     setSelections,
     onStampCapture,
+    cloneSource,
+    onCloneCapture,
+    cloneOffset,
+    onCloneOffset,
     captureMode,
     setCaptureMode,
     gridRotation = 0,
@@ -276,6 +284,10 @@ export function useInteraction(args: UseInteractionArgs) {
     setActiveSelection,
     setSelections,
     onStampCapture,
+    cloneSource,
+    onCloneCapture,
+    cloneOffset,
+    onCloneOffset,
     captureMode: captureMode ?? false,
     setCaptureMode: setCaptureMode ?? (() => {}),
     setSelectedHex,

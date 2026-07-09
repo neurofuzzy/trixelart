@@ -93,6 +93,8 @@ export function useKeyboardShortcuts(
         setTool("select");
       } else if (e.key.toLowerCase() === "t") {
         setTool("stamp");
+      } else if (e.key.toLowerCase() === "c") {
+        setTool("clone");
       } else if (e.key.toLowerCase() === "d") {
         setTool("dodge");
       } else if (e.key.toLowerCase() === "b") {

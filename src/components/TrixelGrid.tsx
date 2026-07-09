@@ -107,6 +107,26 @@ export default function TrixelGrid() {
     opacity: number;
     seq: number;
   } | null>(null);
+  const [cloneSource, setCloneSource] = useState<{
+    x: number;
+    y: number;
+    q: number;
+    r: number;
+    type: string;
+  } | null>(null);
+  const [cloneOffset, setCloneOffset] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [cloneFlash, setCloneFlash] = useState<{
+    c: number;
+    k: number;
+    q: number;
+    r: number;
+    type: string;
+    opacity: number;
+    seq: number;
+  } | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
   const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
@@ -275,6 +295,15 @@ export default function TrixelGrid() {
     setStampFlash((prev) => ({ c, k, opacity: 1, seq: (prev?.seq ?? 0) + 1 }));
   }, []);
 
+  const onCloneOffset = useCallback((o: { x: number; y: number } | null) => {
+    setCloneOffset(o);
+  }, []);
+
+  const onCloneCapture = useCallback((x: number, y: number, c: number, k: number, q: number, r: number, type: string) => {
+    setCloneSource({ x, y, q, r, type });
+    setCloneFlash((prev) => ({ c, k, q, r, type, opacity: 1, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
+
   const {
     hoverTargets,
     setHoveredTri,
@@ -316,6 +345,10 @@ export default function TrixelGrid() {
     setActiveSelection,
     setSelections,
     onStampCapture,
+    cloneSource,
+    onCloneCapture,
+    cloneOffset,
+    onCloneOffset,
     captureMode,
     setCaptureMode,
     gridRotation,
@@ -354,7 +387,31 @@ export default function TrixelGrid() {
   }, [stampFlash?.seq]);
 
   useEffect(() => {
+    if (!cloneFlash) return;
+    let raf = 0;
+    const start = performance.now();
+    const DURATION = 800;
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const opacity = Math.max(0, 1 - elapsed / DURATION);
+      if (opacity <= 0) {
+        setCloneFlash(null);
+        return;
+      }
+      setCloneFlash((prev) => (prev ? { ...prev, opacity } : null));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cloneFlash?.seq]);
+
+  useEffect(() => {
     if (tool === "stamp") setSelectedHex(null);
+  }, [tool]);
+
+  useEffect(() => {
+    if (tool === "clone") setSelectedHex(null);
+    else setCloneOffset(null);
   }, [tool]);
 
   const onDeleteSelection = useCallback(() => {
@@ -858,6 +915,9 @@ export default function TrixelGrid() {
           tool={tool}
           activeSelection={activeSelection}
           stampFlash={stampFlash}
+          cloneFlash={cloneFlash}
+          cloneSource={cloneSource}
+          cloneOffset={cloneOffset}
           captureMode={captureMode}
           gridRotation={gridRotation}
           brushSize={brushSize}

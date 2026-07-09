@@ -53,7 +53,7 @@ export function Footer({
   handleRedo: () => void;
   historyIdx: number;
   historyLength: number;
-  tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "dodge" | "burn" | "eyedropper";
+  tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   captureMode?: boolean;
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
