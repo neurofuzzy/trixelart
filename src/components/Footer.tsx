@@ -41,6 +41,7 @@ export function Footer({
   historyLength,
   tool,
   captureMode,
+  cloneSourceSet,
   gridOrientation,
   onGridOrientationChange,
   tooltip,
@@ -55,6 +56,7 @@ export function Footer({
   historyLength: number;
   tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   captureMode?: boolean;
+  cloneSourceSet?: boolean;
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
   tooltip?: string | null;
@@ -121,6 +123,12 @@ export function Footer({
         ) : tool === "eyedropper" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             click to pick a color and switch to paint
+          </span>
+        ) : tool === "clone" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            {cloneSourceSet
+              ? "click to start cloning"
+              : "ALT-click to select a sample source"}
           </span>
         ) : (
           <>

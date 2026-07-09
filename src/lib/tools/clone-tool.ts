@@ -43,6 +43,12 @@ export const cloneTool: ToolHandler = {
       return;
     }
 
+    // Clone source was cleared externally (e.g. tool switch) — reset offset too.
+    if (!ctx.cloneSource && gCloneOffset) {
+      gCloneOffset = null;
+      return;
+    }
+
     // Establish the persistent offset on first click after alt-click
     if (!gCloneOffset) {
       if (!ctx.cloneSource) return;

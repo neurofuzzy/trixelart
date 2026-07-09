@@ -489,6 +489,8 @@ export function GridCanvas({
         tool !== "select";
       ctx.lineWidth = Math.max(2 / view.zoom, 1);
 
+      const hoverColor = tool === "clone" && !cloneSource ? "rgb(239, 68, 68)" : "white";
+
       if ((tool === "stamp" || tool === "select") && gridDivisions > 0) {
         const hov = hoverTargets[0];
         const { c, k } = triToHex(hov.q, hov.r, hov.type, gridDivisions);
@@ -512,7 +514,7 @@ export function GridCanvas({
             ctx.setLineDash([]);
             ctx.globalAlpha = 1;
           } else {
-            ctx.strokeStyle = "white";
+          ctx.strokeStyle = hoverColor;
             ctx.globalAlpha = 0.7;
             ctx.stroke();
             ctx.globalAlpha = 1;
@@ -561,7 +563,7 @@ export function GridCanvas({
 
           if (wedges.size === 1) {
             const wedge = [...wedges][0];
-            ctx.fillStyle = "white";
+            ctx.fillStyle = hoverColor;
             ctx.globalAlpha = alpha;
             ctx.beginPath();
             ctx.moveTo(hx, hy);
@@ -571,7 +573,7 @@ export function GridCanvas({
             ctx.fill();
           } else {
             // Multiple wedges (symmetry) — draw each wedge polygon
-            ctx.fillStyle = "white";
+            ctx.fillStyle = hoverColor;
             ctx.globalAlpha = alpha;
             for (const wedge of wedges) {
               ctx.beginPath();
@@ -583,7 +585,7 @@ export function GridCanvas({
             }
           }
 
-          ctx.strokeStyle = "white";
+          ctx.strokeStyle = hoverColor;
           ctx.globalAlpha = alpha * 2;
           ctx.beginPath();
           ctx.moveTo(V[0].x, V[0].y);
@@ -593,7 +595,7 @@ export function GridCanvas({
         }
         ctx.globalAlpha = 1;
       } else {
-        ctx.strokeStyle = "white";
+        ctx.strokeStyle = hoverColor;
         const [pa, pb, pc] = getTriVertices(
           hoverTargets[0].q,
           hoverTargets[0].r,

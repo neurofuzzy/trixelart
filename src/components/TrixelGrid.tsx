@@ -411,7 +411,10 @@ export default function TrixelGrid() {
 
   useEffect(() => {
     if (tool === "clone") setSelectedHex(null);
-    else setCloneOffset(null);
+    else {
+      setCloneSource(null);
+      setCloneOffset(null);
+    }
   }, [tool]);
 
   const onDeleteSelection = useCallback(() => {
@@ -982,6 +985,7 @@ export default function TrixelGrid() {
         historyLength={history.length}
         tool={tool}
         captureMode={captureMode}
+        cloneSourceSet={cloneSource !== null}
         gridOrientation={gridOrientation}
         onGridOrientationChange={setGridOrientation}
         tooltip={tooltip}
