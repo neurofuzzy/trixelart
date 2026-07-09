@@ -47,6 +47,15 @@ export type DragState =
       hasMoved: boolean;
       startPos: Pt;
       lastPos: Pt;
+    }
+  | {
+      kind: "selectMove";
+      hasMoved: boolean;
+      sourceHex: { c: number; k: number };
+      lastHex: { c: number; k: number };
+      originPainted: Record<string, string>;
+      snapshotTrixels: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
+      N: number;
     };
 
 export interface ToolContext {
