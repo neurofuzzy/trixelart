@@ -51,8 +51,9 @@ export type DragState =
   | {
       kind: "selectMove";
       hasMoved: boolean;
-      anchorHex: { c: number; k: number };
-      lastDelta: { dc: number; dk: number };
+      startWorld: Pt;
+      lastDq: number;
+      lastDr: number;
       lastShiftKey: boolean;
       originPainted: Record<string, string>;
       items: Array<{

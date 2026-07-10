@@ -1,8 +1,9 @@
-import { worldToTri, triToString } from "@/lib/grid-math";
+import { worldToTri, triToString, SIDE, H } from "@/lib/grid-math";
 import {
   triToHex,
   captureHexSnapshot,
   hexCenterTriAxial,
+  hexCenterWorld,
 } from "@/lib/hex-flower";
 import type { ToolHandler } from "./types";
 import { upsertSelectionSnapshot } from "./selection-utils";
@@ -70,8 +71,9 @@ export const selectTool: ToolHandler = {
           ctx.drag.current = {
             kind: "selectMove",
             hasMoved: false,
-            anchorHex: { c: hex.c, k: hex.k },
-            lastDelta: { dc: 0, dk: 0 },
+            startWorld: world,
+            lastDq: 0,
+            lastDr: 0,
             lastShiftKey: e.shiftKey,
             originPainted: { ...ctx.paintedRef.current },
             items,
@@ -107,35 +109,32 @@ export const selectTool: ToolHandler = {
 
     const N = drag.N;
     const world = ctx.screenToWorld(pos.x, pos.y);
-    const tri = worldToTri(world.x, world.y);
-    const hex = triToHex(tri.q, tri.r, tri.type, N);
+    const dwx = world.x - drag.startWorld.x;
+    const dwy = world.y - drag.startWorld.y;
+    const dr = Math.round(dwy / H);
+    const dq = Math.round(dwx / SIDE - dr * 0.5);
 
-    const dc = hex.c - drag.anchorHex.c;
-    const dk = hex.k - drag.anchorHex.k;
     if (
-      dc === drag.lastDelta.dc &&
-      dk === drag.lastDelta.dk &&
+      dq === drag.lastDq &&
+      dr === drag.lastDr &&
       e.shiftKey === drag.lastShiftKey
     )
       return;
-    drag.lastDelta = { dc, dk };
+    drag.lastDq = dq;
+    drag.lastDr = dr;
     drag.lastShiftKey = e.shiftKey;
     drag.hasMoved = true;
 
     const next = { ...drag.originPainted };
 
     for (const item of drag.items) {
-      const destHex = {
-        c: item.sourceHex.c + dc,
-        k: item.sourceHex.k + dk,
-      };
+      const { qc: srcQc, rc: srcRc } = hexCenterTriAxial(
+        item.sourceHex.c,
+        item.sourceHex.k,
+        N,
+      );
 
       if (!e.shiftKey) {
-        const { qc: srcQc, rc: srcRc } = hexCenterTriAxial(
-          item.sourceHex.c,
-          item.sourceHex.k,
-          N,
-        );
         for (const t of item.snapshot) {
           const srcKey = triToString({
             q: srcQc + t.dq,
@@ -146,15 +145,10 @@ export const selectTool: ToolHandler = {
         }
       }
 
-      const { qc: dstQc, rc: dstRc } = hexCenterTriAxial(
-        destHex.c,
-        destHex.k,
-        N,
-      );
       for (const t of item.snapshot) {
         const dstKey = triToString({
-          q: dstQc + t.dq,
-          r: dstRc + t.dr,
+          q: srcQc + t.dq + dq,
+          r: srcRc + t.dr + dr,
           type: t.type,
         });
         next[dstKey] = t.color;
@@ -169,25 +163,30 @@ export const selectTool: ToolHandler = {
     if (drag.kind !== "selectMove") return;
 
     if (drag.hasMoved) {
-      const dc = drag.lastDelta.dc;
-      const dk = drag.lastDelta.dk;
+      const N = drag.N;
+      const dq = drag.lastDq;
+      const dr = drag.lastDr;
 
-      const newHexes = drag.items.map((item) => ({
-        c: item.sourceHex.c + dc,
-        k: item.sourceHex.k + dk,
-      }));
+      const newHexes = drag.items.map((item) => {
+        const { x, y } = hexCenterWorld(item.sourceHex.c, item.sourceHex.k, N);
+        const dwx = (dq + dr * 0.5) * SIDE;
+        const dwy = dr * H;
+        const tri = worldToTri(x + dwx, y + dwy);
+        return triToHex(tri.q, tri.r, tri.type, N);
+      });
       ctx.setSelectedHexes(newHexes);
 
       for (const item of drag.items) {
-        const destHex = {
-          c: item.sourceHex.c + dc,
-          k: item.sourceHex.k + dk,
-        };
+        const { x, y } = hexCenterWorld(item.sourceHex.c, item.sourceHex.k, N);
+        const dwx = (dq + dr * 0.5) * SIDE;
+        const dwy = dr * H;
+        const tri = worldToTri(x + dwx, y + dwy);
+        const hex = triToHex(tri.q, tri.r, tri.type, N);
         const snap = captureHexSnapshot(
           ctx.paintedRef.current,
-          destHex.c,
-          destHex.k,
-          drag.N,
+          hex.c,
+          hex.k,
+          N,
         );
         if (snap.trixels.length > 0) {
           upsertSelectionSnapshot(
