@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Undo2, Redo2 } from "lucide-react";
+import { Settings, Undo2, Redo2, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -45,6 +45,8 @@ export function Footer({
   gridOrientation,
   onGridOrientationChange,
   tooltip,
+  layersOpen,
+  onToggleLayers,
 }: {
   gridDivisions: number;
   onGridDivisionsChange: (n: number) => void;
@@ -60,6 +62,8 @@ export function Footer({
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
   tooltip?: string | null;
+  layersOpen: boolean;
+  onToggleLayers: () => void;
 }) {
   const [hexDialogOpen, setHexDialogOpen] = useState(false);
 
@@ -141,6 +145,16 @@ export function Footer({
         )}
       </div>
       <div className="flex items-center gap-0.5">
+        <button
+          className={cn(
+            "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            layersOpen && "bg-accent text-accent-foreground",
+          )}
+          onClick={onToggleLayers}
+          title="Layers"
+        >
+          <Layers className="w-4 h-4" />
+        </button>
         <AlertDialog
           open={hexDialogOpen}
           onOpenChange={setHexDialogOpen}

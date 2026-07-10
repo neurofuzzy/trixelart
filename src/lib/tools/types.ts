@@ -1,6 +1,7 @@
 import type React from "react";
 import type { TriKey } from "@/lib/grid-math";
 import type { Symmetry, SelectionSnapshot } from "@/lib/hex-flower";
+import type { Layer } from "@/hooks/use-history";
 
 export type Tool =
   | "paint"
@@ -80,6 +81,8 @@ export interface ToolContext {
   symmetry: Symmetry;
   selectedHexes: { c: number; k: number }[];
   hexEnabled: boolean;
+  layers: Layer[];
+  activeLayerIdx: number;
   gridRotation: number;
   invCos: number;
   invSin: number;

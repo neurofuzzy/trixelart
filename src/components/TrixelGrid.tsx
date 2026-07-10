@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
-import { useHistory, type ProjectSnapshot } from "@/hooks/use-history";
+import { useHistory, type ProjectSnapshot, type Layer } from "@/hooks/use-history";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
@@ -40,6 +40,7 @@ import {
 } from "@/lib/hex-flower";
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
+import { LayerPanel } from "@/components/LayerPanel";
 
 const STORAGE_KEY = "trixel-save";
 
@@ -47,14 +48,26 @@ export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
   const {
     mounted,
+    layers,
+    activeLayerIdx,
     painted,
     setPainted,
+    paintedRef,
     pushHistory,
     handleUndo,
     handleRedo,
     history,
     historyIdx,
     registerRestore,
+    addLayer,
+    deleteLayer,
+    duplicateLayer,
+    toggleLayerVisibility,
+    moveLayer,
+    setActiveLayerIdx,
+    resetToSingleLayer,
+    layersRef,
+    activeLayerIdxRef,
   } = useHistory();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -127,11 +140,19 @@ export default function TrixelGrid() {
     seq: number;
   } | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
   const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
 
-  const paintedRef = useRef(painted);
-  paintedRef.current = painted;
+  const mergedPainted = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+      Object.assign(out, layer.painted);
+    }
+    return out;
+  }, [layers]);
+
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
   const hexModeRef = useRef(hexMode);
@@ -148,7 +169,8 @@ export default function TrixelGrid() {
 
   const buildSnapshot = useCallback(
     (): ProjectSnapshot => ({
-      painted: paintedRef.current,
+      layers: layersRef.current,
+      activeLayerIdx: activeLayerIdxRef.current,
       gridDivisions: gridDivisionsRef.current,
       hexMode: hexModeRef.current,
       flowerRadius: flowerRadiusRef.current,
@@ -164,6 +186,27 @@ export default function TrixelGrid() {
   const onCommit = useCallback(() => {
     pushHistory(buildSnapshot());
   }, [pushHistory, buildSnapshot]);
+
+  const snapshotWithPainted = useCallback(
+    (p: Record<string, string>): ProjectSnapshot => {
+      const l = layersRef.current.map((ly, i) =>
+        i === activeLayerIdxRef.current ? { ...ly, painted: p } : ly,
+      );
+      return {
+        layers: l,
+        activeLayerIdx: activeLayerIdxRef.current,
+        gridDivisions: gridDivisionsRef.current,
+        hexMode: hexModeRef.current,
+        flowerRadius: flowerRadiusRef.current,
+        symmetry: symmetryRef.current,
+        selections: selectionsRef.current,
+        lastPaintTri: lastPaintTriBridgeRef.current?.current
+          ? triToString(lastPaintTriBridgeRef.current.current)
+          : null,
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
@@ -194,6 +237,7 @@ export default function TrixelGrid() {
     }
   }, [
     buildSnapshot,
+    layers,
     painted,
     gridDivisions,
     hexMode,
@@ -352,6 +396,8 @@ export default function TrixelGrid() {
     setCaptureMode,
     gridRotation,
     brushSize,
+    layers,
+    activeLayerIdx,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -433,17 +479,7 @@ export default function TrixelGrid() {
     }
     if (!changed) return;
     setPainted(next);
-    pushHistory({
-      painted: next,
-      gridDivisions: gridDivisionsRef.current,
-      hexMode: hexModeRef.current,
-      flowerRadius: flowerRadiusRef.current,
-      symmetry: symmetryRef.current,
-      selections: selectionsRef.current,
-      lastPaintTri: lastPaintTriBridgeRef.current?.current
-        ? triToString(lastPaintTriBridgeRef.current.current)
-        : null,
-    });
+    pushHistory(snapshotWithPainted(next));
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const handleExport = useCallback(() => {
@@ -481,8 +517,28 @@ export default function TrixelGrid() {
           if (typeof data !== "object" || data === null) return;
 
           if (data.version === 1 || data.painted) {
+            let snapLayers: Layer[];
+            let snapActive: number;
+            if (Array.isArray(data.layers)) {
+              snapLayers = data.layers as Layer[];
+              snapActive =
+                typeof data.activeLayerIdx === "number"
+                  ? data.activeLayerIdx
+                  : 0;
+            } else {
+              snapLayers = [
+                {
+                  id: "0",
+                  name: "Layer 1",
+                  painted: (data.painted || {}) as Record<string, string>,
+                  visible: true,
+                },
+              ];
+              snapActive = 0;
+            }
             const snap: ProjectSnapshot = {
-              painted: data.painted || {},
+              layers: snapLayers,
+              activeLayerIdx: snapActive,
               gridDivisions: data.gridDivisions ?? 1,
               hexMode: normalizeHexMode(data.hexMode),
               flowerRadius: data.flowerRadius ?? 0,
@@ -493,7 +549,7 @@ export default function TrixelGrid() {
                   ? data.lastPaintTri
                   : null,
             };
-            setPainted(snap.painted);
+            setPainted(snapLayers[snapActive]?.painted ?? {});
             pushHistory(snap);
 
             if (data.settings) {
@@ -521,7 +577,15 @@ export default function TrixelGrid() {
             }
           } else {
             const snap: ProjectSnapshot = {
-              painted: data,
+              layers: [
+                {
+                  id: "0",
+                  name: "Layer 1",
+                  painted: (data as Record<string, string>) || {},
+                  visible: true,
+                },
+              ],
+              activeLayerIdx: 0,
               gridDivisions: 1,
               hexMode: "world",
               flowerRadius: 0,
@@ -529,7 +593,7 @@ export default function TrixelGrid() {
               selections: [],
               lastPaintTri: null,
             };
-            setPainted(data);
+            setPainted(snap.layers[0].painted);
             pushHistory(snap);
           }
         } catch (err) {
@@ -580,17 +644,7 @@ export default function TrixelGrid() {
           next = shiftGridPalettes(next, direction as 1 | -1, count);
         }
         if (next !== prev) {
-          pushHistory({
-            painted: next,
-            gridDivisions: gridDivisionsRef.current,
-            hexMode: hexModeRef.current,
-            flowerRadius: flowerRadiusRef.current,
-            symmetry: symmetryRef.current,
-            selections: selectionsRef.current,
-            lastPaintTri: lastPaintTriBridgeRef.current?.current
-              ? triToString(lastPaintTriBridgeRef.current.current)
-              : null,
-          });
+          pushHistory(snapshotWithPainted(next));
         }
         return next;
       });
@@ -599,8 +653,10 @@ export default function TrixelGrid() {
   );
 
   const handleClear = useCallback(() => {
-    const snap: ProjectSnapshot = {
-      painted: {},
+    const cleared = resetToSingleLayer();
+    pushHistory({
+      layers: cleared,
+      activeLayerIdx: 0,
       gridDivisions: gridDivisionsRef.current,
       hexMode: hexModeRef.current,
       flowerRadius: flowerRadiusRef.current,
@@ -609,10 +665,8 @@ export default function TrixelGrid() {
       lastPaintTri: lastPaintTriBridgeRef.current?.current
         ? triToString(lastPaintTriBridgeRef.current.current)
         : null,
-    };
-    setPainted({});
-    pushHistory(snap);
-  }, [pushHistory]);
+    });
+  }, [resetToSingleLayer, pushHistory]);
 
   const onShiftUp = useCallback(() => {
     setPainted((prev) => {
@@ -625,17 +679,7 @@ export default function TrixelGrid() {
         next = remapGrid(prev, 1);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -652,17 +696,7 @@ export default function TrixelGrid() {
         next = remapGrid(prev, -1);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -676,17 +710,7 @@ export default function TrixelGrid() {
         next = rotateHexCW(next, sel.c, sel.k, gridDivisions);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -700,17 +724,7 @@ export default function TrixelGrid() {
         next = rotateHexCCW(next, sel.c, sel.k, gridDivisions);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -724,17 +738,7 @@ export default function TrixelGrid() {
         next = flipHexVertical(next, sel.c, sel.k, gridDivisions);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -748,17 +752,7 @@ export default function TrixelGrid() {
         next = flipHexHorizontal(next, sel.c, sel.k, gridDivisions);
       }
       if (next !== prev) {
-        pushHistory({
-          painted: next,
-          gridDivisions: gridDivisionsRef.current,
-          hexMode: hexModeRef.current,
-          flowerRadius: flowerRadiusRef.current,
-          symmetry: symmetryRef.current,
-          selections: selectionsRef.current,
-          lastPaintTri: lastPaintTriBridgeRef.current?.current
-            ? triToString(lastPaintTriBridgeRef.current.current)
-            : null,
-        });
+        pushHistory(snapshotWithPainted(next));
       }
       return next;
     });
@@ -795,7 +789,8 @@ export default function TrixelGrid() {
           setActiveSelection(null);
         }
         pushHistory({
-          painted: paintedRef.current,
+          layers: layersRef.current,
+          activeLayerIdx: activeLayerIdxRef.current,
           gridDivisions: gridDivisionsRef.current,
           hexMode: hexModeRef.current,
           flowerRadius: flowerRadiusRef.current,
@@ -892,7 +887,7 @@ export default function TrixelGrid() {
           size={size}
           view={view}
           mounted={mounted}
-          painted={painted}
+          layers={layers}
           hoverTargets={hoverTargets}
           screenToWorld={screenToWorld}
           gridDivisions={gridDivisions}
@@ -955,6 +950,20 @@ export default function TrixelGrid() {
             onSaturationOffsetChange={setSatOffset}
           />
         )}
+        {layersOpen && (
+          <LayerPanel
+            layers={layers}
+            activeLayerIdx={activeLayerIdx}
+            onSelectLayer={setActiveLayerIdx}
+            onAddLayer={addLayer}
+            onDeleteLayer={deleteLayer}
+            onDuplicateLayer={duplicateLayer}
+            onToggleVisibility={toggleLayerVisibility}
+            onMoveLayer={moveLayer}
+            onCommit={onCommit}
+            onPointerEnter={() => setHoveredTri(null)}
+          />
+        )}
       </div>
 
       <Footer
@@ -972,12 +981,14 @@ export default function TrixelGrid() {
         gridOrientation={gridOrientation}
         onGridOrientationChange={setGridOrientation}
         tooltip={tooltip}
+        layersOpen={layersOpen}
+        onToggleLayers={() => setLayersOpen((o) => !o)}
       />
 
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
-        painted={painted}
+        painted={mergedPainted}
       />
     </div>
   );

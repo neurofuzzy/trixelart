@@ -17,6 +17,7 @@ import {
   PINCH_SENSITIVITY,
 } from "@/lib/config";
 import { toolMap, viewPanTool, type Tool, type ToolContext, type DragState } from "@/lib/tools";
+import type { Layer } from "@/hooks/use-history";
 import { normPoint, normTouchPair } from "@/lib/touch-utils";
 
 interface UseInteractionArgs {
@@ -51,6 +52,8 @@ interface UseInteractionArgs {
   gridRotation?: number;
   hexEnabled?: boolean;
   brushSize?: "single" | "hex";
+  layers: Layer[];
+  activeLayerIdx: number;
 }
 
 export function useInteraction(args: UseInteractionArgs) {
@@ -84,6 +87,8 @@ export function useInteraction(args: UseInteractionArgs) {
     gridRotation = 0,
     hexEnabled = true,
     brushSize = "single",
+    layers,
+    activeLayerIdx,
   } = args;
 
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
@@ -274,6 +279,8 @@ export function useInteraction(args: UseInteractionArgs) {
     symmetry,
     selectedHexes,
     hexEnabled,
+    layers,
+    activeLayerIdx,
     gridRotation,
     invCos,
     invSin,

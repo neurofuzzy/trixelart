@@ -5,12 +5,13 @@ import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
+import type { Layer } from "@/hooks/use-history";
 
 export function GridCanvas({
   size,
   view,
   mounted,
-  painted,
+  layers,
   hoverTargets,
   screenToWorld,
   gridDivisions,
@@ -32,7 +33,7 @@ export function GridCanvas({
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
   mounted: boolean;
-  painted: Record<string, string>;
+  layers: Layer[];
   hoverTargets: TriKey[];
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
@@ -119,34 +120,38 @@ export function GridCanvas({
         Math.max(minX, maxX) / SIDE - minR * 0.5,
       ) + buffer;
 
-    // Filled triangles — group by color for fewer fillStyle changes
-    const colorGroups = new Map<string, TriKey[]>();
-    for (let r = minR; r <= maxR; r++) {
-      for (let q = minQ; q <= maxQ; q++) {
-        for (const type of ["up", "down"] as const) {
-          const key = `${q},${r},${type}`;
-          const fill = painted[key];
-          if (fill) {
-            const hex = resolveColor(fill);
-            const list = colorGroups.get(hex);
-            if (list) list.push({ q, r, type });
-            else colorGroups.set(hex, [{ q, r, type }]);
+    // Filled triangles — group by color for fewer fillStyle changes,
+    // rendered bottom-to-top through all visible layers.
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+      const colorGroups = new Map<string, TriKey[]>();
+      for (let r = minR; r <= maxR; r++) {
+        for (let q = minQ; q <= maxQ; q++) {
+          for (const type of ["up", "down"] as const) {
+            const key = `${q},${r},${type}`;
+            const fill = layer.painted[key];
+            if (fill) {
+              const hex = resolveColor(fill);
+              const list = colorGroups.get(hex);
+              if (list) list.push({ q, r, type });
+              else colorGroups.set(hex, [{ q, r, type }]);
+            }
           }
         }
       }
-    }
 
-    for (const [fillColor, tris] of colorGroups) {
-      ctx.fillStyle = fillColor;
-      ctx.beginPath();
-      for (const tri of tris) {
-        const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.closePath();
+      for (const [fillColor, tris] of colorGroups) {
+        ctx.fillStyle = fillColor;
+        ctx.beginPath();
+        for (const tri of tris) {
+          const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+        }
+        ctx.fill();
       }
-      ctx.fill();
     }
 
     // Grid outlines — 3 families of parallel lines
@@ -630,7 +635,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, painted, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
+  }, [size, view, layers, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
 
   return (
     <canvas
