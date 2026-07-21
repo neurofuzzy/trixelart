@@ -122,7 +122,7 @@ export function Footer({
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             {captureMode
               ? "click on an area to create a stamp"
-              : "click on an area to place a stamp"}
+              : "ALT click on a hex region to sample a pattern"}
           </span>
         ) : tool === "eyedropper" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">

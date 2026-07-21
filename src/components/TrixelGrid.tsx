@@ -867,7 +867,6 @@ export default function TrixelGrid() {
         onCenterView={onCenterView}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
-        hasSelection={selections.length > 0}
         symmetry={symmetry}
         onSymmetryChange={setSymmetry}
         brushSize={brushSize}

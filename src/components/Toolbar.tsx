@@ -91,7 +91,6 @@ export function Toolbar({
   onCenterView,
   isFullscreen,
   onToggleFullscreen,
-  hasSelection,
   symmetry,
   onSymmetryChange,
   brushSize,
@@ -113,7 +112,6 @@ export function Toolbar({
   onCenterView: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
-  hasSelection: boolean;
   symmetry: Symmetry;
   onSymmetryChange: (v: Symmetry) => void;
   brushSize: BrushSize;
@@ -201,7 +199,6 @@ export function Toolbar({
                 <DropdownMenuItem
                   key={t}
                   onClick={() => onToolChange(t)}
-                  disabled={t === "stamp" ? !hasSelection : undefined}
                   className={tool === t ? "bg-accent" : undefined}
                 >
                   <Icon className="w-4 h-4" />
@@ -225,7 +222,6 @@ export function Toolbar({
               variant={tool === t ? "default" : "ghost"}
               size="icon"
               onClick={() => onToolChange(t)}
-              disabled={t === "stamp" ? !hasSelection : undefined}
               title={`${label} (${shortcut})`}
               onMouseEnter={() => onSetTooltip(label)}
               onMouseLeave={() => onSetTooltip(null)}

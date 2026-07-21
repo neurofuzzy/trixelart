@@ -6,7 +6,6 @@ import {
   hexCenterWorld,
 } from "@/lib/hex-flower";
 import type { ToolHandler } from "./types";
-import { upsertSelectionSnapshot } from "./selection-utils";
 
 export const selectTool: ToolHandler = {
   onDown(ctx, e, pos, isRightClick) {
@@ -52,22 +51,6 @@ export const selectTool: ToolHandler = {
           .filter((item) => item.snapshot.length > 0);
 
         if (items.length > 0) {
-          for (const item of items) {
-            const snap = captureHexSnapshot(
-              ctx.paintedRef.current,
-              item.sourceHex.c,
-              item.sourceHex.k,
-              N,
-            );
-            if (snap.trixels.length > 0) {
-              upsertSelectionSnapshot(
-                ctx.setSelections,
-                ctx.setActiveSelection,
-                snap,
-              );
-            }
-          }
-
           ctx.drag.current = {
             kind: "selectMove",
             hasMoved: false,
@@ -84,19 +67,6 @@ export const selectTool: ToolHandler = {
       }
 
       ctx.setSelectedHexes([hex]);
-      const snap = captureHexSnapshot(
-        ctx.paintedRef.current,
-        hex.c,
-        hex.k,
-        N,
-      );
-      if (snap.trixels.length > 0) {
-        upsertSelectionSnapshot(
-          ctx.setSelections,
-          ctx.setActiveSelection,
-          snap,
-        );
-      }
     } else {
       ctx.setSelectedHexes([]);
     }
@@ -175,27 +145,6 @@ export const selectTool: ToolHandler = {
         return triToHex(tri.q, tri.r, tri.type, N);
       });
       ctx.setSelectedHexes(newHexes);
-
-      for (const item of drag.items) {
-        const { x, y } = hexCenterWorld(item.sourceHex.c, item.sourceHex.k, N);
-        const dwx = (dq + dr * 0.5) * SIDE;
-        const dwy = dr * H;
-        const tri = worldToTri(x + dwx, y + dwy);
-        const hex = triToHex(tri.q, tri.r, tri.type, N);
-        const snap = captureHexSnapshot(
-          ctx.paintedRef.current,
-          hex.c,
-          hex.k,
-          N,
-        );
-        if (snap.trixels.length > 0) {
-          upsertSelectionSnapshot(
-            ctx.setSelections,
-            ctx.setActiveSelection,
-            snap,
-          );
-        }
-      }
 
       ctx.onCommit();
     }
