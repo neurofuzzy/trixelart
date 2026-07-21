@@ -37,6 +37,16 @@
   }
 }
 
+/* Standalone (home-screen) mode with viewport-fit=cover draws edge to edge.
+   The element still fills the screen (its background bleeds under the status
+   bar / notch / home indicator) while its content is inset into the safe
+   area. box-border keeps it within its 100vh height so nothing is clipped. */
+.safe-area-inset {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  box-sizing: border-box;
+}
+
 .no-select {
   user-select: none;
   -webkit-user-select: none;

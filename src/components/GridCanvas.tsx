@@ -640,7 +640,7 @@ export function GridCanvas({
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 pointer-events-none"
+      className="absolute inset-0 w-full h-full pointer-events-none"
     />
   );
 }
