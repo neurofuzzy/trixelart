@@ -20,6 +20,7 @@ import {
   ImageDown,
   Aperture,
   Paintbrush,
+  PaintBucket,
   Snowflake,
   Pipette,
   GitCompareArrows,
@@ -48,6 +49,7 @@ import type { Symmetry, BrushSize, HexMode } from "@/components/Footer";
 const editTools = [
   { tool: "paint" as Tool, icon: Pencil, label: "Paint", shortcut: "P" },
   { tool: "erase" as Tool, icon: Eraser, label: "Erase", shortcut: "E" },
+  { tool: "fill" as Tool, icon: PaintBucket, label: "Fill", shortcut: "F" },
   { tool: "dodge" as Tool, icon: Sun, label: "Dodge", shortcut: "D" },
   { tool: "burn" as Tool, icon: Moon, label: "Burn", shortcut: "B" },
   { tool: "stamp" as Tool, icon: Stamp, label: "Stamp", shortcut: "T" },
@@ -59,6 +61,7 @@ const editTools = [
 const isEditTool = (t: string): boolean =>
   t === "paint" ||
   t === "erase" ||
+  t === "fill" ||
   t === "dodge" ||
   t === "burn" ||
   t === "stamp" ||

@@ -6,6 +6,7 @@ import type { Layer } from "@/hooks/use-history";
 export type Tool =
   | "paint"
   | "erase"
+  | "fill"
   | "pan"
   | "select"
   | "stamp"
@@ -27,6 +28,7 @@ export interface Pt {
 
 export type DragState =
   | { kind: "idle" }
+  | { kind: "fill"; changed: boolean }
   | {
       kind: "edit";
       hasMoved: boolean;

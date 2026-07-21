@@ -56,7 +56,7 @@ export function Footer({
   handleRedo: () => void;
   historyIdx: number;
   historyLength: number;
-  tool?: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
+  tool?: "paint" | "erase" | "fill" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   captureMode?: boolean;
   cloneSourceSet?: boolean;
   gridOrientation?: GridOrientation;

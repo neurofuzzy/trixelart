@@ -1,6 +1,7 @@
 import type { Tool, ToolHandler } from "./types";
 import { paintTool } from "./paint-tool";
 import { eraseTool } from "./erase-tool";
+import { fillTool } from "./fill-tool";
 import { makeDodgeBurnTool } from "./dodge-burn-tool";
 import { panTool } from "./pan-tool";
 import { selectTool } from "./select-tool";
@@ -17,6 +18,7 @@ const burnTool = makeDodgeBurnTool(-1);
 export const toolMap: Record<Tool, ToolHandler> = {
   paint: paintTool,
   erase: eraseTool,
+  fill: fillTool,
   dodge: dodgeTool,
   burn: burnTool,
   pan: panTool,
