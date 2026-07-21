@@ -39,6 +39,7 @@ export function ColorPalette({
         lg:rounded-full"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
     >
       {palette.map((c, i) => (

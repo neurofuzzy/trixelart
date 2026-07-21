@@ -32,6 +32,7 @@ export function SelectionPalette({
         lg:flex-col lg:bottom-1/2 lg:left-4 lg:translate-x-0 lg:translate-y-1/2"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
     >
       <div className="flex flex-row gap-px lg:flex-col lg:gap-px">
