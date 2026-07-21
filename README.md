@@ -29,18 +29,22 @@ infinite and pannable, everything is rendered on a DPR-aware HTML5 canvas, and y
 to the browser. It runs entirely offline — there's no backend and no account — and installs to your
 home screen as a full-screen PWA.
 
+<p align="center">
+  <img src="public/screenshot.png" alt="screenshot">
+</p>
+
 ## Features
 
-- 🔺 **Infinite triangular canvas** — pan and zoom across an unbounded trixel grid.
-- 🧰 **A full toolset** — Paint, Erase, Move, Select, Stamp, Clone, Dodge, Burn, and Eyedropper.
-- 🗂️ **Layers** — add, reorder, duplicate, and toggle visibility.
-- ⬡ **Hex lattice modes** — overlay a flat-top or pointy-top honeycomb with adjustable divisions.
-- 🌸 **Radial symmetry & flowers** — mirror strokes with 60°/120° rotational symmetry and hex-flower repeats.
-- ✂️ **Selections & stamps** — capture the contents of a hex as a reusable stencil, then stamp or transform it (rotate, flip, palette-shift).
-- 🎨 **Palettes** — multiple color palettes with live hue/saturation offsets.
-- ↩️ **Undo/redo** with autosave to `localStorage`.
-- 📤 **Import/export** — save projects as JSON, or export finished art as **SVG**.
-- 📱 **Touch & stylus ready** — pinch-to-zoom, two-finger pan, and installable to your home screen.
+- **Infinite triangular canvas** — pan and zoom across an unbounded trixel grid.
+- **A full toolset** — Paint, Erase, Move, Select, Stamp, Clone, Dodge, Burn, and Eyedropper.
+- **Layers** — add, reorder, duplicate, and toggle visibility.
+- **Hex lattice modes** — overlay a flat-top or pointy-top honeycomb with adjustable divisions.
+- **Radial symmetry & flowers** — mirror strokes with 60°/120° rotational symmetry and hex-flower repeats.
+- **Selections & stamps** — capture the contents of a hex as a reusable stencil, then stamp or transform it (rotate, flip, palette-shift).
+- **Palettes** — multiple color palettes with live hue/saturation offsets.
+- **Undo/redo** with autosave to `localStorage`.
+- **Import/export** — save projects as JSON, or export finished art as **SVG**.
+- **Touch & stylus ready** — pinch-to-zoom, two-finger pan, and installable to your home screen.
 
 ## Getting started
 
