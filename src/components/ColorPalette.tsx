@@ -40,6 +40,7 @@ export function ColorPalette({
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
+      data-tour="palette"
     >
       {palette.map((c, i) => (
         <button

@@ -19,6 +19,7 @@ export function useKeyboardShortcuts(
   hasSelection?: boolean,
   onSaveProject?: () => void,
   onLoadProject?: () => void,
+  onOpenHelp?: () => void,
 ) {
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
@@ -54,6 +55,12 @@ export function useKeyboardShortcuts(
 
       if (e.key === "Delete" || e.key === "Backspace") {
         onDeleteSelection?.();
+        return;
+      }
+
+      if (e.key === "?") {
+        e.preventDefault();
+        onOpenHelp?.();
         return;
       }
 
@@ -122,5 +129,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
-  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW, hasSelection, onSaveProject, onLoadProject]);
+  }, [handleUndo, handleRedo, setTool, setColorIdx, colorCount, onClearSelection, onDeleteSelection, onShiftUp, onShiftDown, onPaletteShift, onRotate, onRotateCCW, hasSelection, onSaveProject, onLoadProject, onOpenHelp]);
 }

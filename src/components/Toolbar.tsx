@@ -24,6 +24,7 @@ import {
   Snowflake,
   Pipette,
   GitCompareArrows,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -93,7 +94,6 @@ export function Toolbar({
   onCenterView,
   isFullscreen,
   onToggleFullscreen,
-  hasSelection,
   symmetry,
   onSymmetryChange,
   brushSize,
@@ -104,6 +104,7 @@ export function Toolbar({
   gridDivisions,
   tooltip,
   onSetTooltip,
+  onOpenHelp,
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -114,7 +115,6 @@ export function Toolbar({
   onCenterView: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
-  hasSelection: boolean;
   symmetry: Symmetry;
   onSymmetryChange: (v: Symmetry) => void;
   brushSize: BrushSize;
@@ -125,6 +125,7 @@ export function Toolbar({
   gridDivisions: number;
   tooltip: string | null;
   onSetTooltip: (t: string | null) => void;
+  onOpenHelp: () => void;
 }) {
   const activeEdit = editTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
@@ -139,7 +140,7 @@ export function Toolbar({
       <div className="flex items-center gap-1">
         <DropdownMenu open={hamburgerOpen} onOpenChange={setHamburgerOpen}>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" title="Menu">
+            <Button variant="ghost" size="icon" title="Menu" data-tour="menu">
               <Menu className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -201,7 +202,6 @@ export function Toolbar({
                 <DropdownMenuItem
                   key={t}
                   onClick={() => onToolChange(t)}
-                  disabled={t === "stamp" ? !hasSelection : undefined}
                   className={tool === t ? "bg-accent" : undefined}
                 >
                   <Icon className="w-4 h-4" />
@@ -215,14 +215,16 @@ export function Toolbar({
           </DropdownMenu>
         </div>
 
-        <div className="hidden lg:flex lg:items-center lg:gap-0.5">
+        <div
+          className="hidden lg:flex lg:items-center lg:gap-0.5"
+          data-tour="tools"
+        >
           {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
             <Button
               key={t}
               variant={tool === t ? "default" : "ghost"}
               size="icon"
               onClick={() => onToolChange(t)}
-              disabled={t === "stamp" ? !hasSelection : undefined}
               title={`${label} (${shortcut})`}
               onMouseEnter={() => onSetTooltip(label)}
               onMouseLeave={() => onSetTooltip(null)}
@@ -234,6 +236,7 @@ export function Toolbar({
 
         <div className="hidden lg:block w-px h-6 bg-border mx-0.5 self-center" />
 
+        <div className="flex items-center gap-0.5" data-tour="effects">
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -316,9 +319,19 @@ export function Toolbar({
             </div>
           )}
         </div>
+        </div>
       </div>
 
       <div className="flex items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenHelp}
+          title="Help & keyboard shortcuts"
+          data-tour="help"
+        >
+          <HelpCircle className="w-4 h-4" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"
