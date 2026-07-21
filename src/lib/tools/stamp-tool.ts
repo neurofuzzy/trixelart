@@ -9,7 +9,13 @@ import type { ToolHandler } from "./types";
 import { upsertSelectionSnapshot } from "./selection-utils";
 
 export const stampTool: ToolHandler = {
-  onDown(ctx, e, pos) {
+  // Stamp commits on pointer-up, not pointer-down. On touch devices the first
+  // finger of a two-finger pinch fires pointerdown before the second finger
+  // registers as a gesture, so acting on down would drop a stamp every time
+  // the user pinch-zooms. onPointerUp is guarded by the two-finger check in
+  // use-interaction, so deferring here suppresses the stray stamp — matching
+  // how the paint/erase tools already behave.
+  onUp(ctx, e, pos) {
     const N = ctx.gridDivisions;
     const world = ctx.screenToWorld(pos.x, pos.y);
     const tri = worldToTri(world.x, world.y);
@@ -56,9 +62,6 @@ export const stampTool: ToolHandler = {
     }
 
     ctx.drag.current = { kind: "idle" };
-  },
-
-  onUp(ctx) {
     ctx.onCommit();
   },
 };
