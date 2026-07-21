@@ -44,6 +44,11 @@ import { LayerPanel } from "@/components/LayerPanel";
 
 const STORAGE_KEY = "trixel-save";
 
+// Grid-setting defaults applied on first launch (no saved settings) and when
+// starting a new project via handleClear.
+const DEFAULT_HEX_MODE: HexMode = "honeycomb";
+const DEFAULT_GRID_DIVISIONS = 3;
+
 export default function TrixelGrid() {
   const { size, containerRef, updateSize } = useCanvasSize();
   const {
@@ -95,8 +100,8 @@ export default function TrixelGrid() {
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
-  const [gridDivisions, setGridDivisions] = useState(1);
-  const [hexMode, setHexMode] = useState<HexMode>("world");
+  const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
+  const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
   const [flowerRadius, setFlowerRadius] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
@@ -654,11 +659,14 @@ export default function TrixelGrid() {
 
   const handleClear = useCallback(() => {
     const cleared = resetToSingleLayer();
+    // A new project resets grid settings to the launch defaults.
+    setGridDivisions(DEFAULT_GRID_DIVISIONS);
+    setHexMode(DEFAULT_HEX_MODE);
     pushHistory({
       layers: cleared,
       activeLayerIdx: 0,
-      gridDivisions: gridDivisionsRef.current,
-      hexMode: hexModeRef.current,
+      gridDivisions: DEFAULT_GRID_DIVISIONS,
+      hexMode: DEFAULT_HEX_MODE,
       flowerRadius: flowerRadiusRef.current,
       symmetry: symmetryRef.current,
       selections: selectionsRef.current,
