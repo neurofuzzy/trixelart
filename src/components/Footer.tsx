@@ -77,7 +77,7 @@ export function Footer({
 
   return (
     <div className="flex items-center justify-between p-2 border-t bg-card/90 backdrop-blur-md z-30">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" data-tour="history">
         <Button
           variant="ghost"
           size="icon"
@@ -152,6 +152,7 @@ export function Footer({
           )}
           onClick={onToggleLayers}
           title="Layers"
+          data-tour="layers"
         >
           <Layers className="w-4 h-4" />
         </button>
@@ -166,6 +167,7 @@ export function Footer({
                 hexDialogOpen && "bg-accent text-accent-foreground",
               )}
               title="Grid settings"
+              data-tour="grid-settings"
             >
               <Settings className="w-4 h-4" />
             </button>

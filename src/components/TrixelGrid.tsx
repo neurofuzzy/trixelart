@@ -41,6 +41,10 @@ import {
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
 import { LayerPanel } from "@/components/LayerPanel";
+import { useOnboarding } from "@/hooks/use-onboarding";
+import { SplashDialog } from "@/components/onboarding/SplashDialog";
+import { HelpDialog } from "@/components/onboarding/HelpDialog";
+import { InterfaceTour } from "@/components/onboarding/InterfaceTour";
 
 const STORAGE_KEY = "trixel-save";
 
@@ -766,6 +770,8 @@ export default function TrixelGrid() {
     });
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
+  const onboarding = useOnboarding();
+
   useKeyboardShortcuts(
     onUndo,
     onRedo,
@@ -785,6 +791,7 @@ export default function TrixelGrid() {
     selectedHexes.length > 0,
     handleExport,
     handleImportClick,
+    onboarding.openHelp,
   );
 
   const onDeletePaletteItem = useCallback(
@@ -871,10 +878,12 @@ export default function TrixelGrid() {
         gridDivisions={gridDivisions}
         tooltip={tooltip}
         onSetTooltip={setTooltip}
+        onOpenHelp={onboarding.openHelp}
       />
 
       <div
         ref={containerRef}
+        data-tour="canvas"
         className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none"
         style={{
           background:
@@ -997,6 +1006,24 @@ export default function TrixelGrid() {
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
         painted={mergedPainted}
+      />
+
+      <SplashDialog
+        open={onboarding.splashOpen}
+        onClose={onboarding.closeSplash}
+        onStartTour={onboarding.startTour}
+      />
+      <HelpDialog
+        open={onboarding.helpOpen}
+        onClose={onboarding.closeHelp}
+        onStartTour={onboarding.startTour}
+      />
+      <InterfaceTour
+        active={onboarding.tourActive}
+        step={onboarding.tourStep}
+        next={onboarding.tourNext}
+        prev={onboarding.tourPrev}
+        end={onboarding.endTour}
       />
     </div>
   );
