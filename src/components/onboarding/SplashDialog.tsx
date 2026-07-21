@@ -4,26 +4,41 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
-/** A small triangular-grid motif standing in for a logo — echoes the app's
- * trixel canvas. */
+/** The Trixel logo — inlined as JSX (kept in sync with `src/assets/logo.svg`)
+ * so it renders without a bundler URL import or next/image config, which keeps
+ * it safe under the GitHub Pages static export + basePath. */
 function TrixelMark() {
   return (
     <svg
-      viewBox="0 0 120 104"
-      className="h-16 w-auto drop-shadow-lg"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 290 256.507"
+      className="h-20 w-auto drop-shadow-lg"
       aria-hidden="true"
     >
-      {/* Row of up/down triangles in the app's accent tints. */}
-      {[
-        { pts: "30,52 60,0 90,52", fill: "rgb(6 182 212 / 0.85)" },
-        { pts: "0,104 30,52 60,104", fill: "rgb(6 182 212 / 0.45)" },
-        { pts: "60,104 90,52 120,104", fill: "rgb(6 182 212 / 0.6)" },
-        { pts: "30,52 60,104 90,52", fill: "rgb(6 182 212 / 0.25)" },
-        { pts: "60,0 90,52 60,104", fill: "rgb(168 85 247 / 0.55)" },
-        { pts: "30,52 60,0 60,104", fill: "rgb(168 85 247 / 0.35)" },
-      ].map((t, i) => (
-        <polygon key={i} points={t.pts} fill={t.fill} />
-      ))}
+      <path
+        d="M70,63.302 L120,63.302 L95,106.603 L70,63.302 Z M120,63.302 L170,63.302 L145,106.603 L120,63.302 Z M170,63.302 L220,63.302 L195,106.603 L170,63.302 Z M120,149.904 L170,149.904 L145,193.206 L120,149.904 Z"
+        fill="#e7b974"
+        stroke="#e7b974"
+        strokeWidth="0.5"
+      />
+      <path
+        d="M95,106.603 L120,63.302 L145,106.603 L95,106.603 Z M145,106.603 L170,63.302 L195,106.603 L145,106.603 Z M145,106.603 L170,149.904 L120,149.904 L145,106.603 Z"
+        fill="#e29a5a"
+        stroke="#e29a5a"
+        strokeWidth="0.5"
+      />
+      <path
+        d="M95,106.603 L145,106.603 L120,149.904 L95,106.603 Z M145,106.603 L195,106.603 L170,149.904 L145,106.603 Z"
+        fill="#b63420"
+        stroke="#b63420"
+        strokeWidth="0.5"
+      />
+      <path
+        d="M95,106.603 L120,149.904 L145,193.206 L170,149.904 L195,106.603 L220,63.302 L170,63.302 L120,63.302 L70,63.302 L95,106.603 Z M95,193.206 L70,149.904 L45,106.603 L20,63.302 L45,20 L95,20 L145,20 L195,20 L245,20 L270,63.302 L245,106.603 L220,149.904 L195,193.206 L170,236.507 L120,236.507 L95,193.206 Z"
+        fill="#5f1116"
+        stroke="#5f1116"
+        strokeWidth="0.5"
+      />
     </svg>
   );
 }
