@@ -136,7 +136,10 @@ export function Toolbar({
   const hexDisabled = gridDivisions === 0 || hexMode === "world";
 
   return (
-    <div className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30">
+    <div
+      className="flex items-center justify-between p-2 border-b bg-card/90 backdrop-blur-md z-30"
+      onMouseLeave={() => onSetTooltip(null)}
+    >
       <div className="flex items-center gap-1">
         <DropdownMenu open={hamburgerOpen} onOpenChange={setHamburgerOpen}>
           <DropdownMenuTrigger asChild>
@@ -227,7 +230,7 @@ export function Toolbar({
               onClick={() => onToolChange(t)}
               title={`${label} (${shortcut})`}
               onMouseEnter={() => onSetTooltip(label)}
-              onMouseLeave={() => onSetTooltip(null)}
+              onMouseLeave={() => onSetTooltip("")}
             >
               <Icon className="w-4 h-4" />
             </Button>
@@ -255,7 +258,7 @@ export function Toolbar({
               brushSize === "hex" ? "Brush: hex wedge" : "Brush: single",
             )
           }
-          onMouseLeave={() => onSetTooltip(null)}
+          onMouseLeave={() => onSetTooltip("")}
         >
           <Paintbrush className="w-4 h-4" />
         </button>
@@ -264,7 +267,7 @@ export function Toolbar({
           size="icon"
           onClick={() => onToolChange("select")}
           onMouseEnter={() => onSetTooltip("Selection: single hexagon")}
-          onMouseLeave={() => onSetTooltip(null)}
+          onMouseLeave={() => onSetTooltip("")}
         >
           <SquareDashed className="w-4 h-4" />
         </Button>
@@ -282,7 +285,7 @@ export function Toolbar({
             onSetTooltip(SYM_LABEL[next]);
           }}
           onMouseEnter={() => onSetTooltip(SYM_LABEL[symmetry])}
-          onMouseLeave={() => onSetTooltip(null)}
+          onMouseLeave={() => onSetTooltip("")}
         >
           <Aperture className="w-4 h-4" />
         </button>
@@ -297,7 +300,7 @@ export function Toolbar({
             onClick={() => setFlowerOpen((v) => !v)}
             disabled={hexDisabled}
             onMouseEnter={() => onSetTooltip("Fan-out")}
-            onMouseLeave={() => onSetTooltip(null)}
+            onMouseLeave={() => onSetTooltip("")}
           >
             <Snowflake className="w-4 h-4" />
           </button>
