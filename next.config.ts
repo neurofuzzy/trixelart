@@ -1,7 +1,15 @@
 import type {NextConfig} from 'next';
 
+// When building for GitHub Pages the app is served from a project subpath
+// (https://<user>.github.io/trixelart/), so it needs a static export and a
+// basePath. Locally / on other hosts these stay unset and it serves at root.
+const isGithubPages = process.env.GITHUB_PAGES === 'true';
+const repoBasePath = '/trixelart';
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  ...(isGithubPages
+    ? { output: 'export', basePath: repoBasePath, assetPrefix: `${repoBasePath}/` }
+    : {}),
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -9,6 +17,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   images: {
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',

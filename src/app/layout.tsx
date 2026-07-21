@@ -6,6 +6,12 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata = {
   title: "Trixel",
   description: "Infinite Triangular Drawing Grid",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Trixel",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport = {
@@ -13,6 +19,8 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: "#09090b",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

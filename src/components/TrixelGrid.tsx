@@ -832,7 +832,7 @@ export default function TrixelGrid() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col h-full w-full bg-background select-none"
+      className="flex flex-col h-full w-full bg-background select-none safe-area-inset"
     >
       <input
         type="file"
