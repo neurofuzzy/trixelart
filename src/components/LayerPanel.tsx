@@ -41,6 +41,7 @@ export function LayerPanel({
         lg:bottom-1/2 lg:right-4 lg:left-auto lg:translate-x-0 lg:translate-y-1/2"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
     >
       <div className="flex items-center justify-between gap-2 mb-0.5">

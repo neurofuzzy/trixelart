@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-09 06:53:58
-# Files: 39
-# Lines of code: ~5398
+# Last updated: 2026-07-21 03:22:50
+# Files: 43
+# Lines of code: ~6571
 ```
 - **/app**
   - **/lib**
@@ -10,8 +10,12 @@
     - Variable: `metadata`
     - Variable: `viewport`
     - Function: `RootLayout`
+  - [manifest.ts](../src/app/manifest.ts)
+    - Variable: `dynamic` - // Required so the manifest is emitted as a sta...
+    - Function: `manifest`
   - [page.tsx](../src/app/page.tsx)
     - Function: `Home`
+- **/assets**
 - **/components**
   - **/ui**
     - [alert-dialog.tsx](../src/components/ui/alert-dialog.tsx)
@@ -33,6 +37,8 @@
     - Function: `Footer`
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
+  - [LayerPanel.tsx](../src/components/LayerPanel.tsx)
+    - Function: `LayerPanel`
   - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
     - Function: `PalettePicker`
   - [SelectionPalette.tsx](../src/components/SelectionPalette.tsx)
@@ -47,6 +53,7 @@
   - [use-canvas-size.ts](../src/hooks/use-canvas-size.ts)
     - Function: `useCanvasSize` - Reliable hook for measuring a container element...
   - [use-history.ts](../src/hooks/use-history.ts)
+    - Interface: `Layer`
     - Interface: `ProjectSnapshot`
     - Function: `useHistory`
   - [use-interaction.ts](../src/hooks/use-interaction.ts)
@@ -55,6 +62,8 @@
     - Function: `useKeyboardShortcuts`
 - **/lib**
   - **/tools**
+    - [clone-tool.ts](../src/lib/tools/clone-tool.ts)
+      - Variable: `cloneTool`
     - [dodge-burn-tool.ts](../src/lib/tools/dodge-burn-tool.ts)
       - Function: `makeDodgeBurnTool`
     - [edit-tool.ts](../src/lib/tools/edit-tool.ts)
@@ -63,6 +72,9 @@
       - Variable: `eraseTool`
     - [eyedropper-tool.ts](../src/lib/tools/eyedropper-tool.ts)
       - Variable: `eyedropperTool`
+    - [fill-tool.ts](../src/lib/tools/fill-tool.ts)
+      - Function: `computeFillRegion` - Flood-fill the region edge-connected to `seed`,...
+      - Variable: `fillTool`
     - [index.ts](../src/lib/tools/index.ts)
       - Variable: `toolMap`
     - [line-draw.ts](../src/lib/tools/line-draw.ts)
@@ -93,6 +105,7 @@
     - Variable: `ZOOM_MAX`
     - Variable: `WHEEL_DIVISOR`
     - Variable: `PINCH_SENSITIVITY`
+    - Variable: `FILL_MAX_RADIUS` - // reaches this radius it is treated as unbound...
   - [constants.ts](../src/lib/constants.ts)
     - Variable: `PALETTE_LIGHTNESSES`
     - Variable: `COLOR_COUNT`
@@ -115,6 +128,7 @@
     - Function: `triToString` - Converts a TriKey object to a unique string for...
     - Function: `stringToTri` - Parses a TriKey string back into an object
     - Function: `worldToTri` - Converts world coordinates (relative to origin)...
+    - Function: `triEdgeNeighbors` - Returns the three edge-adjacent triangles (tria...
     - Function: `getTriABC` - Returns the analytical coordinates for a triang...
     - Function: `getTrianglesOnLine` - Returns all triangles intersected by a line seg...
     - Function: `getTriVertices` - Returns the three vertex coordinates for a tria...
@@ -138,6 +152,7 @@
     - Function: `rotateHexCW`
     - Function: `rotateHexCCW`
     - Function: `flipHexVertical`
+    - Function: `flipHexHorizontal`
     - Function: `remapHex`
     - Function: `shiftHexPalettes`
   - [svg-export.ts](../src/lib/svg-export.ts)
