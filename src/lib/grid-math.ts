@@ -51,7 +51,27 @@ export const worldToTri = (wx: number, wy: number): TriKey => {
   return { q: fq, r: fr, type };
 };
 
-/** 
+/**
+ * Returns the three edge-adjacent triangles (triangles sharing a full edge).
+ * Triangles that only touch at a corner are NOT neighbors. Every triangle has
+ * exactly three such neighbors, all of the opposite type.
+ */
+export function triEdgeNeighbors(t: TriKey): TriKey[] {
+  if (t.type === 'up') {
+    return [
+      { q: t.q, r: t.r, type: 'down' },
+      { q: t.q - 1, r: t.r, type: 'down' },
+      { q: t.q, r: t.r - 1, type: 'down' },
+    ];
+  }
+  return [
+    { q: t.q, r: t.r, type: 'up' },
+    { q: t.q + 1, r: t.r, type: 'up' },
+    { q: t.q, r: t.r + 1, type: 'up' },
+  ];
+}
+
+/**
  * Returns the analytical coordinates for a triangle.
  * Useful for math-based symmetry rules.
  * Redefined so Up(0,0) = (0,0,0)

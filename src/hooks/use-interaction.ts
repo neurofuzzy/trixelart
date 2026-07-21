@@ -154,7 +154,8 @@ export function useInteraction(args: UseInteractionArgs) {
   // land on before clicking.
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
-    if (tool === "select" || tool === "stamp" || tool === "eyedropper") return [hoveredTri];
+    if (tool === "select" || tool === "stamp" || tool === "eyedropper" || tool === "fill")
+      return [hoveredTri];
     const N = gridDivisions;
     const offsets =
       N > 0 ? flowerOffsets(flowerRadius, N) : [];

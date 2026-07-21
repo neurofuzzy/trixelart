@@ -39,7 +39,7 @@ export function GridCanvas({
   gridDivisions: number;
   hexMode: HexMode;
   selectedHexes: { c: number; k: number }[];
-  tool: "paint" | "erase" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
+  tool: "paint" | "erase" | "fill" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
   cloneFlash?: { c: number; k: number; q: number; r: number; type: string; opacity: number; seq: number } | null;
@@ -490,7 +490,8 @@ export function GridCanvas({
         brushSize === "hex" &&
         gridDivisions > 0 &&
         tool !== "stamp" &&
-        tool !== "select";
+        tool !== "select" &&
+        tool !== "fill";
       ctx.lineWidth = Math.max(2 / view.zoom, 1);
 
       const hoverColor = tool === "clone" && !cloneSource ? "rgb(239, 68, 68)" : "white";
