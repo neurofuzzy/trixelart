@@ -30,7 +30,12 @@ export const stampTool: ToolHandler = {
         N,
       );
       if (captured.trixels.length > 0) {
-        upsertSelectionSnapshot(ctx.setSelections, ctx.setActiveSelection, captured);
+        upsertSelectionSnapshot(
+          ctx.selections,
+          ctx.setSelections,
+          ctx.setActiveSelection,
+          captured,
+        );
         ctx.onStampCapture?.(hex.c, hex.k);
         ctx.setCaptureMode(false);
       }
