@@ -28,6 +28,7 @@ import {
   setPaletteOffsets,
 } from "@/lib/constants";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
+import { normalizeProjectFilename, DEFAULT_PROJECT_NAME } from "@/lib/utils";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 import {
   rotateHexCW,
@@ -104,6 +105,7 @@ export default function TrixelGrid() {
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
+  const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
   const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
   const [flowerRadius, setFlowerRadius] = useState(0);
@@ -288,6 +290,8 @@ export default function TrixelGrid() {
           setGridOrientation(data.gridOrientation as GridOrientation);
         }
         if (data.brushSize === "hex") setBrushSize("hex");
+        if (typeof data.projectName === "string" && data.projectName.trim())
+          setProjectName(data.projectName);
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
@@ -307,6 +311,7 @@ export default function TrixelGrid() {
         symmetry,
         gridOrientation,
         brushSize,
+        projectName,
         hueOffset,
         saturationOffset: satOffset,
       }),
@@ -318,6 +323,7 @@ export default function TrixelGrid() {
     symmetry,
     gridOrientation,
     brushSize,
+    projectName,
     hueOffset,
     satOffset,
   ]);
@@ -504,17 +510,21 @@ export default function TrixelGrid() {
 
   const handleExport = useCallback(() => {
     const project = buildSnapshot();
-    const dataStr = JSON.stringify({ ...project, version: 1 }, null, 2);
+    const dataStr = JSON.stringify(
+      { ...project, name: projectName, version: 1 },
+      null,
+      2,
+    );
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `trixel-grid-${new Date().toISOString().split("T")[0]}.json`;
+    link.download = `${normalizeProjectFilename(projectName) || "trixel-grid"}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [buildSnapshot]);
+  }, [buildSnapshot, projectName]);
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
@@ -535,6 +545,9 @@ export default function TrixelGrid() {
           const content = event.target?.result as string;
           const data = JSON.parse(content);
           if (typeof data !== "object" || data === null) return;
+
+          if (typeof data.name === "string" && data.name.trim())
+            setProjectName(data.name);
 
           if (data.version === 1 || data.painted) {
             let snapLayers: Layer[];
@@ -632,6 +645,7 @@ export default function TrixelGrid() {
       setSymmetry,
       setSelections,
       setActiveSelection,
+      setProjectName,
     ],
   );
 
@@ -677,6 +691,7 @@ export default function TrixelGrid() {
     // A new project resets grid settings to the launch defaults.
     setGridDivisions(DEFAULT_GRID_DIVISIONS);
     setHexMode(DEFAULT_HEX_MODE);
+    setProjectName(DEFAULT_PROJECT_NAME);
     pushHistory({
       layers: cleared,
       activeLayerIdx: 0,
@@ -889,6 +904,8 @@ export default function TrixelGrid() {
         tooltip={tooltip}
         onSetTooltip={setTooltip}
         onOpenHelp={onboarding.openHelp}
+        projectName={projectName}
+        onProjectNameChange={setProjectName}
       />
 
       <div
@@ -1016,6 +1033,7 @@ export default function TrixelGrid() {
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
         painted={mergedPainted}
+        projectName={projectName}
       />
 
       <SplashDialog

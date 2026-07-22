@@ -11,6 +11,7 @@ import {
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 import { generateSVG } from "@/lib/svg-export";
+import { normalizeProjectFilename } from "@/lib/utils";
 
 function stripSvgDimensions(svg: string): string {
   return svg.replace(
@@ -24,10 +25,12 @@ export function ExportDialog({
   open,
   onOpenChange,
   painted,
+  projectName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
+  projectName: string;
 }) {
   const [stroke, setStroke] = useState(false);
   const [merge, setMerge] = useState(false);
@@ -60,7 +63,7 @@ export function ExportDialog({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `trixel-${new Date().toISOString().split("T")[0]}.svg`;
+    link.download = `${normalizeProjectFilename(projectName) || "trixel"}.svg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

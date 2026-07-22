@@ -46,6 +46,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Tool } from "@/lib/tools";
 import type { Symmetry, BrushSize, HexMode } from "@/components/Footer";
+import { ProjectName } from "@/components/ProjectName";
 
 const editTools = [
   { tool: "paint" as Tool, icon: Pencil, label: "Paint", shortcut: "P" },
@@ -105,6 +106,8 @@ export function Toolbar({
   tooltip,
   onSetTooltip,
   onOpenHelp,
+  projectName,
+  onProjectNameChange,
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -126,6 +129,8 @@ export function Toolbar({
   tooltip: string | null;
   onSetTooltip: (t: string | null) => void;
   onOpenHelp: () => void;
+  projectName: string;
+  onProjectNameChange: (name: string) => void;
 }) {
   const activeEdit = editTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
@@ -324,6 +329,8 @@ export function Toolbar({
         </div>
         </div>
       </div>
+
+      <ProjectName name={projectName} onChange={onProjectNameChange} />
 
       <div className="flex items-center gap-0.5">
         <Button
