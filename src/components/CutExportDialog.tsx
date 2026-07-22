@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { Scissors, CheckCircle2 } from "lucide-react";
+import { Scissors, CheckCircle2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -19,6 +19,8 @@ import {
   DEFAULT_CUT_STACK_OPTIONS,
   type CutFrame,
 } from "@/lib/cut-mesh";
+import { buildCutSVG } from "@/lib/cut-svg";
+import { normalizeProjectFilename } from "@/lib/utils";
 
 const FRAMES: { value: CutFrame; label: string; hint: string }[] = [
   {
@@ -51,11 +53,11 @@ export function CutExportDialog({
   open,
   onOpenChange,
   painted,
+  projectName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
-  // projectName is threaded in for Phase 3's SVG filename; unused until then.
   projectName: string;
 }) {
   const [widthMm, setWidthMm] = useState(DEFAULT_CUT_STACK_OPTIONS.widthMm);
@@ -89,6 +91,22 @@ export function CutExportDialog({
       : DEFAULT_CUT_STACK_OPTIONS.widthMm;
     setWidthMm(clamped);
     setWidthDraft(String(clamped));
+  };
+
+  const handleDownloadSVG = () => {
+    if (!plan) return;
+    const svg = buildCutSVG(plan, painted, { widthMm, frame });
+    if (!svg) return;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${normalizeProjectFilename(projectName) || "trixel"}-cut.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    onOpenChange(false);
   };
 
   if (!open) return null;
@@ -236,9 +254,13 @@ export function CutExportDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button disabled className="gap-1.5" title="Coming soon">
-            <Scissors className="w-4 h-4" />
-            Export SVG (soon)
+          <Button
+            onClick={handleDownloadSVG}
+            disabled={!plan}
+            className="gap-1.5"
+          >
+            <Download className="w-4 h-4" />
+            Download SVG
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

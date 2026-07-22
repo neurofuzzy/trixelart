@@ -179,6 +179,6 @@ Ship **planner + exploded preview first**; SVG export lands second (cut paper on
 - Explode slider (`gap`); assembled (`gap=0`) sanity-check; **island highlighting** for any sheet with `components>1`.
 - New `CutExportDialog` hosting it + the plan summary / island report.
 
-**Phase 3 — SVG cut export.** Boundary tracing (§5) → per-sheet SVG files (bottom→top), shared origin, assembly notes.
+**Phase 3 — SVG cut export. ✅ built** (`src/lib/cut-svg.ts`). `traceUnionLoops` walks boundary edges (reverse-edge-absent test) into closed loops, merges collinear runs → **one compound path per layer** (outer + holes as sub-paths, opposite winding, `fill-rule: evenodd`) so the cutter cuts the union silhouette, never internal triangle edges. `buildCutSVG` auto-tiles the layers into a grid, each a labeled inkscape layer (`Sᵢ ∪ frame`; the mat is the frame alone), sized in mm from the width control. Wired to a **Download SVG** button in `CutExportDialog`.
 
 **Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding/feature-size guards · budget>0 auto-splits · bridge-hint surfacing.

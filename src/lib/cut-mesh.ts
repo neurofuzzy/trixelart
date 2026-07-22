@@ -198,6 +198,59 @@ export interface CutSheetGeometry {
   isFrame: boolean;
 }
 
+/** One physical cut sheet: the exact triangle set to cut, plus its identity. */
+export interface CutLayer {
+  level: number;
+  label: string;
+  colorKey: string;
+  colorHex: string;
+  /** Triangle keys forming this sheet's paper (Sᵢ ∪ frame, or the frame alone). */
+  keys: string[];
+  isFrame: boolean;
+}
+
+/**
+ * The per-layer cut geometry, bottom → top: each color sheet is its positive
+ * region Sᵢ plus the shared frame (every layer is framed), then the black
+ * outline mat (frame alone) on top. Shared by the 3D preview and the SVG export
+ * so both cut identical shapes.
+ */
+export function cutLayers(
+  plan: CutPlan,
+  painted: Record<string, string>,
+  frame: CutFrame,
+): CutLayer[] {
+  const frameKeys = frame === "mat" ? matTriangles(painted) : [];
+  const hasFrame = frameKeys.length > 0;
+  const layers: CutLayer[] = [];
+
+  for (const sheet of plan.sheets) {
+    layers.push({
+      level: sheet.level,
+      label: `Level ${sheet.level}`,
+      colorKey: sheet.colorKey,
+      colorHex: sheet.colorHex,
+      keys: hasFrame ? sheet.triangles.concat(frameKeys) : sheet.triangles,
+      isFrame: false,
+    });
+  }
+
+  if (hasFrame) {
+    const frameHex = plan.sheets.reduce((best, s) =>
+      hexLuminance(s.colorHex) < hexLuminance(best.colorHex) ? s : best,
+    ).colorHex;
+    layers.push({
+      level: plan.sheets.length + 1,
+      label: "Mat",
+      colorKey: "mat",
+      colorHex: frameHex,
+      keys: frameKeys,
+      isFrame: true,
+    });
+  }
+  return layers;
+}
+
 export interface CutStackModel {
   model: TrixelModel;
   /** Per-sheet stats, bottom (level 1) → top (mat last, if present). */
@@ -220,58 +273,34 @@ export function buildCutStackModel(
   const T = options.sheetThicknessMm;
   const gap = options.explode * MAX_EXPLODE_GAP_MM;
   const step = T + gap;
-  const K = plan.sheets.length;
 
-  // The frame region (exterior outline silhouette) — carried by EVERY layer.
-  const frame = options.frame === "mat" ? matTriangles(painted) : [];
-  const hasFrame = frame.length > 0;
-
+  const layers = cutLayers(plan, painted, options.frame);
   const bodies: ExportBody[] = [];
   const sheets: CutSheetGeometry[] = [];
 
-  // Color sheets: each is its positive region Sᵢ PLUS the frame, so every sheet
-  // has solid paper all the way around. Interior unpainted areas stay holes.
-  for (const sheet of plan.sheets) {
-    const zLow = (sheet.level - 1) * step;
-    const keys = hasFrame ? sheet.triangles.concat(frame) : sheet.triangles;
+  for (const layer of layers) {
+    const zLow = (layer.level - 1) * step;
     bodies.push(
       sheetBody(
-        keys,
+        layer.keys,
         toModel,
         zLow,
         zLow + T,
-        `Sheet ${sheet.level}`,
-        sheet.colorKey,
-        sheet.colorHex,
+        layer.label,
+        layer.colorKey,
+        layer.colorHex,
       ),
     );
     sheets.push({
-      level: sheet.level,
-      colorHex: sheet.colorHex,
-      triCount: keys.length,
-      isFrame: false,
-    });
-  }
-
-  // Mat on top: the frame region alone, in black, above the top color layer.
-  if (hasFrame) {
-    const frameHex = plan.sheets.reduce((best, s) =>
-      hexLuminance(s.colorHex) < hexLuminance(best.colorHex) ? s : best,
-    ).colorHex;
-    const zLow = K * step;
-    bodies.push(
-      sheetBody(frame, toModel, zLow, zLow + T, "Mat", "mat", frameHex),
-    );
-    sheets.push({
-      level: K + 1,
-      colorHex: frameHex,
-      triCount: frame.length,
-      isFrame: true,
+      level: layer.level,
+      colorHex: layer.colorHex,
+      triCount: layer.keys.length,
+      isFrame: layer.isFrame,
     });
   }
 
   const triangleCount = bodies.reduce((s, b) => s + b.indices.length / 3, 0);
-  const topLevel = options.frame === "mat" ? K + 1 : K;
+  const topLevel = layers.length ? layers[layers.length - 1].level : 1;
   const depthMm = (topLevel - 1) * step + T;
 
   return {
