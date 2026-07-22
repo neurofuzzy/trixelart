@@ -124,6 +124,12 @@ export function useInteraction(args: UseInteractionArgs) {
   const lastPaintTriRef = useRef<TriKey | null>(null);
   const lastEditToolRef = useRef<Tool | null>(null);
   const lastHoveredTriRef = useRef<TriKey | null>(null);
+  // True only while a pointer sequence that began on the canvas is in flight.
+  // Overlays (palettes, layer panel) stopPropagation on pointerdown, so a click
+  // on them never sets this — letting onPointerUp skip tool commits that would
+  // otherwise fire on the canvas underneath (e.g. the stamp tool, which commits
+  // on up without any drag state to guard against).
+  const canvasPointerActive = useRef(false);
 
   // Inverse-rotation coefficients for screen->world. Forward canvas
   // transform is screen = center + zoom * R(θ) * (world + view), so the
@@ -395,6 +401,7 @@ export function useInteraction(args: UseInteractionArgs) {
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (isTwoFinger.current) return;
+      canvasPointerActive.current = true;
       const isRightClick = e.button === 2 || e.ctrlKey;
       const pos = getRelativePointer(e);
 
@@ -429,6 +436,10 @@ export function useInteraction(args: UseInteractionArgs) {
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (isTwoFinger.current) return;
+      // Ignore pointer-ups whose sequence began on an overlay rather than the
+      // canvas — otherwise a click on the palette bubbles here and commits.
+      if (!canvasPointerActive.current) return;
+      canvasPointerActive.current = false;
       const pos = getRelativePointer(e);
       const d = drag.current;
       const handler =
