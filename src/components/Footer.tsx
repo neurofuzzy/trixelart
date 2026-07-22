@@ -98,10 +98,12 @@ export function Footer({
         </Button>
       </div>
       <div className="flex items-center gap-1.5 min-w-0">
-        {tooltip ? (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
-            {tooltip}
-          </span>
+        {tooltip !== null ? (
+          tooltip ? (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+              {tooltip}
+            </span>
+          ) : null
         ) : tool === "paint" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             click to paint
