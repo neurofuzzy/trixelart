@@ -42,6 +42,7 @@ import {
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
 import { Export3DDialog } from "@/components/Export3DDialog";
+import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
@@ -49,6 +50,8 @@ import { HelpDialog } from "@/components/onboarding/HelpDialog";
 import { InterfaceTour } from "@/components/onboarding/InterfaceTour";
 
 const STORAGE_KEY = "trixel-save";
+
+const DEFAULT_SVG_EXPORT: SVGExportOptions = { stroke: false, merge: false };
 
 // Grid-setting defaults applied on first launch (no saved settings) and when
 // starting a new project via handleClear.
@@ -90,6 +93,13 @@ export default function TrixelGrid() {
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [export3DOpen, setExport3DOpen] = useState(false);
+  const [svgExport, setSvgExport] =
+    useState<SVGExportOptions>(DEFAULT_SVG_EXPORT);
+  const updateSvgExport = useCallback(
+    (patch: Partial<SVGExportOptions>) =>
+      setSvgExport((s) => ({ ...s, ...patch })),
+    [],
+  );
 
   const computedPalettes = useMemo(
     () => computePaletteColors(PALETTE_DEFS, hueOffset, satOffset),
@@ -297,6 +307,11 @@ export default function TrixelGrid() {
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
+        if (data.svgExport && typeof data.svgExport === "object")
+          setSvgExport({
+            stroke: !!data.svgExport.stroke,
+            merge: !!data.svgExport.merge,
+          });
       }
     } catch {
       /* ignore parse errors */
@@ -316,6 +331,7 @@ export default function TrixelGrid() {
         projectName,
         hueOffset,
         saturationOffset: satOffset,
+        svgExport,
       }),
     );
   }, [
@@ -328,6 +344,7 @@ export default function TrixelGrid() {
     projectName,
     hueOffset,
     satOffset,
+    svgExport,
   ]);
 
   useEffect(() => {
@@ -513,7 +530,7 @@ export default function TrixelGrid() {
   const handleExport = useCallback(() => {
     const project = buildSnapshot();
     const dataStr = JSON.stringify(
-      { ...project, name: projectName, version: 1 },
+      { ...project, name: projectName, svgExport, version: 1 },
       null,
       2,
     );
@@ -526,7 +543,7 @@ export default function TrixelGrid() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [buildSnapshot, projectName]);
+  }, [buildSnapshot, projectName, svgExport]);
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
@@ -554,6 +571,12 @@ export default function TrixelGrid() {
 
           if (typeof data.name === "string" && data.name.trim())
             setProjectName(data.name);
+
+          if (data.svgExport && typeof data.svgExport === "object")
+            setSvgExport({
+              stroke: !!data.svgExport.stroke,
+              merge: !!data.svgExport.merge,
+            });
 
           if (data.version === 1 || data.painted) {
             let snapLayers: Layer[];
@@ -652,6 +675,7 @@ export default function TrixelGrid() {
       setSelections,
       setActiveSelection,
       setProjectName,
+      setSvgExport,
     ],
   );
 
@@ -1041,6 +1065,8 @@ export default function TrixelGrid() {
         onOpenChange={setExportDialogOpen}
         painted={mergedPainted}
         projectName={projectName}
+        settings={svgExport}
+        onSettingsChange={updateSvgExport}
       />
 
       <Export3DDialog

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +10,7 @@ import {
   AlertDialogTitle,
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
-import { generateSVG } from "@/lib/svg-export";
+import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
 import { normalizeProjectFilename } from "@/lib/utils";
 
 function stripSvgDimensions(svg: string): string {
@@ -26,14 +26,18 @@ export function ExportDialog({
   onOpenChange,
   painted,
   projectName,
+  settings,
+  onSettingsChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
   projectName: string;
+  settings: SVGExportOptions;
+  onSettingsChange: (patch: Partial<SVGExportOptions>) => void;
 }) {
-  const [stroke, setStroke] = useState(false);
-  const [merge, setMerge] = useState(false);
+  const stroke = settings.stroke ?? false;
+  const merge = settings.merge ?? false;
 
   const svg = useMemo(
     () => generateSVG(painted, { stroke, merge }),
@@ -93,7 +97,7 @@ export function ExportDialog({
               <input
                 type="checkbox"
                 checked={stroke}
-                onChange={(e) => setStroke(e.target.checked)}
+                onChange={(e) => onSettingsChange({ stroke: e.target.checked })}
                 className="rounded"
               />
               <span className="text-sm text-muted-foreground">
@@ -104,7 +108,7 @@ export function ExportDialog({
               <input
                 type="checkbox"
                 checked={merge}
-                onChange={(e) => setMerge(e.target.checked)}
+                onChange={(e) => onSettingsChange({ merge: e.target.checked })}
                 className="rounded"
               />
               <span className="text-sm text-muted-foreground">
