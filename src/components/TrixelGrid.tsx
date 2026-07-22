@@ -41,6 +41,7 @@ import {
 } from "@/lib/hex-flower";
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
+import { Export3DDialog } from "@/components/Export3DDialog";
 import { LayerPanel } from "@/components/LayerPanel";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
@@ -88,6 +89,7 @@ export default function TrixelGrid() {
   const [hueOffset, setHueOffset] = useState(0);
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [export3DOpen, setExport3DOpen] = useState(false);
 
   const computedPalettes = useMemo(
     () => computePaletteColors(PALETTE_DEFS, hueOffset, satOffset),
@@ -530,6 +532,10 @@ export default function TrixelGrid() {
     setExportDialogOpen(true);
   }, []);
 
+  const handleExport3D = useCallback(() => {
+    setExport3DOpen(true);
+  }, []);
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -888,6 +894,7 @@ export default function TrixelGrid() {
         onToolChange={setTool}
         onExport={handleExport}
         onExportSVG={handleExportSVG}
+        onExport3D={handleExport3D}
         onImportClick={handleImportClick}
         onClear={handleClear}
         onCenterView={onCenterView}
@@ -1032,6 +1039,13 @@ export default function TrixelGrid() {
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
+        painted={mergedPainted}
+        projectName={projectName}
+      />
+
+      <Export3DDialog
+        open={export3DOpen}
+        onOpenChange={setExport3DOpen}
         painted={mergedPainted}
         projectName={projectName}
       />

@@ -38,6 +38,7 @@
     "date-fns": "^3.6.0",
     "dotenv": "^16.5.0",
     "embla-carousel-react": "^8.6.0",
+    "fflate": "^0.8.3",
     "lucide-react": "^0.475.0",
     "next": "^15.5.20",
     "patch-package": "^8.0.0",
@@ -48,12 +49,14 @@
     "recharts": "^2.15.1",
     "tailwind-merge": "^3.0.1",
     "tailwindcss-animate": "^1.0.7",
+    "three": "^0.169.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
+    "@types/three": "^0.169.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.10",
     "postcss": "^8",
