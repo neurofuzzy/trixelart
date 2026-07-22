@@ -5,6 +5,56 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { TrixelModel } from "@/lib/mesh-export";
 
+// Grain preview stripes: spacing of the light/dark line pairs (model mm) and how
+// far they push lightness (±fraction). Tight + subtle, just to read the angle.
+const GRAIN_SPACING_MM = 1.5;
+const GRAIN_AMOUNT = 0.14;
+
+/** Paint faint directional stripes on the up/down-facing faces of a body so its
+ *  grain angle is visible. The line direction is `angleDeg`; stripes alternate
+ *  perpendicular to it. Gated to near-horizontal faces (via the geometric face
+ *  normal from screen-space derivatives) so walls stay clean. */
+function applyGrainShader(mat: THREE.MeshStandardMaterial, angleDeg: number) {
+  const theta = (angleDeg * Math.PI) / 180;
+  // Perpendicular to the line direction, in model XY — stripes vary along this.
+  const dir = new THREE.Vector2(-Math.sin(theta), Math.cos(theta));
+  const freq = (2 * Math.PI) / GRAIN_SPACING_MM;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uGrainDir = { value: dir };
+    shader.uniforms.uGrainFreq = { value: freq };
+    shader.uniforms.uGrainAmount = { value: GRAIN_AMOUNT };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nvarying vec3 vGrainWPos;",
+      )
+      .replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvGrainWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform vec2 uGrainDir;\nuniform float uGrainFreq;\nuniform float uGrainAmount;\nvarying vec3 vGrainWPos;",
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+{
+  vec3 gdx = dFdx(vGrainWPos);
+  vec3 gdy = dFdy(vGrainWPos);
+  float gtop = smoothstep(0.55, 0.9, abs(normalize(cross(gdx, gdy)).z));
+  float ph = dot(vGrainWPos.xy, uGrainDir) * uGrainFreq;
+  float ln = smoothstep(-0.5, 0.5, sin(ph)) * 2.0 - 1.0;
+  diffuseColor.rgb *= 1.0 + gtop * uGrainAmount * ln;
+}`,
+      );
+  };
+  // Distinct from the base body's un-patched program so three doesn't hand us
+  // the stripe-less shader (default cache key ignores onBeforeCompile edits).
+  mat.customProgramCacheKey = () => "trixel-grain";
+}
+
 function buildGroup(m: TrixelModel): THREE.Group {
   const group = new THREE.Group();
   for (const body of m.bodies) {
@@ -21,6 +71,7 @@ function buildGroup(m: TrixelModel): THREE.Group {
       metalness: 0.15,
       flatShading: true,
     });
+    if (body.grainAngle !== null) applyGrainShader(mat, body.grainAngle);
     group.add(new THREE.Mesh(geo, mat));
   }
   return group;
@@ -43,6 +94,25 @@ function boundsCenter(group: THREE.Group): {
     .setFromObject(group)
     .getBoundingSphere(new THREE.Sphere());
   return { center: sphere.center, radius: sphere.radius || 50 };
+}
+
+/** Vertical studio-gradient texture (lighter top → darker bottom) used both as
+ *  the flat screen background and, mapped as an equirect, as the reflection
+ *  environment so faceted faces catch soft form-defining highlights. */
+function makeGradientTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 8;
+  c.height = 256;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, "#6b7486"); // top
+  g.addColorStop(0.55, "#3a3f49");
+  g.addColorStop(1, "#17191d"); // bottom
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 /** Orbitable 3D preview of the export model, lit by a camera-tracking
@@ -70,6 +140,19 @@ export function Model3DPreview({ model }: { model: TrixelModel }) {
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
+    // Studio gradient: flat texture as the screen background, plus a PMREM'd
+    // copy as the reflection environment so both dark and light faces read.
+    const bgTex = makeGradientTexture();
+    scene.background = bgTex;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envSrc = makeGradientTexture();
+    envSrc.mapping = THREE.EquirectangularReflectionMapping;
+    const envRT = pmrem.fromEquirectangular(envSrc);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 0.5;
+    envSrc.dispose();
+    pmrem.dispose();
+
     const camera = new THREE.PerspectiveCamera(
       45,
       container.clientWidth / Math.max(1, container.clientHeight),
@@ -86,10 +169,11 @@ export function Model3DPreview({ model }: { model: TrixelModel }) {
     controlsRef.current = controls;
 
     // Headlamp: directional light kept at the eye, aimed at the orbit pivot.
-    const headlamp = new THREE.DirectionalLight(0xffffff, 2.6);
+    // Eased a touch since the gradient environment now adds reflective fill.
+    const headlamp = new THREE.DirectionalLight(0xffffff, 2.0);
     scene.add(headlamp);
     scene.add(headlamp.target);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 0.55));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 0.4));
 
     let raf = 0;
     const tick = () => {
@@ -115,6 +199,8 @@ export function Model3DPreview({ model }: { model: TrixelModel }) {
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
+      bgTex.dispose();
+      envRT.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       sceneRef.current = null;
@@ -155,7 +241,7 @@ export function Model3DPreview({ model }: { model: TrixelModel }) {
   return (
     <div
       ref={containerRef}
-      className="h-[240px] w-full rounded-md border bg-[repeating-conic-gradient(rgba(255,255,255,0.04)_0%_25%,_transparent_0%_50%)_50%_/_16px_16px] cursor-grab active:cursor-grabbing overflow-hidden"
+      className="h-full min-h-[240px] w-full rounded-md border cursor-grab active:cursor-grabbing overflow-hidden"
     />
   );
 }

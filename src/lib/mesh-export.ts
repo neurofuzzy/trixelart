@@ -28,6 +28,9 @@ export interface MeshExportOptions {
   /** Thickness of the solid backing plate, in mm (ignored when mode "none"). */
   baseThicknessMm: number;
   baseMode: BaseMode;
+  /** Per-color grain-angle overrides, keyed by color key. Colors absent here
+   *  fall back to the auto-cycled angle (0/60/120° by body order). */
+  grainByColor?: Record<string, number>;
 }
 
 export const DEFAULT_MESH_OPTIONS: MeshExportOptions = {
@@ -35,6 +38,7 @@ export const DEFAULT_MESH_OPTIONS: MeshExportOptions = {
   topThicknessMm: 1.2,
   baseThicknessMm: 2,
   baseMode: "plate",
+  grainByColor: {},
 };
 
 export const MESH_LIMITS = {
@@ -55,8 +59,13 @@ export function clampMeshOption(
 /** Grain angles cycled across color bodies, in degrees. */
 export const GRAIN_ANGLES = [0, 60, 120];
 
+/** Selectable grain angles offered for per-color overrides, in degrees. */
+export const GRAIN_ANGLE_CHOICES = [0, 30, 45, 60, 90, 120, 135, 150];
+
 export interface ExportBody {
   name: string;
+  /** Encoded palette key this body was built from ("paletteIdx,colorIdx"). */
+  colorKey: string;
   colorHex: string; // "#rrggbb"
   grainAngle: number | null; // null for the base plate
   /** Flat vertex coordinates: x0,y0,z0, x1,y1,z1, … */
@@ -250,10 +259,16 @@ export function buildTrixelModel(
     const mesh = new MeshBuilder();
     addSlab(mesh, polys, topLow, topHigh);
     if (mode === "sandwich") addSlab(mesh, polys, botLow, botHigh);
+    const override = options.grainByColor?.[colorKey];
+    const grainAngle =
+      typeof override === "number"
+        ? override
+        : GRAIN_ANGLES[i % GRAIN_ANGLES.length];
     bodies.push({
       name: `Color ${i + 1}`,
+      colorKey,
       colorHex: resolveColor(colorKey),
-      grainAngle: GRAIN_ANGLES[i % GRAIN_ANGLES.length],
+      grainAngle,
       positions: mesh.positions,
       indices: mesh.indices,
     });
@@ -270,6 +285,7 @@ export function buildTrixelModel(
     addSlab(baseMesh, allPolys, baseLow, baseHigh);
     bodies.unshift({
       name: "Base",
+      colorKey: darkest,
       colorHex: resolveColor(darkest),
       grainAngle: null,
       positions: baseMesh.positions,
