@@ -7,13 +7,14 @@ import type { CutPlan } from "@/lib/cut-export";
 // Cut plan → one layered SVG for cutting machines (see docs/fabrication-export
 // .md §5). Each layer is emitted as ONE compound path — the union boundary of
 // its triangles (outer edge + hole edges as sub-paths) — so the cutter cuts
-// only the silhouette and holes, never the internal triangle edges (which would
-// shred the sheet). Layers are auto-tiled apart into a grid and grouped as
-// labeled SVG layers, ready to assign to cardstock.
+// only the silhouette and holes, never internal triangle edges. Layers are
+// auto-tiled into a grid and grouped as labeled SVG layers.
 //
-// The union is traced with no CSG: an edge of a triangle is on the boundary iff
-// the neighbor across it is absent (its reverse directed edge is missing). We
-// chain boundary edges into closed loops and merge collinear runs.
+// Merge-islands (optional): same-layer triangles that touch at a single vertex
+// are connected by a zero-width point and fall apart when cut. When enabled, the
+// boundary walk uses the reflex-crossing rule to merge them into one loop, and
+// each pinch corner is replaced by a quadratic Bézier "neck" (control point at
+// the touch vertex → tangent to both edges) for a smooth metaball-style join.
 // ---------------------------------------------------------------------------
 
 /** Quantize a world point to a stable integer key (1e-3 world units). */
@@ -22,38 +23,25 @@ function vkey(p: Pt): string {
 }
 
 interface DEdge {
-  key: string; // `${ak}->${bk}`
   a: Pt;
+  b: Pt;
   ak: string;
   bk: string;
 }
 
+/** A boundary node: the segment INTO `p` is a line, or a quad Bézier if `q` set. */
+interface LoopNode {
+  p: Pt;
+  q?: Pt;
+}
+
 /** Three collinear points? (cross product ~ 0 within tolerance). */
 function collinear(p: Pt, q: Pt, r: Pt): boolean {
-  const cross = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  return Math.abs(cross) < 1e-4;
+  return Math.abs((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)) < 1e-4;
 }
 
-/** Drop vertices that lie on a straight run so a long edge is one segment. */
-function mergeCollinear(loop: Pt[]): Pt[] {
-  const n = loop.length;
-  if (n < 3) return loop;
-  const out: Pt[] = [];
-  for (let i = 0; i < n; i++) {
-    const prev = loop[(i - 1 + n) % n];
-    const cur = loop[i];
-    const next = loop[(i + 1) % n];
-    if (!collinear(prev, cur, next)) out.push(cur);
-  }
-  return out.length >= 3 ? out : loop;
-}
-
-/**
- * Traces the union boundary of a triangle set as closed loops (world coords):
- * outer boundaries and holes, each a ring of points. Winding is consistent
- * (render with fill-rule evenodd for holes).
- */
-export function traceUnionLoops(keys: string[]): Pt[][] {
+/** Directed boundary edges of a triangle set (solid region on the left). */
+function boundaryEdges(keys: string[]): DEdge[] {
   const present = new Set<string>();
   const edges: DEdge[] = [];
   for (const key of keys) {
@@ -63,43 +51,130 @@ export function traceUnionLoops(keys: string[]): Pt[][] {
     for (let i = 0; i < 3; i++) {
       const a = v[i];
       const b = v[(i + 1) % 3];
-      const ak = vkey(a);
-      const bk = vkey(b);
-      const ekey = `${ak}->${bk}`;
-      present.add(ekey);
-      edges.push({ key: ekey, a, ak, bk });
+      edges.push({ a, b, ak: vkey(a), bk: vkey(b) });
+      present.add(`${vkey(a)}->${vkey(b)}`);
     }
   }
+  return edges.filter((e) => !present.has(`${e.bk}->${e.ak}`));
+}
 
-  // Boundary edges: no triangle on the far side ⇒ reverse edge absent.
-  const byKey = new Map<string, DEdge>();
-  const adj = new Map<string, string[]>(); // ak → outgoing boundary edge keys
+/** Outgoing-boundary-edge count per vertex; >1 marks a pinch (corner touch). */
+function outDegree(edges: DEdge[]): Map<string, number> {
+  const deg = new Map<string, number>();
+  for (const e of edges) deg.set(e.ak, (deg.get(e.ak) ?? 0) + 1);
+  return deg;
+}
+
+/**
+ * Chains boundary edges into closed loops. With `merge`, pinch vertices take the
+ * widest (reflex) turn so corner-touching pieces weld into one loop; otherwise
+ * the first available edge is taken (pieces stay separate).
+ */
+function walkLoops(edges: DEdge[], merge: boolean): { p: Pt; vk: string }[][] {
+  const byStart = new Map<string, DEdge[]>();
   for (const e of edges) {
-    if (!present.has(`${e.bk}->${e.ak}`)) {
-      byKey.set(e.key, e);
-      const list = adj.get(e.ak);
-      if (list) list.push(e.key);
-      else adj.set(e.ak, [e.key]);
-    }
+    const l = byStart.get(e.ak);
+    if (l) l.push(e);
+    else byStart.set(e.ak, [e]);
   }
-
-  // Chain boundary edges head-to-tail into closed loops.
+  const ekey = (e: DEdge) => `${e.ak}->${e.bk}`;
+  const ang = (dx: number, dy: number) => Math.atan2(dy, dx);
   const used = new Set<string>();
-  const loops: Pt[][] = [];
-  for (const start of byKey.keys()) {
-    if (used.has(start)) continue;
-    const loop: Pt[] = [];
-    let cur: string | undefined = start;
-    while (cur && !used.has(cur)) {
-      used.add(cur);
-      const e = byKey.get(cur) as DEdge;
-      loop.push(e.a);
-      const outs = adj.get(e.bk);
-      cur = outs?.find((k) => !used.has(k));
+  const loops: { p: Pt; vk: string }[][] = [];
+
+  for (const start of edges) {
+    if (used.has(ekey(start))) continue;
+    const loop: { p: Pt; vk: string }[] = [];
+    let e: DEdge | null = start;
+    while (e && !used.has(ekey(e))) {
+      used.add(ekey(e));
+      loop.push({ p: e.a, vk: e.ak });
+      const outs: DEdge[] = (byStart.get(e.bk) ?? []).filter(
+        (o) => !used.has(ekey(o)),
+      );
+      if (outs.length === 0) {
+        e = null;
+        break;
+      }
+      if (outs.length === 1) {
+        e = outs[0];
+        continue;
+      }
+      // Pinch: merge → widest clockwise (reflex) turn; else first available.
+      if (!merge) {
+        e = outs[0];
+        continue;
+      }
+      const back = ang(e.a.x - e.b.x, e.a.y - e.b.y);
+      let best = outs[0];
+      let bestCW = -Infinity;
+      for (const o of outs) {
+        const a2 = ang(o.b.x - o.a.x, o.b.y - o.a.y);
+        let cw = back - a2;
+        while (cw <= 1e-9) cw += 2 * Math.PI;
+        while (cw > 2 * Math.PI) cw -= 2 * Math.PI;
+        if (cw > bestCW) {
+          bestCW = cw;
+          best = o;
+        }
+      }
+      e = best;
     }
-    if (loop.length >= 3) loops.push(mergeCollinear(loop));
+    if (loop.length >= 3) loops.push(loop);
   }
   return loops;
+}
+
+/**
+ * Converts a raw loop to render nodes: drops collinear points, and (when merging)
+ * replaces pinch corners with a quad-Bézier neck of pull-back `neck` (control at
+ * the touch vertex → tangent to both edges).
+ */
+function decorate(
+  loop: { p: Pt; vk: string }[],
+  deg: Map<string, number>,
+  neck: number,
+): LoopNode[] {
+  const n = loop.length;
+  const out: LoopNode[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = loop[(i - 1 + n) % n].p;
+    const cur = loop[i];
+    const next = loop[(i + 1) % n].p;
+    const col = collinear(prev, cur.p, next);
+    const pinch = (deg.get(cur.vk) ?? 0) > 1;
+    if (pinch && !col && neck > 0) {
+      const din = { x: prev.x - cur.p.x, y: prev.y - cur.p.y };
+      const dl = Math.hypot(din.x, din.y) || 1;
+      const li = Math.min(neck, dl * 0.45);
+      const don = { x: next.x - cur.p.x, y: next.y - cur.p.y };
+      const dr = Math.hypot(don.x, don.y) || 1;
+      const lo = Math.min(neck, dr * 0.45);
+      out.push({ p: { x: cur.p.x + (din.x / dl) * li, y: cur.p.y + (din.y / dl) * li } });
+      out.push({
+        p: { x: cur.p.x + (don.x / dr) * lo, y: cur.p.y + (don.y / dr) * lo },
+        q: { x: cur.p.x, y: cur.p.y },
+      });
+    } else if (!col) {
+      out.push({ p: cur.p });
+    }
+  }
+  return out.length >= 3 ? out : loop.map((n) => ({ p: n.p }));
+}
+
+/**
+ * Traces the union boundary of a triangle set as closed loops (world coords).
+ * With `merge`, corner-touching pieces are welded with smooth Bézier necks.
+ */
+export function traceUnionLoops(
+  keys: string[],
+  merge = false,
+  neck = 0,
+): LoopNode[][] {
+  const edges = boundaryEdges(keys);
+  const deg = outDegree(edges);
+  const raw = walkLoops(edges, merge);
+  return raw.map((loop) => decorate(loop, deg, merge ? neck : 0));
 }
 
 export interface CutSVGOptions {
@@ -107,6 +182,10 @@ export interface CutSVGOptions {
   widthMm: number;
   /** Top outline-silhouette mat on/off. */
   frame: CutFrame;
+  /** Weld corner-touching islands into one piece with smooth necks. */
+  mergeIslands?: boolean;
+  /** Neck pull-back for merges, in world units (0 = sharp weld). */
+  neck?: number;
 }
 
 /** Gap between tiled layers, in mm. */
@@ -137,21 +216,21 @@ export function buildCutSVG(
   const layers = cutLayers(plan, painted, options.frame);
   if (layers.length === 0) return null;
   const scale = transform.scale;
+  const merge = options.mergeIslands ?? false;
+  const neck = options.neck ?? 0;
 
-  // Trace every layer; collect loops (world) and a shared bbox (all layers
-  // carry the frame, so the frame rectangle bounds them all → equal tiles).
-  const traced = layers.map((l) => traceUnionLoops(l.keys));
+  const traced = layers.map((l) => traceUnionLoops(l.keys, merge, neck));
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
     maxY = -Infinity;
   for (const loops of traced) {
     for (const loop of loops) {
-      for (const p of loop) {
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
+      for (const nd of loop) {
+        if (nd.p.x < minX) minX = nd.p.x;
+        if (nd.p.x > maxX) maxX = nd.p.x;
+        if (nd.p.y < minY) minY = nd.p.y;
+        if (nd.p.y > maxY) maxY = nd.p.y;
       }
     }
   }
@@ -164,20 +243,24 @@ export function buildCutSVG(
   const totalW = cols * tileW + (cols - 1) * TILE_GAP_MM;
   const totalH = rows * tileH + (rows - 1) * TILE_GAP_MM;
 
+  const tx = (x: number, ox: number) => round((x - minX) * scale + ox);
+  const ty = (y: number, oy: number) => round((y - minY) * scale + oy);
+
   const parts: string[] = [];
   layers.forEach((layer, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
     const ox = col * (tileW + TILE_GAP_MM);
     const oy = row * (tileH + TILE_GAP_MM);
-    // World → mm, normalized to this tile's top-left.
     const d = traced[i]
       .map((loop) => {
         const seg = loop
-          .map((p, j) => {
-            const x = round((p.x - minX) * scale + ox);
-            const y = round((p.y - minY) * scale + oy);
-            return `${j === 0 ? "M" : "L"}${x} ${y}`;
+          .map((nd, j) => {
+            const x = tx(nd.p.x, ox);
+            const y = ty(nd.p.y, oy);
+            if (j === 0) return `M${x} ${y}`;
+            if (nd.q) return `Q${tx(nd.q.x, ox)} ${ty(nd.q.y, oy)} ${x} ${y}`;
+            return `L${x} ${y}`;
           })
           .join(" ");
         return `${seg} Z`;

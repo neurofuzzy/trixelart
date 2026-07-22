@@ -64,6 +64,8 @@ export function CutExportDialog({
   const [widthDraft, setWidthDraft] = useState(String(widthMm));
   const [explode, setExplode] = useState(DEFAULT_CUT_STACK_OPTIONS.explode);
   const [frame, setFrame] = useState<CutFrame>(DEFAULT_CUT_STACK_OPTIONS.frame);
+  const [mergeIslands, setMergeIslands] = useState(true);
+  const [joinSize, setJoinSize] = useState(0.6);
 
   const plan = useMemo(
     () => (open ? planCut(painted) : null),
@@ -95,7 +97,13 @@ export function CutExportDialog({
 
   const handleDownloadSVG = () => {
     if (!plan) return;
-    const svg = buildCutSVG(plan, painted, { widthMm, frame });
+    const svg = buildCutSVG(plan, painted, {
+      widthMm,
+      frame,
+      mergeIslands,
+      // Neck pull-back in world units (SIDE = 50); 0 = sharp weld.
+      neck: mergeIslands ? joinSize * 18 : 0,
+    });
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
@@ -203,6 +211,48 @@ export function CutExportDialog({
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Merge touching islands
+                    </span>
+                    <button
+                      role="switch"
+                      aria-checked={mergeIslands}
+                      onClick={() => setMergeIslands((v) => !v)}
+                      className={`h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                        mergeIslands
+                          ? "border-primary bg-primary/70"
+                          : "border-input bg-muted"
+                      }`}
+                    >
+                      <span
+                        className={`block h-4 w-4 rounded-full bg-white transition-transform ${
+                          mergeIslands ? "translate-x-4" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  {mergeIslands && (
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="w-16 shrink-0">Join size</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={joinSize}
+                        onChange={(e) => setJoinSize(Number(e.target.value))}
+                        className="h-6 flex-1 accent-primary"
+                      />
+                    </label>
+                  )}
+                  <p className="text-[11px] text-muted-foreground/60">
+                    Welds corner-touching pieces with smooth necks so the sheet
+                    cuts as one.
+                  </p>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
