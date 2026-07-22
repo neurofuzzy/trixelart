@@ -42,6 +42,7 @@ import {
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
 import { Export3DDialog } from "@/components/Export3DDialog";
+import { CutExportDialog } from "@/components/CutExportDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
 import { useOnboarding } from "@/hooks/use-onboarding";
@@ -93,6 +94,7 @@ export default function TrixelGrid() {
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [export3DOpen, setExport3DOpen] = useState(false);
+  const [exportCutOpen, setExportCutOpen] = useState(false);
   const [svgExport, setSvgExport] =
     useState<SVGExportOptions>(DEFAULT_SVG_EXPORT);
   const updateSvgExport = useCallback(
@@ -553,6 +555,10 @@ export default function TrixelGrid() {
     setExport3DOpen(true);
   }, []);
 
+  const handleExportCut = useCallback(() => {
+    setExportCutOpen(true);
+  }, []);
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -919,6 +925,7 @@ export default function TrixelGrid() {
         onExport={handleExport}
         onExportSVG={handleExportSVG}
         onExport3D={handleExport3D}
+        onExportCut={handleExportCut}
         onImportClick={handleImportClick}
         onClear={handleClear}
         onCenterView={onCenterView}
@@ -1072,6 +1079,13 @@ export default function TrixelGrid() {
       <Export3DDialog
         open={export3DOpen}
         onOpenChange={setExport3DOpen}
+        painted={mergedPainted}
+        projectName={projectName}
+      />
+
+      <CutExportDialog
+        open={exportCutOpen}
+        onOpenChange={setExportCutOpen}
         painted={mergedPainted}
         projectName={projectName}
       />

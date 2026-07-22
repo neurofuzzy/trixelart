@@ -1,8 +1,7 @@
 import {
   getTriVertices,
   stringToTri,
-  triToString,
-  triEdgeNeighbors,
+  countComponents,
 } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { zipSync, strToU8 } from "fflate";
@@ -68,6 +67,9 @@ export interface ExportBody {
   colorKey: string;
   colorHex: string; // "#rrggbb"
   grainAngle: number | null; // null for the base plate
+  /** Optional emissive tint ("#rrggbb") — used to make a body glow (e.g. a
+   *  loose island in the cut-stack preview). Undefined = no emissive. */
+  emissiveHex?: string;
   /** Flat vertex coordinates: x0,y0,z0, x1,y1,z1, … */
   positions: number[];
   /** Flat triangle vertex indices into `positions`. */
@@ -85,7 +87,52 @@ export interface TrixelModel {
   options: MeshExportOptions;
 }
 
-type Pt = { x: number; y: number };
+export type Pt = { x: number; y: number };
+
+/** World→model mapping shared by every builder: centers the design at the
+ *  origin and scales its longest extent to `widthMm`, Y flipped to Y-up. */
+export interface ModelTransform {
+  scale: number;
+  widthMm: number;
+  heightMm: number;
+  /** Maps a world-space triangle vertex into centered, Y-up model space. */
+  toModel: (v: Pt) => Pt;
+}
+
+/** Computes the shared model transform from a painted grid. Null if empty. */
+export function computeModelTransform(
+  painted: Record<string, string>,
+  widthMm: number,
+): ModelTransform | null {
+  const keys = Object.keys(painted);
+  if (keys.length === 0) return null;
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  for (const key of keys) {
+    const t = stringToTri(key);
+    for (const v of getTriVertices(t.q, t.r, t.type)) {
+      if (v.x < minX) minX = v.x;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+    }
+  }
+  const worldW = maxX - minX || 1;
+  const scale = widthMm / worldW;
+  const w = worldW * scale;
+  const h = (maxY - minY) * scale;
+  return {
+    scale,
+    widthMm: w,
+    heightMm: h,
+    toModel: (v) => ({
+      x: (v.x - minX) * scale - w / 2,
+      y: (maxY - v.y) * scale - h / 2,
+    }),
+  };
+}
 
 // Relative luminance (sRGB) for picking the darkest color as the base.
 function hexLuminance(hex: string): number {
@@ -108,7 +155,7 @@ function round(n: number): number {
  *  when same-color tiles only touch at a corner (a cross-tile weld would be
  *  non-manifold there). Slicers union the overlapping closed solids into one
  *  printed piece. */
-class MeshBuilder {
+export class MeshBuilder {
   positions: number[] = [];
   indices: number[] = [];
 
@@ -134,7 +181,7 @@ class MeshBuilder {
 }
 
 /** Extrudes each CCW polygon into a closed triangular prism. */
-function addSlab(
+export function addSlab(
   mesh: MeshBuilder,
   polys: Pt[][],
   zLow: number,
@@ -143,36 +190,13 @@ function addSlab(
   for (const poly of polys) mesh.prism(poly, zLow, zHigh);
 }
 
-function signedArea(p: Pt[]): number {
+export function signedArea(p: Pt[]): number {
   let a = 0;
   for (let i = 0; i < p.length; i++) {
     const j = (i + 1) % p.length;
     a += p[i].x * p[j].y - p[j].x * p[i].y;
   }
   return a / 2;
-}
-
-function countComponents(keys: string[]): number {
-  const set = new Set(keys);
-  const seen = new Set<string>();
-  let components = 0;
-  for (const start of keys) {
-    if (seen.has(start)) continue;
-    components++;
-    const stack = [start];
-    seen.add(start);
-    while (stack.length) {
-      const cur = stack.pop() as string;
-      for (const n of triEdgeNeighbors(stringToTri(cur))) {
-        const nk = triToString(n);
-        if (set.has(nk) && !seen.has(nk)) {
-          seen.add(nk);
-          stack.push(nk);
-        }
-      }
-    }
-  }
-  return components;
 }
 
 /** Build a 3D model from the painted grid. Returns null if nothing is painted. */
@@ -183,30 +207,10 @@ export function buildTrixelModel(
   const entries = Object.entries(painted);
   if (entries.length === 0) return null;
 
-  // World-space bounds across every painted triangle vertex.
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const [key] of entries) {
-    const t = stringToTri(key);
-    for (const v of getTriVertices(t.q, t.r, t.type)) {
-      if (v.x < minX) minX = v.x;
-      if (v.x > maxX) maxX = v.x;
-      if (v.y < minY) minY = v.y;
-      if (v.y > maxY) maxY = v.y;
-    }
-  }
-  const worldW = maxX - minX || 1;
-  const scale = options.widthMm / worldW;
-  const widthMm = worldW * scale;
-  const heightMm = (maxY - minY) * scale;
-
-  // World → centered, Y-up model space (matches the on-screen orientation).
-  const toModel = (v: Pt): Pt => ({
-    x: (v.x - minX) * scale - widthMm / 2,
-    y: (maxY - v.y) * scale - heightMm / 2,
-  });
+  // Shared world → centered, Y-up model transform (matches on-screen orientation).
+  const transform = computeModelTransform(painted, options.widthMm);
+  if (!transform) return null;
+  const { widthMm, heightMm, toModel } = transform;
 
   // Group tiles by color; store each as a CCW model-space polygon.
   const byColor = new Map<string, Pt[][]>();

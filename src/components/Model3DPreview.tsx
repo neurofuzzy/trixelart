@@ -71,6 +71,10 @@ function buildGroup(m: TrixelModel): THREE.Group {
       metalness: 0.15,
       flatShading: true,
     });
+    if (body.emissiveHex) {
+      mat.emissive = new THREE.Color(body.emissiveHex);
+      mat.emissiveIntensity = 0.6;
+    }
     if (body.grainAngle !== null) applyGrainShader(mat, body.grainAngle);
     group.add(new THREE.Mesh(geo, mat));
   }

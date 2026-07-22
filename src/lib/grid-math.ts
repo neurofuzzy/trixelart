@@ -72,6 +72,64 @@ export function triEdgeNeighbors(t: TriKey): TriKey[] {
 }
 
 /**
+ * Counts edge-connected components of a set of triangles (BFS over
+ * `triEdgeNeighbors`). Triangles touching only at a corner are separate
+ * components. `keys` are `triToString` keys; duplicates are ignored.
+ */
+export function countComponents(keys: string[]): number {
+  const set = new Set(keys);
+  const seen = new Set<string>();
+  let components = 0;
+  for (const start of set) {
+    if (seen.has(start)) continue;
+    components++;
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const cur = stack.pop() as string;
+      for (const n of triEdgeNeighbors(stringToTri(cur))) {
+        const nk = triToString(n);
+        if (set.has(nk) && !seen.has(nk)) {
+          seen.add(nk);
+          stack.push(nk);
+        }
+      }
+    }
+  }
+  return components;
+}
+
+/**
+ * Groups a set of triangles into edge-connected components. Like
+ * `countComponents`, but returns each component's member keys (largest useful
+ * for isolating islands in previews). `keys` are `triToString` keys.
+ */
+export function connectedComponents(keys: string[]): string[][] {
+  const set = new Set(keys);
+  const seen = new Set<string>();
+  const components: string[][] = [];
+  for (const start of set) {
+    if (seen.has(start)) continue;
+    const comp: string[] = [];
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const cur = stack.pop() as string;
+      comp.push(cur);
+      for (const n of triEdgeNeighbors(stringToTri(cur))) {
+        const nk = triToString(n);
+        if (set.has(nk) && !seen.has(nk)) {
+          seen.add(nk);
+          stack.push(nk);
+        }
+      }
+    }
+    components.push(comp);
+  }
+  return components;
+}
+
+/**
  * Returns the analytical coordinates for a triangle.
  * Useful for math-based symmetry rules.
  * Redefined so Up(0,0) = (0,0,0)

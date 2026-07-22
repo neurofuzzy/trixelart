@@ -94,16 +94,21 @@ The app already has real editing layers (`useHistory` layers, `LayerPanel`). Wir
 
 The connectivity check is cheap enough to run **while drawing**: quietly report "cleanly layerable in 4 sheets, 0 islands" or "light gray forms 3 islands in any order — bridge here." Fabrication constraint becomes real-time compositional feedback. This is the differentiator vs. a plain export button.
 
+**Live feedback ≠ a WebGL port.** The cost of the check is the *planner* — a pure graph computation (`K` suffix-unions × `countComponents` BFS × `K!` permutations), pure JS/CPU with nothing to do with rasterization. Porting `GridCanvas` to WebGL would not speed it up. The right architecture: keep `planCut` a **pure function** → run it in a **Web Worker**, **debounce** to stroke-end, and **memoize `V_c` per color** so a stroke only recomputes touched colors. Analysis then runs off the main thread and drawing stays at 60fps regardless of renderer. At the default `K=5` a full recompute is ~600 BFS passes (sub-ms–low-ms); it only strains near `K=8`, which the grayscale palette never reaches. *A WebGL port is a separate, profile-driven editor investment (e.g. the iPad drawing lag at large triangle counts) — justified on its own, never a prerequisite for this facet.*
+
 ---
 
 ## 4. Exploded 3D preview (reuse, not rebuild)
 
-A cut sheet **is already a body** in the 3D exporter's sense — reuse `MeshBuilder.prism` and `Model3DPreview` almost verbatim.
+A cut sheet **is already a body** in the 3D exporter's sense — reuse `MeshBuilder.prism` and `Model3DPreview` almost verbatim. (The cutting facet lives in its **own `CutExportDialog`**, not a mode toggle on `Export3DDialog` — but the *preview component* `Model3DPreview` is still shared/extended with an exploded-stack mode. Separate dialogs, one viewer.)
 
 - **Mesh per sheet:** extrude the triangle set `Sᵢ` to a thin *uniform* thickness `T_sheet`, placed at `Z = (i−1)·(T_sheet + gap)`. Color = the **cardstock** color of level `i` (physical, not the rendered art palette).
 - **Holes for free** — `Sᵢ` is a triangle set, so absent triangles are negative space in the mesh automatically.
 - **Explode slider** fans sheets apart to inspect each outline + holes; **assembled mode** (`gap = 0`) shows the top surface reproducing the design (it will, by construction — instant sanity check).
-- **Island highlighting** — any sheet with `components > 1` renders its loose pieces in a warning color/outline, so budget-0's "2 glued islands" is *those two pieces, glowing.*
+- **Island highlighting (float-aware)** — glow marks only pieces that *genuinely float*, not every fragmented sheet. Because sheets are nested supersets (`S₁ ⊇ … ⊇ S_K`), **every triangle of an upper sheet has solid material on every sheet below it** — upper-sheet fragments are *mounted*, not loose. The only sheet that can float is the **bottom** one, and only when the painted design is itself disconnected. So the preview glows only bottom-sheet components with nothing beneath them; a woven/lace design (fragmented top, interlocked bottom) correctly shows **zero glow**. (Earlier framing that glowed "every sheet with `components>1`" was wrong — it alarmed on pieces that actually glue straight onto the layer below.)
+- **Physical model (top → bottom):** (1) a black **outline-silhouette mat** on top — a screen-rectangle with the design's outline cut out as a window (the exterior region, flood-filled inward so interior negative space stays a window); (2) **color sheets** = nested positive regions `Sᵢ` = {painted t : level(color(t)) ≥ i}; (3) bottom = level-1 sheet `S₁` = the painted silhouette, which **keeps holes** wherever the interior is unpainted.
+- **Unpainted = through-holes.** Unpainted triangles are cut through the *entire* stack as see-through negative space. The **one exception is the outline silhouette** — the exterior, which the black mat fills as solid paper on top (and defines the outer edge). So a color sheet is exactly `Sᵢ` (no filling of unpainted), and only the mat lives outside the silhouette.
+- `components(Sᵢ)−1` counts **pieces per color sheet** (handling cost / planner objective) — reported neutrally. A fragmented upper color is held in the glued sandwich; no floating alarm.
 - **Ortho top-down of an exploded sheet == the SVG cut path** (outer boundary + hole boundaries). Preview and export look at the same geometry from two angles.
 
 ### Difference vs. 3D-print mode (one viewer, a mode toggle)
@@ -122,6 +127,18 @@ A cut sheet **is already a body** in the 3D exporter's sense — reuse `MeshBuil
 - Registration consistent across sheets (shared coordinate origin) so the stack aligns when assembled.
 - Cut path per sheet = outer boundary + hole boundaries of `Sᵢ`.
 - Accompanying assembly notes: stack order, cardstock colors, count of any glued islands.
+- **Cardstock color = art color (MVP).** Each sheet is labeled/previewed with its color's art-palette value; a physical art-color→cardstock-swatch mapping UI is a later refinement, not part of the first slice.
+
+### Boundary tracing (the one genuinely new algorithm)
+
+Everything else in this spec is set arithmetic on triangle sets (unions, `countComponents`, `K!` permutations) — instant, already-built primitives. Turning a triangle *set* `Sᵢ` into SVG cut paths is the real new work: trace the **boundary of a union of triangles** as ordered closed polygons (outer silhouette + each hole). No CSG/booleans — consistent with §2's "holes are free" principle:
+
+1. **Boundary edges.** For each triangle in `Sᵢ`, each of its 3 edges is a boundary edge iff the triangle across that edge is *absent* from `Sᵢ`. (Neighbor lookup = the same `triEdgeNeighbors` adjacency used by `countComponents`.)
+2. **Walk into loops.** Chain boundary half-edges head-to-tail (next-edge-around-shared-vertex) into closed loops. Each loop → one SVG subpath.
+3. **Classify (labeling only).** Signed area / point-in-polygon separates outer boundary from holes for weeding stats and labels. The *path itself* needs no classification — render with `fill-rule: evenodd` and nesting resolves automatically.
+4. **Merge collinear runs** so a straight edge of N triangles emits one line segment, not N.
+
+Self-contained (~100 lines), no dependency on the mesh pipeline. Ortho top-down of the exploded preview sheet == this SVG (§4) — same geometry, two projections.
 
 ---
 
@@ -129,7 +146,7 @@ A cut sheet **is already a body** in the 3D exporter's sense — reuse `MeshBuil
 
 | Need | Existing code |
 |---|---|
-| Connected components of a triangle set | `countComponents`, `triEdgeNeighbors` (`mesh-export.ts` / `grid-math.ts`) |
+| Connected components of a triangle set | `countComponents` (private in `mesh-export.ts:155` — **must be exported**; takes `string[]` keys), `triEdgeNeighbors` (`grid-math.ts`) |
 | Prism extrusion for preview meshes | `MeshBuilder.prism` (`mesh-export.ts`) |
 | Orbit/headlamp/gradient 3D preview | `Model3DPreview.tsx` (add exploded-stack mode) |
 | Per-color grouping, resolveColor | `mesh-export.ts` grouping, `resolveColor` (`constants.ts`) |
@@ -143,3 +160,25 @@ A cut sheet **is already a body** in the 3D exporter's sense — reuse `MeshBuil
 - Design-layer boundary: **soft hint**, overridable by a cleaner all-auto ordering.
 - Search: **exhaustive `K!` permutations** (colors are few); tiebreak by `Σ area·level`.
 - Preview: **reuse the 3D preview** as an exploded cut-stack viewer.
+- UI: **separate `CutExportDialog`** (not a mode toggle on the 3D dialog); shares `Model3DPreview`.
+- Cardstock color: **= art palette (MVP)**; a color→physical-swatch mapping UI is deferred.
+- Boundary→SVG: **boundary-edge walk, no CSG**; `fill-rule: evenodd` for holes.
+- Physical model (top→bottom): **black outline-silhouette mat · color sheets `Sᵢ` · bottom = `S₁`**. Unpainted = holes cut through the whole stack (negative space); the **only exception is the outline silhouette** (the mat, exterior region). Color sheet = positive region `Sᵢ`; the bottom keeps its interior holes.
+
+## 8. Implementation phases
+
+Ship **planner + exploded preview first**; SVG export lands second (cut paper only against previewed, verified geometry).
+
+**Phase 1 — planner core (pure, testable).** New `src/lib/cut-export.ts`.
+- Export `countComponents` from `mesh-export.ts` (or lift to `grid-math.ts`).
+- Flatten visible `useHistory` layers → `painted`, group by color → `V_c`.
+- `planCut(painted)`: enumerate `K!` level permutations, build each `Sᵢ = ⋃{V_c : level(c) ≥ i}`, score by `Σ(components(Sᵢ)−1)`, tiebreak `Σ area·level`. Return `{ order, sheets: [{ level, colorKey, triangles, componentCount }], islands }`.
+
+**Phase 2 — exploded preview.** Extend `Model3DPreview` with a stacked-slab mode.
+- Per sheet: `MeshBuilder.prism` over `Sᵢ` at uniform `T_sheet`, `Z = (i−1)·(T_sheet+gap)`, colored by art color.
+- Explode slider (`gap`); assembled (`gap=0`) sanity-check; **island highlighting** for any sheet with `components>1`.
+- New `CutExportDialog` hosting it + the plan summary / island report.
+
+**Phase 3 — SVG cut export.** Boundary tracing (§5) → per-sheet SVG files (bottom→top), shared origin, assembly notes.
+
+**Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding/feature-size guards · budget>0 auto-splits · bridge-hint surfacing.
