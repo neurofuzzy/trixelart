@@ -192,10 +192,6 @@ export default function TrixelGrid() {
     [],
   );
 
-  const onCommit = useCallback(() => {
-    pushHistory(buildSnapshot());
-  }, [pushHistory, buildSnapshot]);
-
   const snapshotWithPainted = useCallback(
     (p: Record<string, string>): ProjectSnapshot => {
       const l = layersRef.current.map((ly, i) =>
@@ -216,6 +212,20 @@ export default function TrixelGrid() {
     },
     [],
   );
+
+  const onCommit = useCallback(() => {
+    // Tools call setPainted(...) then onCommit() synchronously in the same
+    // event. At that point layersRef (and thus buildSnapshot) still holds the
+    // pre-edit painted because React hasn't re-rendered yet — reading it here
+    // would snapshot the state from BEFORE this edit and push an off-by-one
+    // history entry (making a single undo appear to revert two actions).
+    // Reading through a setPainted updater yields the fully-reduced latest
+    // painted for this batch, so the snapshot matches the edit just made.
+    setPainted((latest) => {
+      pushHistory(snapshotWithPainted(latest));
+      return latest;
+    });
+  }, [setPainted, pushHistory, snapshotWithPainted]);
 
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
@@ -395,6 +405,7 @@ export default function TrixelGrid() {
     setSelectedHexes,
     activeSelection,
     setActiveSelection,
+    selections,
     setSelections,
     onStampCapture,
     cloneSource,

@@ -94,6 +94,7 @@ export interface ToolContext {
   brushExpand: (tri: TriKey) => TriKey[];
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
+  selections: SelectionSnapshot[];
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
   onStampCapture?: (c: number, k: number) => void;
   cloneSource: { x: number; y: number; q: number; r: number; type: string } | null;

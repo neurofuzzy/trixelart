@@ -41,6 +41,7 @@ interface UseInteractionArgs {
   setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
+  selections: SelectionSnapshot[];
   setSelections: React.Dispatch<React.SetStateAction<SelectionSnapshot[]>>;
   onStampCapture?: (c: number, k: number) => void;
   cloneSource: { x: number; y: number; q: number; r: number; type: string } | null;
@@ -76,6 +77,7 @@ export function useInteraction(args: UseInteractionArgs) {
     setSelectedHexes,
     activeSelection,
     setActiveSelection,
+    selections,
     setSelections,
     onStampCapture,
     cloneSource,
@@ -291,6 +293,7 @@ export function useInteraction(args: UseInteractionArgs) {
     brushExpand,
     activeSelection,
     setActiveSelection,
+    selections,
     setSelections,
     onStampCapture,
     cloneSource,
