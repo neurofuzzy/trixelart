@@ -72,6 +72,9 @@ export function CutExportDialog({
     [open, painted],
   );
 
+  // Hexagon-neck radius in world units (SIDE = 50); 0 = sharp weld.
+  const neck = mergeIslands ? joinSize * 18 : 0;
+
   const stack = useMemo(
     () =>
       open && plan
@@ -80,9 +83,11 @@ export function CutExportDialog({
             sheetThicknessMm: DEFAULT_CUT_STACK_OPTIONS.sheetThicknessMm,
             explode,
             frame,
+            mergeIslands,
+            neck,
           })
         : null,
-    [open, plan, painted, widthMm, explode, frame],
+    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck],
   );
 
   const commitWidth = () => {
@@ -101,8 +106,7 @@ export function CutExportDialog({
       widthMm,
       frame,
       mergeIslands,
-      // Neck pull-back in world units (SIDE = 50); 0 = sharp weld.
-      neck: mergeIslands ? joinSize * 18 : 0,
+      neck,
     });
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml" });
@@ -250,8 +254,8 @@ export function CutExportDialog({
                     </label>
                   )}
                   <p className="text-[11px] text-muted-foreground/60">
-                    Welds corner-touching pieces with smooth necks so the sheet
-                    cuts as one.
+                    Bridges corner-touching pieces with a tiny hexagon at each
+                    join so the sheet cuts as one.
                   </p>
                 </div>
 

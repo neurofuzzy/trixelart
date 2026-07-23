@@ -17,6 +17,7 @@ import {
   type TrixelModel,
 } from "@/lib/mesh-export";
 import type { CutPlan } from "@/lib/cut-export";
+import { neckFillTriangles } from "@/lib/cut-svg";
 
 // ---------------------------------------------------------------------------
 // Cut plan → exploded 3D stack of cardstock sheets (see docs/fabrication-export
@@ -50,6 +51,10 @@ export interface CutStackOptions {
   explode: number;
   /** Top outline-silhouette mat: "mat" = on, "none" = off. */
   frame: CutFrame;
+  /** Weld corner-touching pieces with tiny-hexagon necks (matches SVG export). */
+  mergeIslands?: boolean;
+  /** Hexagon-neck radius for merges, in world units (0 = sharp weld). */
+  neck?: number;
 }
 
 export const DEFAULT_CUT_STACK_OPTIONS: CutStackOptions = {
@@ -160,7 +165,9 @@ function matTriangles(painted: Record<string, string>): string[] {
   return [...mat];
 }
 
-/** Builds one slab body from a set of triangle keys at [zLow, zHigh]. */
+/** Builds one slab body from a set of triangle keys at [zLow, zHigh]. When
+ *  `neck > 0`, tiny-hexagon neck fills are extruded too so corner-touching
+ *  pieces weld into one solid — matching the SVG cut export. */
 function sheetBody(
   keys: string[],
   toModel: (v: Pt) => Pt,
@@ -169,12 +176,18 @@ function sheetBody(
   name: string,
   colorKey: string,
   colorHex: string,
+  neck: number,
 ): ExportBody {
   const mesh = new MeshBuilder();
   const polys: Pt[][] = [];
   for (const key of keys) {
     const t = stringToTri(key);
     const poly = getTriVertices(t.q, t.r, t.type).map(toModel);
+    if (signedArea(poly) < 0) poly.reverse();
+    polys.push(poly);
+  }
+  for (const tri of neckFillTriangles(keys, neck)) {
+    const poly = tri.map(toModel);
     if (signedArea(poly) < 0) poly.reverse();
     polys.push(poly);
   }
@@ -274,6 +287,7 @@ export function buildCutStackModel(
   const gap = options.explode * MAX_EXPLODE_GAP_MM;
   const step = T + gap;
 
+  const neck = options.mergeIslands ? (options.neck ?? 0) : 0;
   const layers = cutLayers(plan, painted, options.frame);
   const bodies: ExportBody[] = [];
   const sheets: CutSheetGeometry[] = [];
@@ -289,6 +303,7 @@ export function buildCutStackModel(
         layer.label,
         layer.colorKey,
         layer.colorHex,
+        neck,
       ),
     );
     sheets.push({

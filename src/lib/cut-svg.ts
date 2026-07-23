@@ -13,8 +13,11 @@ import type { CutPlan } from "@/lib/cut-export";
 // Merge-islands (optional): same-layer triangles that touch at a single vertex
 // are connected by a zero-width point and fall apart when cut. When enabled, the
 // boundary walk uses the reflex-crossing rule to merge them into one loop, and
-// each pinch corner is replaced by a quadratic Bézier "neck" (control point at
-// the touch vertex → tangent to both edges) for a smooth metaball-style join.
+// each pinch corner is replaced by a "tiny hexagon" neck: the boundary is routed
+// through hexagon vertices at radius `neck` along the grid's 60° rays, spanning
+// every empty sector across the notch. This is exactly the union boundary of a
+// small regular hexagon dropped at the touch vertex — straight edges, no
+// smoothing — giving each join a clean, robust bridge.
 // ---------------------------------------------------------------------------
 
 /** Quantize a world point to a stable integer key (1e-3 world units). */
@@ -27,12 +30,6 @@ interface DEdge {
   b: Pt;
   ak: string;
   bk: string;
-}
-
-/** A boundary node: the segment INTO `p` is a line, or a quad Bézier if `q` set. */
-interface LoopNode {
-  p: Pt;
-  q?: Pt;
 }
 
 /** Three collinear points? (cross product ~ 0 within tolerance). */
@@ -125,56 +122,109 @@ function walkLoops(edges: DEdge[], merge: boolean): { p: Pt; vk: string }[][] {
   return loops;
 }
 
+/** Grid rays radiate at 60° steps; snap an angle to the nearest lattice ray. */
+const RAY_STEP = Math.PI / 3;
+function snapRay(a: number): number {
+  return Math.round(a / RAY_STEP) * RAY_STEP;
+}
+
 /**
- * Converts a raw loop to render nodes: drops collinear points, and (when merging)
- * replaces pinch corners with a quad-Bézier neck of pull-back `neck` (control at
- * the touch vertex → tangent to both edges).
+ * The tiny-hexagon neck ring at a pinch corner: the boundary is pulled back to
+ * radius `neck` on the incoming (`prev`) and outgoing (`next`) grid rays, then
+ * routed through a hexagon vertex on every empty ray across the notch. Returns
+ * the ordered ring points (≥2), or null when this corner takes no neck (a
+ * straight run, or `neck <= 0`).
  */
-function decorate(
+function pinchRing(prev: Pt, cur: Pt, next: Pt, neck: number): Pt[] | null {
+  if (neck <= 0 || collinear(prev, cur, next)) return null;
+  // Clamp so the neck never overshoots a short adjacent boundary edge.
+  const lp = Math.hypot(prev.x - cur.x, prev.y - cur.y);
+  const ln = Math.hypot(next.x - cur.x, next.y - cur.y);
+  const d = Math.min(neck, lp * 0.45, ln * 0.45);
+  const aIn = snapRay(Math.atan2(prev.y - cur.y, prev.x - cur.x));
+  const aOut = snapRay(Math.atan2(next.y - cur.y, next.x - cur.x));
+  // Sweep the short way from incoming to outgoing ray: the empty notch this
+  // pass turns through. Emit a hexagon vertex on each grid ray along it.
+  let diff = aOut - aIn;
+  while (diff <= -Math.PI) diff += 2 * Math.PI;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  const steps = Math.round(Math.abs(diff) / RAY_STEP);
+  const dir = diff >= 0 ? 1 : -1;
+  const ring: Pt[] = [];
+  for (let s = 0; s <= steps; s++) {
+    const a = aIn + dir * s * RAY_STEP;
+    ring.push({ x: cur.x + Math.cos(a) * d, y: cur.y + Math.sin(a) * d });
+  }
+  return ring;
+}
+
+/**
+ * Converts a raw loop to render points: drops collinear points, and (when
+ * merging with `neck > 0`) replaces each pinch corner with a tiny-hexagon neck —
+ * i.e. the union boundary of a small regular hexagon at the touch vertex.
+ */
+function hexNeck(
   loop: { p: Pt; vk: string }[],
   deg: Map<string, number>,
   neck: number,
-): LoopNode[] {
+): Pt[] {
   const n = loop.length;
-  const out: LoopNode[] = [];
+  const out: Pt[] = [];
   for (let i = 0; i < n; i++) {
     const prev = loop[(i - 1 + n) % n].p;
     const cur = loop[i];
     const next = loop[(i + 1) % n].p;
     const col = collinear(prev, cur.p, next);
     const pinch = (deg.get(cur.vk) ?? 0) > 1;
-    if (pinch && !col && neck > 0) {
-      const din = { x: prev.x - cur.p.x, y: prev.y - cur.p.y };
-      const dl = Math.hypot(din.x, din.y) || 1;
-      const li = Math.min(neck, dl * 0.45);
-      const don = { x: next.x - cur.p.x, y: next.y - cur.p.y };
-      const dr = Math.hypot(don.x, don.y) || 1;
-      const lo = Math.min(neck, dr * 0.45);
-      out.push({ p: { x: cur.p.x + (din.x / dl) * li, y: cur.p.y + (din.y / dl) * li } });
-      out.push({
-        p: { x: cur.p.x + (don.x / dr) * lo, y: cur.p.y + (don.y / dr) * lo },
-        q: { x: cur.p.x, y: cur.p.y },
-      });
-    } else if (!col) {
-      out.push({ p: cur.p });
-    }
+    const ring = pinch && !col ? pinchRing(prev, cur.p, next, neck) : null;
+    if (ring) for (const p of ring) out.push(p);
+    else if (!col) out.push(cur.p);
   }
-  return out.length >= 3 ? out : loop.map((n) => ({ p: n.p }));
+  return out.length >= 3 ? out : loop.map((nd) => nd.p);
 }
 
 /**
  * Traces the union boundary of a triangle set as closed loops (world coords).
- * With `merge`, corner-touching pieces are welded with smooth Bézier necks.
+ * With `merge`, corner-touching pieces are welded with tiny-hexagon necks.
  */
 export function traceUnionLoops(
   keys: string[],
   merge = false,
   neck = 0,
-): LoopNode[][] {
+): Pt[][] {
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
   const raw = walkLoops(edges, merge);
-  return raw.map((loop) => decorate(loop, deg, merge ? neck : 0));
+  return raw.map((loop) => hexNeck(loop, deg, merge ? neck : 0));
+}
+
+/**
+ * The extra "neck fill" triangles (world coords) that bridge corner-touching
+ * pieces of a triangle set — a fan from each touch vertex out across its
+ * tiny-hexagon ring. Extruded alongside the tiles, these weld the 3D stack the
+ * same way the necks weld the flat SVG cut. Empty when `neck <= 0`.
+ */
+export function neckFillTriangles(keys: string[], neck: number): Pt[][] {
+  if (neck <= 0) return [];
+  const edges = boundaryEdges(keys);
+  const deg = outDegree(edges);
+  const raw = walkLoops(edges, true);
+  const tris: Pt[][] = [];
+  for (const loop of raw) {
+    const n = loop.length;
+    for (let i = 0; i < n; i++) {
+      const cur = loop[i];
+      if ((deg.get(cur.vk) ?? 0) <= 1) continue;
+      const prev = loop[(i - 1 + n) % n].p;
+      const next = loop[(i + 1) % n].p;
+      const ring = pinchRing(prev, cur.p, next, neck);
+      if (!ring || ring.length < 2) continue;
+      for (let s = 0; s + 1 < ring.length; s++) {
+        tris.push([cur.p, ring[s], ring[s + 1]]);
+      }
+    }
+  }
+  return tris;
 }
 
 export interface CutSVGOptions {
@@ -182,9 +232,9 @@ export interface CutSVGOptions {
   widthMm: number;
   /** Top outline-silhouette mat on/off. */
   frame: CutFrame;
-  /** Weld corner-touching islands into one piece with smooth necks. */
+  /** Weld corner-touching islands into one piece with tiny-hexagon necks. */
   mergeIslands?: boolean;
-  /** Neck pull-back for merges, in world units (0 = sharp weld). */
+  /** Hexagon-neck radius for merges, in world units (0 = sharp weld). */
   neck?: number;
 }
 
@@ -226,11 +276,11 @@ export function buildCutSVG(
     maxY = -Infinity;
   for (const loops of traced) {
     for (const loop of loops) {
-      for (const nd of loop) {
-        if (nd.p.x < minX) minX = nd.p.x;
-        if (nd.p.x > maxX) maxX = nd.p.x;
-        if (nd.p.y < minY) minY = nd.p.y;
-        if (nd.p.y > maxY) maxY = nd.p.y;
+      for (const p of loop) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
       }
     }
   }
@@ -255,13 +305,7 @@ export function buildCutSVG(
     const d = traced[i]
       .map((loop) => {
         const seg = loop
-          .map((nd, j) => {
-            const x = tx(nd.p.x, ox);
-            const y = ty(nd.p.y, oy);
-            if (j === 0) return `M${x} ${y}`;
-            if (nd.q) return `Q${tx(nd.q.x, ox)} ${ty(nd.q.y, oy)} ${x} ${y}`;
-            return `L${x} ${y}`;
-          })
+          .map((p, j) => `${j === 0 ? "M" : "L"}${tx(p.x, ox)} ${ty(p.y, oy)}`)
           .join(" ");
         return `${seg} Z`;
       })
