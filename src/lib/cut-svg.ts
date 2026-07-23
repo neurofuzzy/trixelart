@@ -62,10 +62,52 @@ function outDegree(edges: DEdge[]): Map<string, number> {
   return deg;
 }
 
+const ekey = (e: DEdge) => `${e.ak}->${e.bk}`;
+const ang = (dx: number, dy: number) => Math.atan2(dy, dx);
+
+/**
+ * Precomputes each edge's merge successor: at a pinch (a vertex with several
+ * outgoing boundary edges) the boundary takes the widest clockwise (reflex) turn
+ * so corner-touching pieces weld into one loop. Crucially this is chosen over
+ * ALL out-edges, not just unused ones — so the pairing is a permutation of the
+ * boundary edges independent of traversal order. A greedy used-set walk would
+ * otherwise, at one of several symmetric pinches, be forced onto a straight
+ * pass-through and drop that pinch's neck (the "star tip that won't merge" bug).
+ */
+function reflexSuccessors(
+  edges: DEdge[],
+  byStart: Map<string, DEdge[]>,
+): Map<string, DEdge> {
+  const succ = new Map<string, DEdge>();
+  for (const e of edges) {
+    const outs = byStart.get(e.bk) ?? [];
+    if (outs.length <= 1) {
+      if (outs.length === 1) succ.set(ekey(e), outs[0]);
+      continue;
+    }
+    const back = ang(e.a.x - e.b.x, e.a.y - e.b.y);
+    let best = outs[0];
+    let bestCW = -Infinity;
+    for (const o of outs) {
+      const a2 = ang(o.b.x - o.a.x, o.b.y - o.a.y);
+      let cw = back - a2;
+      while (cw <= 1e-9) cw += 2 * Math.PI;
+      while (cw > 2 * Math.PI) cw -= 2 * Math.PI;
+      if (cw > bestCW) {
+        bestCW = cw;
+        best = o;
+      }
+    }
+    succ.set(ekey(e), best);
+  }
+  return succ;
+}
+
 /**
  * Chains boundary edges into closed loops. With `merge`, pinch vertices take the
- * widest (reflex) turn so corner-touching pieces weld into one loop; otherwise
- * the first available edge is taken (pieces stay separate).
+ * widest (reflex) turn (via a precomputed order-independent pairing) so
+ * corner-touching pieces weld into one loop; otherwise the first available edge
+ * is taken (pieces stay separate).
  */
 function walkLoops(edges: DEdge[], merge: boolean): { p: Pt; vk: string }[][] {
   const byStart = new Map<string, DEdge[]>();
@@ -74,8 +116,7 @@ function walkLoops(edges: DEdge[], merge: boolean): { p: Pt; vk: string }[][] {
     if (l) l.push(e);
     else byStart.set(e.ak, [e]);
   }
-  const ekey = (e: DEdge) => `${e.ak}->${e.bk}`;
-  const ang = (dx: number, dy: number) => Math.atan2(dy, dx);
+  const succ = merge ? reflexSuccessors(edges, byStart) : null;
   const used = new Set<string>();
   const loops: { p: Pt; vk: string }[][] = [];
 
@@ -86,36 +127,15 @@ function walkLoops(edges: DEdge[], merge: boolean): { p: Pt; vk: string }[][] {
     while (e && !used.has(ekey(e))) {
       used.add(ekey(e));
       loop.push({ p: e.a, vk: e.ak });
+      if (succ) {
+        e = succ.get(ekey(e)) ?? null;
+        continue;
+      }
+      // Non-merge: first still-unused outgoing edge (pieces stay separate).
       const outs: DEdge[] = (byStart.get(e.bk) ?? []).filter(
         (o) => !used.has(ekey(o)),
       );
-      if (outs.length === 0) {
-        e = null;
-        break;
-      }
-      if (outs.length === 1) {
-        e = outs[0];
-        continue;
-      }
-      // Pinch: merge → widest clockwise (reflex) turn; else first available.
-      if (!merge) {
-        e = outs[0];
-        continue;
-      }
-      const back = ang(e.a.x - e.b.x, e.a.y - e.b.y);
-      let best = outs[0];
-      let bestCW = -Infinity;
-      for (const o of outs) {
-        const a2 = ang(o.b.x - o.a.x, o.b.y - o.a.y);
-        let cw = back - a2;
-        while (cw <= 1e-9) cw += 2 * Math.PI;
-        while (cw > 2 * Math.PI) cw -= 2 * Math.PI;
-        if (cw > bestCW) {
-          bestCW = cw;
-          best = o;
-        }
-      }
-      e = best;
+      e = outs[0] ?? null;
     }
     if (loop.length >= 3) loops.push(loop);
   }
