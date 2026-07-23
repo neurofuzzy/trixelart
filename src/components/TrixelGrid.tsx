@@ -41,6 +41,9 @@ import {
 } from "@/lib/hex-flower";
 import type { Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
+import { Export3DDialog } from "@/components/Export3DDialog";
+import { CutExportDialog } from "@/components/CutExportDialog";
+import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
@@ -48,6 +51,8 @@ import { HelpDialog } from "@/components/onboarding/HelpDialog";
 import { InterfaceTour } from "@/components/onboarding/InterfaceTour";
 
 const STORAGE_KEY = "trixel-save";
+
+const DEFAULT_SVG_EXPORT: SVGExportOptions = { stroke: false, merge: false };
 
 // Grid-setting defaults applied on first launch (no saved settings) and when
 // starting a new project via handleClear.
@@ -88,6 +93,15 @@ export default function TrixelGrid() {
   const [hueOffset, setHueOffset] = useState(0);
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [export3DOpen, setExport3DOpen] = useState(false);
+  const [exportCutOpen, setExportCutOpen] = useState(false);
+  const [svgExport, setSvgExport] =
+    useState<SVGExportOptions>(DEFAULT_SVG_EXPORT);
+  const updateSvgExport = useCallback(
+    (patch: Partial<SVGExportOptions>) =>
+      setSvgExport((s) => ({ ...s, ...patch })),
+    [],
+  );
 
   const computedPalettes = useMemo(
     () => computePaletteColors(PALETTE_DEFS, hueOffset, satOffset),
@@ -215,19 +229,30 @@ export default function TrixelGrid() {
     [],
   );
 
+  // Tools call setPainted(...) then onCommit() synchronously in the same event.
+  // At that point layersRef still holds the pre-edit painted because React
+  // hasn't re-rendered yet, so we can't snapshot here directly. We also must
+  // NOT push from inside a setPainted updater: React StrictMode (on by default
+  // in dev) double-invokes updaters to surface impurity, which would run the
+  // pushHistory side effect twice and desync historyIdx (undo/redo then needs
+  // an extra press). Instead bump a counter and push from an effect, which runs
+  // once after the render that applied the edit — layersRef is current by then,
+  // so buildSnapshot captures the fully-reduced latest painted for this batch.
+  const [commitVersion, setCommitVersion] = useState(0);
+
   const onCommit = useCallback(() => {
-    // Tools call setPainted(...) then onCommit() synchronously in the same
-    // event. At that point layersRef (and thus buildSnapshot) still holds the
-    // pre-edit painted because React hasn't re-rendered yet — reading it here
-    // would snapshot the state from BEFORE this edit and push an off-by-one
-    // history entry (making a single undo appear to revert two actions).
-    // Reading through a setPainted updater yields the fully-reduced latest
-    // painted for this batch, so the snapshot matches the edit just made.
-    setPainted((latest) => {
-      pushHistory(snapshotWithPainted(latest));
-      return latest;
-    });
-  }, [setPainted, pushHistory, snapshotWithPainted]);
+    setCommitVersion((v) => v + 1);
+  }, []);
+
+  useEffect(() => {
+    if (commitVersion === 0) return;
+    pushHistory(buildSnapshot());
+    // pushHistory intentionally omitted from deps: its identity changes on every
+    // history mutation, and re-running this effect without a new commit would
+    // push a spurious duplicate. The closure already captures the latest
+    // pushHistory from the render where commitVersion changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commitVersion]);
 
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
@@ -295,6 +320,11 @@ export default function TrixelGrid() {
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
+        if (data.svgExport && typeof data.svgExport === "object")
+          setSvgExport({
+            stroke: !!data.svgExport.stroke,
+            merge: !!data.svgExport.merge,
+          });
       }
     } catch {
       /* ignore parse errors */
@@ -314,6 +344,7 @@ export default function TrixelGrid() {
         projectName,
         hueOffset,
         saturationOffset: satOffset,
+        svgExport,
       }),
     );
   }, [
@@ -326,6 +357,7 @@ export default function TrixelGrid() {
     projectName,
     hueOffset,
     satOffset,
+    svgExport,
   ]);
 
   useEffect(() => {
@@ -511,7 +543,7 @@ export default function TrixelGrid() {
   const handleExport = useCallback(() => {
     const project = buildSnapshot();
     const dataStr = JSON.stringify(
-      { ...project, name: projectName, version: 1 },
+      { ...project, name: projectName, svgExport, version: 1 },
       null,
       2,
     );
@@ -524,10 +556,18 @@ export default function TrixelGrid() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [buildSnapshot, projectName]);
+  }, [buildSnapshot, projectName, svgExport]);
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
+  }, []);
+
+  const handleExport3D = useCallback(() => {
+    setExport3DOpen(true);
+  }, []);
+
+  const handleExportCut = useCallback(() => {
+    setExportCutOpen(true);
   }, []);
 
   const handleImportClick = () => {
@@ -548,6 +588,12 @@ export default function TrixelGrid() {
 
           if (typeof data.name === "string" && data.name.trim())
             setProjectName(data.name);
+
+          if (data.svgExport && typeof data.svgExport === "object")
+            setSvgExport({
+              stroke: !!data.svgExport.stroke,
+              merge: !!data.svgExport.merge,
+            });
 
           if (data.version === 1 || data.painted) {
             let snapLayers: Layer[];
@@ -646,6 +692,7 @@ export default function TrixelGrid() {
       setSelections,
       setActiveSelection,
       setProjectName,
+      setSvgExport,
     ],
   );
 
@@ -888,6 +935,8 @@ export default function TrixelGrid() {
         onToolChange={setTool}
         onExport={handleExport}
         onExportSVG={handleExportSVG}
+        onExport3D={handleExport3D}
+        onExportCut={handleExportCut}
         onImportClick={handleImportClick}
         onClear={handleClear}
         onCenterView={onCenterView}
@@ -1032,6 +1081,22 @@ export default function TrixelGrid() {
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
+        painted={mergedPainted}
+        projectName={projectName}
+        settings={svgExport}
+        onSettingsChange={updateSvgExport}
+      />
+
+      <Export3DDialog
+        open={export3DOpen}
+        onOpenChange={setExport3DOpen}
+        painted={mergedPainted}
+        projectName={projectName}
+      />
+
+      <CutExportDialog
+        open={exportCutOpen}
+        onOpenChange={setExportCutOpen}
         painted={mergedPainted}
         projectName={projectName}
       />

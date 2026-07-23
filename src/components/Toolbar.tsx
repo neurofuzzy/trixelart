@@ -18,6 +18,8 @@ import {
   Menu,
   FilePlus,
   ImageDown,
+  Box,
+  Scissors,
   Aperture,
   Paintbrush,
   PaintBucket,
@@ -90,6 +92,8 @@ export function Toolbar({
   onToolChange,
   onExport,
   onExportSVG,
+  onExport3D,
+  onExportCut,
   onImportClick,
   onClear,
   onCenterView,
@@ -113,6 +117,8 @@ export function Toolbar({
   onToolChange: (tool: Tool) => void;
   onExport: () => void;
   onExportSVG: () => void;
+  onExport3D: () => void;
+  onExportCut: () => void;
   onImportClick: () => void;
   onClear: () => void;
   onCenterView: () => void;
@@ -188,6 +194,24 @@ export function Toolbar({
             >
               <ImageDown className="w-4 h-4" />
               <span>Export Project</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExport3D();
+              }}
+            >
+              <Box className="w-4 h-4" />
+              <span>Export for 3D Print</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExportCut();
+              }}
+            >
+              <Scissors className="w-4 h-4" />
+              <span>Export for Cutting</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
