@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-07-21 03:22:50
-# Files: 43
-# Lines of code: ~6571
+# Last updated: 2026-07-23 06:03:33
+# Files: 57
+# Lines of code: ~9735
 ```
 - **/app**
   - **/lib**
@@ -17,6 +17,22 @@
     - Function: `Home`
 - **/assets**
 - **/components**
+  - **/onboarding**
+    - [HelpDialog.tsx](../src/components/onboarding/HelpDialog.tsx)
+      - Function: `HelpDialog` - Keyboard-shortcuts reference dialog, opened fro...
+    - [InterfaceTour.tsx](../src/components/onboarding/InterfaceTour.tsx)
+      - Function: `InterfaceTour` - The spotlight interface tour: dims the whole ap...
+    - [shortcuts.ts](../src/components/onboarding/shortcuts.ts) - Human-readable keyboard-shortcut reference for ...
+      - Type: `Shortcut` - Human-readable keyboard-shortcut reference for ...
+      - Type: `ShortcutGroup`
+      - Function: `modKey` - The Cmd/Ctrl modifier, shown per-platform in th...
+      - Function: `shortcutGroups`
+    - [SplashDialog.tsx](../src/components/onboarding/SplashDialog.tsx)
+      - Function: `SplashDialog` - First-run welcome screen: the Trixel mark, a sh...
+    - [tour-steps.ts](../src/components/onboarding/tour-steps.ts) - Preferred side to float a tour callout relative...
+      - Type: `TourPlacement` - Preferred side to float a tour callout relative...
+      - Type: `TourStep`
+      - Variable: `TOUR_STEPS` - The ordered spotlight interface tour. Each step...
   - **/ui**
     - [alert-dialog.tsx](../src/components/ui/alert-dialog.tsx)
     - [button.tsx](../src/components/ui/button.tsx)
@@ -26,6 +42,10 @@
     - Function: `AbcDisplay`
   - [ColorPalette.tsx](../src/components/ColorPalette.tsx)
     - Function: `ColorPalette`
+  - [CutExportDialog.tsx](../src/components/CutExportDialog.tsx)
+    - Function: `CutExportDialog`
+  - [Export3DDialog.tsx](../src/components/Export3DDialog.tsx)
+    - Function: `Export3DDialog`
   - [ExportDialog.tsx](../src/components/ExportDialog.tsx)
     - Function: `ExportDialog`
   - [Footer.tsx](../src/components/Footer.tsx)
@@ -39,8 +59,12 @@
     - Function: `GridCanvas`
   - [LayerPanel.tsx](../src/components/LayerPanel.tsx)
     - Function: `LayerPanel`
+  - [Model3DPreview.tsx](../src/components/Model3DPreview.tsx)
+    - Function: `Model3DPreview` - Orbitable 3D preview of the export model, lit b...
   - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
     - Function: `PalettePicker`
+  - [ProjectName.tsx](../src/components/ProjectName.tsx)
+    - Function: `ProjectName` - Inline-editable project title. Click to rename;...
   - [SelectionPalette.tsx](../src/components/SelectionPalette.tsx)
     - Function: `SelectionPalette`
   - [StampPalette.tsx](../src/components/StampPalette.tsx)
@@ -60,6 +84,8 @@
     - Function: `useInteraction`
   - [use-keyboard-shortcuts.ts](../src/hooks/use-keyboard-shortcuts.ts)
     - Function: `useKeyboardShortcuts`
+  - [use-onboarding.ts](../src/hooks/use-onboarding.ts)
+    - Function: `useOnboarding` - Onboarding state: the first-run splash, the key...
 - **/lib**
   - **/tools**
     - [clone-tool.ts](../src/lib/tools/clone-tool.ts)
@@ -120,6 +146,27 @@
     - Function: `dodgeColor`
     - Function: `burnColor`
     - Function: `shiftGridPalettes`
+  - [cut-export.ts](../src/lib/cut-export.ts)
+    - Variable: `MAX_EXHAUSTIVE_COLORS` - Above this color count, K! is too large to brut...
+    - Interface: `CutSheet` - One physical cardstock sheet in the stack.
+    - Interface: `CutPlan`
+    - Function: `flattenPainted` - Flattens editing layers into a single painted g...
+    - Function: `planCut` - Computes the fewest-islands cut plan for a pain...
+  - [cut-mesh.ts](../src/lib/cut-mesh.ts)
+    - Type: `CutFrame` - // --------------------------------------------...
+    - Interface: `CutStackOptions`
+    - Variable: `DEFAULT_CUT_STACK_OPTIONS`
+    - Variable: `CUT_STACK_LIMITS`
+    - Interface: `CutSheetGeometry`
+    - Interface: `CutLayer` - One physical cut sheet: the exact triangle set ...
+    - Function: `cutLayers` - The per-layer cut geometry, bottom → top: each ...
+    - Interface: `CutStackModel`
+    - Function: `buildCutStackModel` - Builds the cut stack from a plan: nested color ...
+  - [cut-svg.ts](../src/lib/cut-svg.ts)
+    - Function: `traceUnionLoops` - Traces the union boundary of a triangle set as ...
+    - Function: `neckFillTriangles` - The extra "neck fill" triangles (world coords) ...
+    - Interface: `CutSVGOptions`
+    - Function: `buildCutSVG` - Builds one layered, auto-tiled SVG for the cut ...
   - [grid-math.ts](../src/lib/grid-math.ts) - Triangular Grid Mathematics
     - Variable: `SIDE` - Triangular Grid Mathematics Uses a coordinate s...
     - Variable: `H`
@@ -129,6 +176,8 @@
     - Function: `stringToTri` - Parses a TriKey string back into an object
     - Function: `worldToTri` - Converts world coordinates (relative to origin)...
     - Function: `triEdgeNeighbors` - Returns the three edge-adjacent triangles (tria...
+    - Function: `countComponents` - Counts edge-connected components of a set of tr...
+    - Function: `connectedComponents` - Groups a set of triangles into edge-connected c...
     - Function: `getTriABC` - Returns the analytical coordinates for a triang...
     - Function: `getTrianglesOnLine` - Returns all triangles intersected by a line seg...
     - Function: `getTriVertices` - Returns the three vertex coordinates for a tria...
@@ -155,6 +204,25 @@
     - Function: `flipHexHorizontal`
     - Function: `remapHex`
     - Function: `shiftHexPalettes`
+  - [mesh-export.ts](../src/lib/mesh-export.ts)
+    - Type: `BaseMode` - // --------------------------------------------...
+    - Interface: `MeshExportOptions`
+    - Variable: `DEFAULT_MESH_OPTIONS`
+    - Variable: `MESH_LIMITS`
+    - Function: `clampMeshOption`
+    - Variable: `GRAIN_ANGLES` - Grain angles cycled across color bodies, in deg...
+    - Variable: `GRAIN_ANGLE_CHOICES` - Selectable grain angles offered for per-color o...
+    - Interface: `ExportBody`
+    - Interface: `TrixelModel`
+    - Type: `Pt`
+    - Interface: `ModelTransform` - World→model mapping shared by every builder: ce...
+    - Function: `computeModelTransform` - Computes the shared model transform from a pain...
+    - Class: `MeshBuilder` (Methods: prism) - Collects geometry for one body as a set of inde...
+    - Function: `addSlab` - Extrudes each CCW polygon into a closed triangu...
+    - Function: `signedArea`
+    - Function: `buildTrixelModel` - Build a 3D model from the painted grid. Returns...
+    - Function: `to3MF` - Serialize a model to 3MF bytes (a zipped OPC pa...
+    - Function: `buildPrinterNotes` - Copy-paste order notes for the print service / ...
   - [svg-export.ts](../src/lib/svg-export.ts)
     - Interface: `TriangleData`
     - Interface: `MergedPathData`
@@ -167,3 +235,5 @@
     - Function: `normTouchPair`
   - [utils.ts](../src/lib/utils.ts)
     - Function: `cn`
+    - Function: `normalizeProjectFilename` - Turn a human-entered project name into a safe f...
+    - Variable: `DEFAULT_PROJECT_NAME`
