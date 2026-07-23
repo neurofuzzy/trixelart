@@ -229,19 +229,30 @@ export default function TrixelGrid() {
     [],
   );
 
+  // Tools call setPainted(...) then onCommit() synchronously in the same event.
+  // At that point layersRef still holds the pre-edit painted because React
+  // hasn't re-rendered yet, so we can't snapshot here directly. We also must
+  // NOT push from inside a setPainted updater: React StrictMode (on by default
+  // in dev) double-invokes updaters to surface impurity, which would run the
+  // pushHistory side effect twice and desync historyIdx (undo/redo then needs
+  // an extra press). Instead bump a counter and push from an effect, which runs
+  // once after the render that applied the edit — layersRef is current by then,
+  // so buildSnapshot captures the fully-reduced latest painted for this batch.
+  const [commitVersion, setCommitVersion] = useState(0);
+
   const onCommit = useCallback(() => {
-    // Tools call setPainted(...) then onCommit() synchronously in the same
-    // event. At that point layersRef (and thus buildSnapshot) still holds the
-    // pre-edit painted because React hasn't re-rendered yet — reading it here
-    // would snapshot the state from BEFORE this edit and push an off-by-one
-    // history entry (making a single undo appear to revert two actions).
-    // Reading through a setPainted updater yields the fully-reduced latest
-    // painted for this batch, so the snapshot matches the edit just made.
-    setPainted((latest) => {
-      pushHistory(snapshotWithPainted(latest));
-      return latest;
-    });
-  }, [setPainted, pushHistory, snapshotWithPainted]);
+    setCommitVersion((v) => v + 1);
+  }, []);
+
+  useEffect(() => {
+    if (commitVersion === 0) return;
+    pushHistory(buildSnapshot());
+    // pushHistory intentionally omitted from deps: its identity changes on every
+    // history mutation, and re-running this effect without a new commit would
+    // push a spurious duplicate. The closure already captures the latest
+    // pushHistory from the render where commitVersion changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commitVersion]);
 
   useEffect(() => {
     registerRestore((snap: ProjectSnapshot) => {
