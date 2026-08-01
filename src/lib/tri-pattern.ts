@@ -99,11 +99,15 @@ export function triPatternValue(t: TriKey, p: TriPattern): 0 | 1 {
       return mod(r, 3) === 0 ? 1 : 0;
 
     case "rings": {
-      // Hexagonal rings. The rhombic basis is exactly the axial hex system, so
-      // the ring index is the standard axial distance.
-      const dq = q - 8 * p.scale;
-      const dr = r - 8 * p.scale;
-      const ring = (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) * 0.5;
+      // Hexagonal rings about the world origin. The rhombic basis is exactly
+      // the axial hex system, so the ring index is the standard axial distance.
+      //
+      // Deliberately drops the shader's `8 * scale` centre offset. That existed
+      // because material-forge evaluates over a finite 0..gridSize tile, where
+      // 8 sits inside it. Here the canvas is infinite and centred on the origin,
+      // so the same offset pins the centre ~8 edge-units away at every scale and
+      // leaves only far-field sectors in view.
+      const ring = (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) * 0.5;
       return mod(Math.floor(ring), 2) === 0 ? 1 : 0;
     }
   }

@@ -23,7 +23,17 @@ import {
 
 // ~28 trixels across. Enough for the moire to resolve.
 const PREVIEW_SPAN = 14 * SIDE;
-const PREVIEW_TRIS = trixelsInBox(0, 0, PREVIEW_SPAN, PREVIEW_SPAN);
+const PREVIEW_HALF = PREVIEW_SPAN / 2;
+
+// Centred on the lattice origin rather than starting there. Patterns with a
+// distinguished centre — `rings` anchors near the origin — otherwise put it in
+// the corner, so the preview showed only far-field structure.
+const PREVIEW_TRIS = trixelsInBox(
+  -PREVIEW_HALF,
+  -PREVIEW_HALF,
+  PREVIEW_HALF,
+  PREVIEW_HALF,
+);
 
 const TYPE_LABEL: Record<TriPatternType, string> = {
   checker: "Checker",
@@ -74,6 +84,8 @@ export function PatternPanel({
     const s = css / PREVIEW_SPAN;
     ctx.save();
     ctx.scale(s, s);
+    // World (0,0) lands at the centre of the canvas.
+    ctx.translate(PREVIEW_HALF, PREVIEW_HALF);
 
     // Batch by colour: two fills instead of one path per trixel.
     for (const value of [0, 1] as const) {
