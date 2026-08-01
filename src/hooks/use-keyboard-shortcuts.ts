@@ -96,6 +96,8 @@ export function useKeyboardShortcuts(
         setTool("erase");
       } else if (e.key.toLowerCase() === "f") {
         setTool("fill");
+      } else if (e.key.toLowerCase() === "n") {
+        setTool("pattern");
       } else if (e.key.toLowerCase() === "h") {
         setTool("pan");
       } else if (e.key.toLowerCase() === "s") {

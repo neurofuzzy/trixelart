@@ -6,6 +6,7 @@ import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWe
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 import type { Layer } from "@/hooks/use-history";
+import type { Tool } from "@/lib/tools";
 
 export function GridCanvas({
   size,
@@ -39,7 +40,7 @@ export function GridCanvas({
   gridDivisions: number;
   hexMode: HexMode;
   selectedHexes: { c: number; k: number }[];
-  tool: "paint" | "erase" | "fill" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
+  tool: Tool;
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
   cloneFlash?: { c: number; k: number; q: number; r: number; type: string; opacity: number; seq: number } | null;

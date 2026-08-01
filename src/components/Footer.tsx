@@ -11,6 +11,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import type { Tool } from "@/lib/tools";
 
 export type HexMode = "world" | "honeycomb";
 export type Symmetry = "off" | "sym60" | "sym120";
@@ -56,7 +57,7 @@ export function Footer({
   handleRedo: () => void;
   historyIdx: number;
   historyLength: number;
-  tool?: "paint" | "erase" | "fill" | "pan" | "select" | "stamp" | "clone" | "dodge" | "burn" | "eyedropper";
+  tool?: Tool;
   captureMode?: boolean;
   cloneSourceSet?: boolean;
   gridOrientation?: GridOrientation;
