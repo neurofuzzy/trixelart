@@ -1,20 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SIDE, getTriVertices } from "@/lib/grid-math";
 import { encodeColor, resolveColor } from "@/lib/constants";
 import {
   PATTERN_BLEND_MODES,
   makePatternLayer,
   makePatternPainter,
   triPatternValue,
-  trixelsInBox,
   type PatternLayer,
   type PatternBlendMode,
   type QuantizeTarget,
 } from "@/lib/tri-pattern";
+import {
+  PREVIEW_SPAN,
+  PREVIEW_TRIS,
+  THUMB_SPAN,
+  THUMB_TRIS,
+  paintPatternCanvas,
+} from "@/lib/pattern-render";
 
 /**
  * Designer for the pattern brush stack.
@@ -24,23 +29,6 @@ import {
  * between stacked layers — and a small swatch shows neither.
  */
 
-// ~28 trixels across. Enough for the moire to resolve.
-const PREVIEW_SPAN = 14 * SIDE;
-const PREVIEW_HALF = PREVIEW_SPAN / 2;
-
-// Centred on the lattice origin rather than starting there, so the preview
-// shows the field around the point everything is measured from.
-const PREVIEW_TRIS = trixelsInBox(
-  -PREVIEW_HALF,
-  -PREVIEW_HALF,
-  PREVIEW_HALF,
-  PREVIEW_HALF,
-);
-
-// A single layer's thumbnail needs far fewer cells than the stack preview.
-const THUMB_SPAN = 5 * SIDE;
-const THUMB_HALF = THUMB_SPAN / 2;
-const THUMB_TRIS = trixelsInBox(-THUMB_HALF, -THUMB_HALF, THUMB_HALF, THUMB_HALF);
 
 const MODE_LABEL: Record<PatternBlendMode, string> = {
   normal: "Norm",
@@ -49,48 +37,6 @@ const MODE_LABEL: Record<PatternBlendMode, string> = {
   difference: "Diff",
 };
 
-/** Fills `tris` on a square canvas, world origin at centre. */
-function paintCanvas(
-  canvas: HTMLCanvasElement,
-  span: number,
-  tris: typeof PREVIEW_TRIS,
-  colorOf: (t: (typeof PREVIEW_TRIS)[number]) => string,
-) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const dpr = window.devicePixelRatio || 1;
-  const css = canvas.clientWidth || 200;
-  canvas.width = css * dpr;
-  canvas.height = css * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, css, css);
-
-  ctx.save();
-  ctx.scale(css / span, css / span);
-  ctx.translate(span / 2, span / 2);
-
-  // Batch by colour so each distinct colour costs one fill, not one per trixel.
-  const byColor = new Map<string, typeof tris>();
-  for (const t of tris) {
-    const c = colorOf(t);
-    const list = byColor.get(c);
-    if (list) list.push(t);
-    else byColor.set(c, [t]);
-  }
-  for (const [color, list] of byColor) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    for (const t of list) {
-      const [a, b, c] = getTriVertices(t.q, t.r, t.type);
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(c.x, c.y);
-      ctx.closePath();
-    }
-    ctx.fill();
-  }
-  ctx.restore();
-}
 
 function LayerThumb({ layer }: { layer: PatternLayer }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -102,7 +48,7 @@ function LayerThumb({ layer }: { layer: PatternLayer }) {
     if (!c) return;
     // The thumbnail shows the layer alone, unblended and unquantized — it is
     // there to identify the layer, not to predict the composite.
-    paintCanvas(c, THUMB_SPAN, THUMB_TRIS, (t) =>
+    paintPatternCanvas(c, THUMB_SPAN, THUMB_TRIS, (t) =>
       triPatternValue(t, layer) ? fg : bg,
     );
   }, [layer, fg, bg]);
@@ -211,6 +157,7 @@ export function PatternPanel({
   const palette = palettes[paletteIdx]?.colors ?? palettes[0].colors;
   const previewRef = useRef<HTMLCanvasElement | null>(null);
   const previewWrapRef = useRef<HTMLDivElement | null>(null);
+  const [tab, setTab] = useState<"pattern" | "color">("pattern");
 
   // The composited, palette-quantized result — exactly what the brush paints.
   const painter = useMemo(
@@ -228,13 +175,13 @@ export function PatternPanel({
       // Fit a square into the leftover box. CSS cannot express "square, bounded
       // by both axes" — aspect-ratio plus a max on one axis just breaks the
       // ratio — so the side is measured and applied directly.
-      const side = Math.max(
-        48,
-        Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight)),
-      );
+      const side = Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight));
+      // Below this it conveys nothing, so give the space to the controls.
+      c.style.display = side < 40 ? "none" : "block";
+      if (side < 40) return;
       c.style.width = `${side}px`;
       c.style.height = `${side}px`;
-      paintCanvas(c, PREVIEW_SPAN, PREVIEW_TRIS, (t) => resolveColor(painter(t)));
+      paintPatternCanvas(c, PREVIEW_SPAN, PREVIEW_TRIS, (t) => resolveColor(painter(t)));
     };
 
     draw();
@@ -298,7 +245,7 @@ export function PatternPanel({
         </span>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5 p-3">
       {/* The preview is the only child allowed to flex, so it absorbs whatever
           height the controls leave over and is the first thing to give way on a
           short display. Everything below it is shrink-0 and stays on screen.
@@ -306,7 +253,7 @@ export function PatternPanel({
           so the space left for the preview is not a fraction of the viewport. */}
       <div
         ref={previewWrapRef}
-        className="flex-1 min-h-[3rem] flex items-center justify-center"
+        className="flex-1 min-h-0 flex items-center justify-center"
       >
         <canvas
           ref={previewRef}
@@ -401,102 +348,138 @@ export function PatternPanel({
 
       <div className="h-px bg-white/10 shrink-0" />
 
-      {/* Editor for the selected layer */}
-      <div className="grid grid-cols-4 gap-1 shrink-0">
-        {PATTERN_BLEND_MODES.map((m) => (
+      {/* Tabbed so each half stays short: the preview takes whatever the
+          controls leave over, so fewer controls on screen means a bigger
+          preview and a drawer that fits on shorter displays. */}
+      <div className="grid grid-cols-2 gap-1 shrink-0">
+        {(["pattern", "color"] as const).map((t) => (
           <button
-            key={m}
-            onClick={() => update({ mode: m })}
-            title={m}
+            key={t}
+            onClick={() => setTab(t)}
             className={cn(
-              "text-[10px] uppercase tracking-wide py-1 rounded border transition-colors",
-              active.mode === m
+              "text-[10px] uppercase tracking-widest py-1 rounded border transition-colors",
+              tab === t
                 ? "border-white bg-white/15 text-white"
-                : "border-white/10 text-white/60 hover:bg-white/5",
+                : "border-white/10 text-white/50 hover:bg-white/5",
             )}
           >
-            {MODE_LABEL[m]}
+            {t}
           </button>
         ))}
       </div>
 
-      <label className="flex flex-col gap-0.5 shrink-0">
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Scale {active.scale.toFixed(2)}
-        </span>
-        {/* Above 1 the pattern lattice is finer than the grid, which is where
-            the emergent motifs live — so the range runs well past it. */}
-        <input
-          type="range"
-          min={0.1}
-          max={6}
-          step={0.01}
-          value={active.scale}
-          onChange={(e) => update({ scale: Number(e.target.value) })}
-          className="w-full accent-white"
-        />
-      </label>
+      {tab === "pattern" ? (
+        <>
+          <div className="grid grid-cols-4 gap-1 shrink-0">
+            {PATTERN_BLEND_MODES.map((m) => (
+              <button
+                key={m}
+                onClick={() => update({ mode: m })}
+                title={m}
+                className={cn(
+                  "text-[10px] uppercase tracking-wide py-1 rounded border transition-colors",
+                  active.mode === m
+                    ? "border-white bg-white/15 text-white"
+                    : "border-white/10 text-white/60 hover:bg-white/5",
+                )}
+              >
+                {MODE_LABEL[m]}
+              </button>
+            ))}
+          </div>
 
-      <label className="flex flex-col gap-0.5 shrink-0">
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Rotation {Math.round(active.rotation)}&deg;
-        </span>
-        {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
-            would remove every pattern that depends on being off-axis. */}
-        <input
-          type="range"
-          min={0}
-          max={360}
-          step={0.1}
-          value={active.rotation}
-          onChange={(e) => update({ rotation: Number(e.target.value) })}
-          className="w-full accent-white"
-        />
-      </label>
+          <label className="flex flex-col gap-0.5 shrink-0">
+            <span className="text-[10px] uppercase tracking-wide text-white/60">
+              Scale {active.scale.toFixed(2)}
+            </span>
+            {/* Above 1 the pattern lattice is finer than the grid, which is
+                where the emergent motifs live — so the range runs well past it. */}
+            <input
+              type="range"
+              min={0.1}
+              max={6}
+              step={0.01}
+              value={active.scale}
+              onChange={(e) => update({ scale: Number(e.target.value) })}
+              className="w-full accent-white"
+            />
+          </label>
 
-      <label className="flex flex-col gap-0.5 shrink-0">
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Opacity {Math.round(active.opacity * 100)}%
-        </span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={active.opacity}
-          onChange={(e) => update({ opacity: Number(e.target.value) })}
-          className="w-full accent-white"
-        />
-      </label>
+          <label className="flex flex-col gap-0.5 shrink-0">
+            <span className="text-[10px] uppercase tracking-wide text-white/60">
+              Rotation {Math.round(active.rotation)}&deg;
+            </span>
+            {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
+                would remove every pattern that depends on being off-axis. */}
+            <input
+              type="range"
+              min={0}
+              max={360}
+              step={0.1}
+              value={active.rotation}
+              onChange={(e) => update({ rotation: Number(e.target.value) })}
+              className="w-full accent-white"
+            />
+          </label>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5 shrink-0">
+            <span className="text-[10px] uppercase tracking-wide text-white/60">
+              Palette
+            </span>
+            {/* Keeps its own row: inlining the label would squeeze the chips
+                back onto a second line. */}
+            <PaletteChips
+              palettes={palettes}
+              value={paletteIdx}
+              onChange={onPaletteIdxChange}
+            />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-white/60 w-14 shrink-0">
+                Primary
+              </span>
+              <div className="flex-1">
+                <Swatches
+                  value={active.fg}
+                  palette={palette}
+                  paletteIdx={paletteIdx}
+                  onChange={(c) => update({ fg: c })}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-white/60 w-14 shrink-0">
+                Secondary
+              </span>
+              <div className="flex-1">
+                <Swatches
+                  value={active.bg}
+                  palette={palette}
+                  paletteIdx={paletteIdx}
+                  onChange={(c) => update({ bg: c })}
+                />
+              </div>
+            </div>
+          </div>
 
-      <div className="flex flex-col gap-1.5 shrink-0">
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Palette
-        </span>
-        <PaletteChips
-          palettes={palettes}
-          value={paletteIdx}
-          onChange={onPaletteIdxChange}
-        />
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Primary
-        </span>
-        <Swatches
-          value={active.fg}
-          palette={palette}
-          paletteIdx={paletteIdx}
-          onChange={(c) => update({ fg: c })}
-        />
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
-          Secondary
-        </span>
-        <Swatches
-          value={active.bg}
-          palette={palette}
-          paletteIdx={paletteIdx}
-          onChange={(c) => update({ bg: c })}
-        />
-      </div>
+          <label className="flex flex-col gap-0.5 shrink-0">
+            <span className="text-[10px] uppercase tracking-wide text-white/60">
+              Opacity {Math.round(active.opacity * 100)}%
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={active.opacity}
+              onChange={(e) => update({ opacity: Number(e.target.value) })}
+              className="w-full accent-white"
+            />
+          </label>
+        </>
+      )}
+
       </div>
     </aside>
   );

@@ -308,3 +308,42 @@ export function makePatternPainter(
     return hit;
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * Saved presets
+ * ------------------------------------------------------------------ */
+
+/**
+ * A whole stack, stored as a palette slot.
+ *
+ * Presets travel in the project snapshot rather than in view settings: a stack
+ * is authored content — it took work to find — and losing it when a project is
+ * shared or reopened elsewhere would be the wrong trade. This mirrors how stamp
+ * selections are handled.
+ */
+export interface PatternPreset {
+  id: string;
+  layers: PatternLayer[];
+}
+
+let presetSeq = 0;
+
+export function makePatternPreset(layers: PatternLayer[]): PatternPreset {
+  presetSeq += 1;
+  return {
+    id: `pp-${Date.now().toString(36)}-${presetSeq}`,
+    // Deep-copied so later edits to the live stack cannot mutate the slot.
+    layers: layers.map((l) => makePatternLayer(l)),
+  };
+}
+
+/** Validates a preset loaded from a project file or storage. */
+export function normalizePatternPreset(raw: unknown): PatternPreset | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Partial<PatternPreset>;
+  if (!Array.isArray(r.layers) || r.layers.length === 0) return null;
+  return {
+    id: typeof r.id === "string" ? r.id : makePatternPreset([]).id,
+    layers: r.layers.map((l) => makePatternLayer(l)),
+  };
+}

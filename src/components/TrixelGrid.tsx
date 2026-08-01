@@ -30,10 +30,14 @@ import {
 import {
   DEFAULT_TRI_PATTERN,
   makePatternLayer,
+  makePatternPreset,
+  normalizePatternPreset,
   buildQuantizeTargets,
   type PatternLayer,
+  type PatternPreset,
 } from "@/lib/tri-pattern";
 import { PatternPanel } from "@/components/PatternPanel";
+import { PatternPalette } from "@/components/PatternPalette";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import { normalizeProjectFilename, DEFAULT_PROJECT_NAME } from "@/lib/utils";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
@@ -147,6 +151,10 @@ export default function TrixelGrid() {
   // The pattern panel picks its own palette. Sharing the paint palette meant
   // switching colour to paint silently changed the pattern's swatch row.
   const [patternPaletteIdx, setPatternPaletteIdx] = useState(0);
+  // Saved stacks. These ride in the project snapshot rather than view settings
+  // — a stack is authored content, so it should travel with the artwork.
+  const [patternPresets, setPatternPresets] = useState<PatternPreset[]>([]);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
   const [tooltip, setTooltip] = useState<string | null>(null);
@@ -212,6 +220,8 @@ export default function TrixelGrid() {
   symmetryRef.current = symmetry;
   const selectionsRef = useRef(selections);
   selectionsRef.current = selections;
+  const patternPresetsRef = useRef(patternPresets);
+  patternPresetsRef.current = patternPresets;
 
   const lastPaintTriBridgeRef =
     useRef<React.MutableRefObject<TriKey | null> | null>(null);
@@ -225,6 +235,7 @@ export default function TrixelGrid() {
       flowerRadius: flowerRadiusRef.current,
       symmetry: symmetryRef.current,
       selections: selectionsRef.current,
+      patternPresets: patternPresetsRef.current,
       lastPaintTri: lastPaintTriBridgeRef.current?.current
         ? triToString(lastPaintTriBridgeRef.current.current)
         : null,
@@ -245,6 +256,7 @@ export default function TrixelGrid() {
         flowerRadius: flowerRadiusRef.current,
         symmetry: symmetryRef.current,
         selections: selectionsRef.current,
+        patternPresets: patternPresetsRef.current,
         lastPaintTri: lastPaintTriBridgeRef.current?.current
           ? triToString(lastPaintTriBridgeRef.current.current)
           : null,
@@ -285,6 +297,13 @@ export default function TrixelGrid() {
       // (SETTINGS_KEY) and shouldn't be touched by undo — otherwise
       // changing a setting between edits would get rolled back alongside
       // the paint when the user hits undo.
+      if (Array.isArray(snap.patternPresets)) {
+        setPatternPresets(
+          snap.patternPresets
+            .map(normalizePatternPreset)
+            .filter((p): p is PatternPreset => p !== null),
+        );
+      }
       if (Array.isArray(snap.selections)) {
         setSelections(snap.selections as SelectionSnapshot[]);
         const head = snap.selections[0] as SelectionSnapshot | undefined;
@@ -314,6 +333,7 @@ export default function TrixelGrid() {
     flowerRadius,
     symmetry,
     selections,
+    patternPresets,
   ]);
 
   const SETTINGS_KEY = "trixel-settings";
@@ -676,6 +696,7 @@ export default function TrixelGrid() {
               flowerRadius: data.flowerRadius ?? 0,
               symmetry: data.symmetry ?? "off",
               selections: Array.isArray(data.selections) ? data.selections : [],
+              patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
               lastPaintTri:
                 typeof data.lastPaintTri === "string"
                   ? data.lastPaintTri
@@ -723,6 +744,7 @@ export default function TrixelGrid() {
               flowerRadius: 0,
               symmetry: "off",
               selections: [],
+              patternPresets: [],
               lastPaintTri: null,
             };
             setPainted(snap.layers[0].painted);
@@ -800,6 +822,7 @@ export default function TrixelGrid() {
       flowerRadius: flowerRadiusRef.current,
       symmetry: symmetryRef.current,
       selections: selectionsRef.current,
+      patternPresets: patternPresetsRef.current,
       lastPaintTri: lastPaintTriBridgeRef.current?.current
         ? triToString(lastPaintTriBridgeRef.current.current)
         : null,
@@ -920,6 +943,32 @@ export default function TrixelGrid() {
     onboarding.openHelp,
   );
 
+  // Capture the live stack into a slot. Commits so the slot is undoable, the
+  // same contract the stamp palette follows.
+  const onCapturePattern = useCallback(() => {
+    const preset = makePatternPreset(patternLayers);
+    setPatternPresets((prev) => [...prev, preset]);
+    setActivePresetId(preset.id);
+    onCommit();
+  }, [patternLayers, onCommit]);
+
+  const onSelectPattern = useCallback((p: PatternPreset) => {
+    // Copied on load as well as on save, so editing after loading a slot does
+    // not write back into it.
+    setPatternLayers(p.layers.map((l) => makePatternLayer(l)));
+    setActivePatternIdx(0);
+    setActivePresetId(p.id);
+  }, []);
+
+  const onDeletePattern = useCallback(
+    (p: PatternPreset) => {
+      setPatternPresets((prev) => prev.filter((x) => x.id !== p.id));
+      setActivePresetId((cur) => (cur === p.id ? null : cur));
+      onCommit();
+    },
+    [onCommit],
+  );
+
   const onDeletePaletteItem = useCallback(
     (snap: SelectionSnapshot) => {
       setSelections((prev) => {
@@ -937,6 +986,7 @@ export default function TrixelGrid() {
           flowerRadius: flowerRadiusRef.current,
           symmetry: symmetryRef.current,
           selections: next,
+          patternPresets: [],
           lastPaintTri: lastPaintTriBridgeRef.current?.current
             ? triToString(lastPaintTriBridgeRef.current.current)
             : null,
@@ -1064,6 +1114,16 @@ export default function TrixelGrid() {
             hasSelection={selectedHexes.length > 0}
             onPointerEnter={() => setHoveredTri(null)}
             gridOrientation={gridOrientation}
+          />
+        ) : tool === "pattern" ? (
+          <PatternPalette
+            presets={patternPresets}
+            activePresetId={activePresetId}
+            quantizeTargets={quantizeTargets}
+            onSelect={onSelectPattern}
+            onCapture={onCapturePattern}
+            onDelete={onDeletePattern}
+            onPointerEnter={() => setHoveredTri(null)}
           />
         ) : tool === "stamp" ? (
           <StampPalette

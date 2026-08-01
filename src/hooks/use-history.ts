@@ -18,6 +18,8 @@ export interface ProjectSnapshot {
   flowerRadius: number;
   symmetry: string;
   selections: unknown[];
+  /** Saved pattern-brush stacks; see `tri-pattern.ts`. */
+  patternPresets: unknown[];
   lastPaintTri: string | null;
 }
 
@@ -51,6 +53,7 @@ function migrateLegacy(data: { painted?: unknown } & Record<string, unknown>): P
     flowerRadius: typeof data.flowerRadius === "number" ? data.flowerRadius : 0,
     symmetry: typeof data.symmetry === "string" ? data.symmetry : "off",
     selections: Array.isArray(data.selections) ? data.selections : [],
+    patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
     lastPaintTri: typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
   };
 }
@@ -89,6 +92,7 @@ export function useHistory() {
               flowerRadius: data.flowerRadius ?? 0,
               symmetry: data.symmetry ?? "off",
               selections: Array.isArray(data.selections) ? data.selections : [],
+              patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
               lastPaintTri: typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
             };
           } else {
