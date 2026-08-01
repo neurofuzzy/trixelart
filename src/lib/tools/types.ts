@@ -2,11 +2,13 @@ import type React from "react";
 import type { TriKey } from "@/lib/grid-math";
 import type { Symmetry, SelectionSnapshot } from "@/lib/hex-flower";
 import type { Layer } from "@/hooks/use-history";
+import type { TriPattern } from "@/lib/tri-pattern";
 
 export type Tool =
   | "paint"
   | "erase"
   | "fill"
+  | "pattern"
   | "pan"
   | "select"
   | "stamp"
@@ -29,6 +31,13 @@ export interface Pt {
 export type DragState =
   | { kind: "idle" }
   | { kind: "fill"; changed: boolean }
+  | {
+      kind: "pattern";
+      changed: boolean;
+      /** Hex ids ("c,k") already painted this stroke. */
+      visited: Set<string>;
+      lastWorld: Pt;
+    }
   | {
       kind: "edit";
       hasMoved: boolean;
@@ -78,6 +87,10 @@ export interface ToolContext {
   setTool: (t: Tool) => void;
   color: string;
   setColor: (c: string) => void;
+  /** Pattern brush settings. `color` is the pattern's primary; this is its
+   *  secondary, so a stroke covers every trixel of the hex. */
+  pattern: TriPattern;
+  patternSecondary: string;
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;

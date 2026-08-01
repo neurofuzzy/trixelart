@@ -27,6 +27,8 @@ import {
   shiftGridPalettes,
   setPaletteOffsets,
 } from "@/lib/constants";
+import { DEFAULT_TRI_PATTERN, type TriPattern } from "@/lib/tri-pattern";
+import { PatternPanel } from "@/components/PatternPanel";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import { normalizeProjectFilename, DEFAULT_PROJECT_NAME } from "@/lib/utils";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
@@ -123,6 +125,10 @@ export default function TrixelGrid() {
   const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
   const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
   const [flowerRadius, setFlowerRadius] = useState(0);
+  const [pattern, setPattern] = useState<TriPattern>(DEFAULT_TRI_PATTERN);
+  // Encoded like every other stored colour; the pattern's primary is just the
+  // active paint colour, so only the secondary needs its own slot.
+  const [patternSecondary, setPatternSecondary] = useState(encodeColor(0, 1));
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
   const [tooltip, setTooltip] = useState<string | null>(null);
@@ -320,6 +326,10 @@ export default function TrixelGrid() {
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
+        if (data.pattern && typeof data.pattern === "object")
+          setPattern({ ...DEFAULT_TRI_PATTERN, ...data.pattern });
+        if (typeof data.patternSecondary === "string")
+          setPatternSecondary(data.patternSecondary);
         if (data.svgExport && typeof data.svgExport === "object")
           setSvgExport({
             stroke: !!data.svgExport.stroke,
@@ -344,6 +354,8 @@ export default function TrixelGrid() {
         projectName,
         hueOffset,
         saturationOffset: satOffset,
+        pattern,
+        patternSecondary,
         svgExport,
       }),
     );
@@ -357,6 +369,8 @@ export default function TrixelGrid() {
     projectName,
     hueOffset,
     satOffset,
+    pattern,
+    patternSecondary,
     svgExport,
   ]);
 
@@ -431,6 +445,8 @@ export default function TrixelGrid() {
         setTool("paint");
       }
     },
+    pattern,
+    patternSecondary,
     painted,
     setPainted,
     onCommit,
@@ -1041,6 +1057,18 @@ export default function TrixelGrid() {
             onHueOffsetChange={setHueOffset}
             saturationOffset={satOffset}
             onSaturationOffsetChange={setSatOffset}
+          />
+        )}
+        {tool === "pattern" && (
+          <PatternPanel
+            pattern={pattern}
+            onPatternChange={setPattern}
+            primary={paintKey}
+            secondary={patternSecondary}
+            onSecondaryChange={setPatternSecondary}
+            palette={activePalette}
+            activePaletteIdx={activePaletteIdx}
+            onPointerEnter={() => setHoveredTri(null)}
           />
         )}
         {layersOpen && (

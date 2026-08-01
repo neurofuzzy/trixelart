@@ -23,6 +23,7 @@ import {
   Aperture,
   Paintbrush,
   PaintBucket,
+  Hexagon,
   Snowflake,
   Pipette,
   GitCompareArrows,
@@ -54,6 +55,7 @@ const editTools = [
   { tool: "paint" as Tool, icon: Pencil, label: "Paint", shortcut: "P" },
   { tool: "erase" as Tool, icon: Eraser, label: "Erase", shortcut: "E" },
   { tool: "fill" as Tool, icon: PaintBucket, label: "Fill", shortcut: "F" },
+  { tool: "pattern" as Tool, icon: Hexagon, label: "Pattern", shortcut: "N" },
   { tool: "dodge" as Tool, icon: Sun, label: "Dodge", shortcut: "D" },
   { tool: "burn" as Tool, icon: Moon, label: "Burn", shortcut: "B" },
   { tool: "stamp" as Tool, icon: Stamp, label: "Stamp", shortcut: "T" },
@@ -66,6 +68,7 @@ const isEditTool = (t: string): boolean =>
   t === "paint" ||
   t === "erase" ||
   t === "fill" ||
+  t === "pattern" ||
   t === "dodge" ||
   t === "burn" ||
   t === "stamp" ||

@@ -7,6 +7,7 @@ import {
   paintTargets,
   triToHex,
   getHexWedgeTrixels,
+  enumerateHexTrixels,
   type Symmetry,
   type SelectionSnapshot,
 } from "@/lib/hex-flower";
@@ -16,8 +17,16 @@ import {
   WHEEL_DIVISOR,
   PINCH_SENSITIVITY,
 } from "@/lib/config";
-import { toolMap, viewPanTool, type Tool, type ToolContext, type DragState } from "@/lib/tools";
+import {
+  toolMap,
+  viewPanTool,
+  patternBrushN,
+  type Tool,
+  type ToolContext,
+  type DragState,
+} from "@/lib/tools";
 import type { Layer } from "@/hooks/use-history";
+import type { TriPattern } from "@/lib/tri-pattern";
 import { normPoint, normTouchPair } from "@/lib/touch-utils";
 
 interface UseInteractionArgs {
@@ -30,6 +39,8 @@ interface UseInteractionArgs {
   setTool: (tool: Tool) => void;
   color: string;
   setColor: (color: string) => void;
+  pattern: TriPattern;
+  patternSecondary: string;
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   onCommit: () => void;
@@ -66,6 +77,8 @@ export function useInteraction(args: UseInteractionArgs) {
     setTool,
     color,
     setColor,
+    pattern,
+    patternSecondary,
     painted,
     setPainted,
     onCommit,
@@ -164,6 +177,13 @@ export function useInteraction(args: UseInteractionArgs) {
     if (!hoveredTri) return [];
     if (tool === "select" || tool === "stamp" || tool === "eyedropper" || tool === "fill")
       return [hoveredTri];
+    // The pattern brush covers a whole hex, so the ghost shows that footprint
+    // rather than the flower/brush expansion the edit tools use.
+    if (tool === "pattern") {
+      const pn = patternBrushN(gridDivisions);
+      const h = triToHex(hoveredTri.q, hoveredTri.r, hoveredTri.type, pn);
+      return enumerateHexTrixels(h.c, h.k, pn);
+    }
     const N = gridDivisions;
     const offsets =
       N > 0 ? flowerOffsets(flowerRadius, N) : [];
@@ -283,6 +303,8 @@ export function useInteraction(args: UseInteractionArgs) {
     setTool,
     color,
     setColor,
+    pattern,
+    patternSecondary,
     flowerRadius,
     gridDivisions,
     symmetry,
