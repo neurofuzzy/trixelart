@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { SIDE, getTriVertices } from "@/lib/grid-math";
 import { encodeColor, resolveColor } from "@/lib/constants";
 import {
-  TRI_PATTERN_TYPES,
   PATTERN_BLEND_MODES,
   makePatternLayer,
   makePatternPainter,
@@ -15,25 +14,22 @@ import {
   type PatternLayer,
   type PatternBlendMode,
   type QuantizeTarget,
-  type TriPatternType,
 } from "@/lib/tri-pattern";
 
 /**
  * Designer for the pattern brush stack.
  *
- * The preview deliberately covers a wide patch. The patterns worth finding are
- * emergent — they come from the pattern lattice beating against the trixel
- * lattice — and a small swatch shows the predicate but not the interference,
- * which is the part actually being designed.
+ * The preview deliberately covers a wide patch. What is being designed here is
+ * interference — between the pattern lattice and the trixel lattice, and then
+ * between stacked layers — and a small swatch shows neither.
  */
 
 // ~28 trixels across. Enough for the moire to resolve.
 const PREVIEW_SPAN = 14 * SIDE;
 const PREVIEW_HALF = PREVIEW_SPAN / 2;
 
-// Centred on the lattice origin rather than starting there. Patterns with a
-// distinguished centre — `rings` anchors at the origin — otherwise put it in
-// the corner, so the preview showed only far-field structure.
+// Centred on the lattice origin rather than starting there, so the preview
+// shows the field around the point everything is measured from.
 const PREVIEW_TRIS = trixelsInBox(
   -PREVIEW_HALF,
   -PREVIEW_HALF,
@@ -45,14 +41,6 @@ const PREVIEW_TRIS = trixelsInBox(
 const THUMB_SPAN = 5 * SIDE;
 const THUMB_HALF = THUMB_SPAN / 2;
 const THUMB_TRIS = trixelsInBox(-THUMB_HALF, -THUMB_HALF, THUMB_HALF, THUMB_HALF);
-
-const TYPE_LABEL: Record<TriPatternType, string> = {
-  checker: "Check",
-  grid: "Grid",
-  brick: "Brick",
-  lines: "Lines",
-  rings: "Rings",
-};
 
 const MODE_LABEL: Record<PatternBlendMode, string> = {
   normal: "Norm",
@@ -133,19 +121,67 @@ function Swatches({
   paletteIdx: number;
   onChange: (encoded: string) => void;
 }) {
-  const resolved = resolveColor(value);
   return (
     <div className="flex gap-0.5">
-      {palette.map((c, i) => (
+      {palette.map((c, i) => {
+        const encoded = encodeColor(paletteIdx, i);
+        return (
+          <button
+            key={c}
+            onClick={() => onChange(encoded)}
+            title={c}
+            className={cn(
+              "flex-1 h-5 rounded-sm border transition-all",
+              // Compared by encoding, not by resolved hex: separate palettes can
+              // land on the same colour and would both light up.
+              value === encoded
+                ? "border-white scale-110"
+                : "border-white/10 opacity-70",
+            )}
+            style={{ backgroundColor: c }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Palette chooser for the panel's swatch rows.
+ *
+ * Independent of the left-hand paint palette on purpose: a pattern layer's two
+ * colours have nothing to do with the colour the paint tool is holding, and
+ * tying them meant switching palette to paint changed what the pattern offered.
+ */
+function PaletteChips({
+  palettes,
+  value,
+  onChange,
+}: {
+  palettes: { name: string; colors: string[] }[];
+  value: number;
+  onChange: (i: number) => void;
+}) {
+  return (
+    <div className="flex gap-1 flex-nowrap">
+      {palettes.map((p, i) => (
         <button
-          key={c}
-          onClick={() => onChange(encodeColor(paletteIdx, i))}
+          key={p.name}
+          onClick={() => onChange(i)}
+          title={p.name}
           className={cn(
-            "flex-1 h-4 rounded-sm border transition-all",
-            resolved === c ? "border-white scale-110" : "border-white/10 opacity-70",
+            "w-5 h-5 shrink-0 rounded border overflow-hidden flex flex-col transition-all",
+            value === i ? "border-white scale-110" : "border-white/10 opacity-70",
           )}
-          style={{ backgroundColor: c }}
-        />
+        >
+          {[2, 5, 8].map((ci) => (
+            <span
+              key={ci}
+              className="flex-1 block"
+              style={{ backgroundColor: p.colors[ci] }}
+            />
+          ))}
+        </button>
       ))}
     </div>
   );
@@ -157,8 +193,9 @@ export function PatternPanel({
   activeIdx,
   onActiveIdxChange,
   quantizeTargets,
-  palette,
-  activePaletteIdx,
+  palettes,
+  paletteIdx,
+  onPaletteIdxChange,
   onPointerEnter,
 }: {
   layers: PatternLayer[];
@@ -166,11 +203,14 @@ export function PatternPanel({
   activeIdx: number;
   onActiveIdxChange: (i: number) => void;
   quantizeTargets: QuantizeTarget[];
-  palette: string[];
-  activePaletteIdx: number;
+  palettes: { name: string; colors: string[] }[];
+  paletteIdx: number;
+  onPaletteIdxChange: (i: number) => void;
   onPointerEnter: () => void;
 }) {
+  const palette = palettes[paletteIdx]?.colors ?? palettes[0].colors;
   const previewRef = useRef<HTMLCanvasElement | null>(null);
+  const previewWrapRef = useRef<HTMLDivElement | null>(null);
 
   // The composited, palette-quantized result — exactly what the brush paints.
   const painter = useMemo(
@@ -179,9 +219,30 @@ export function PatternPanel({
   );
 
   useEffect(() => {
-    const c = previewRef.current;
-    if (!c) return;
-    paintCanvas(c, PREVIEW_SPAN, PREVIEW_TRIS, (t) => resolveColor(painter(t)));
+    const wrap = previewWrapRef.current;
+    if (!wrap) return;
+
+    const draw = () => {
+      const c = previewRef.current;
+      if (!c) return;
+      // Fit a square into the leftover box. CSS cannot express "square, bounded
+      // by both axes" — aspect-ratio plus a max on one axis just breaks the
+      // ratio — so the side is measured and applied directly.
+      const side = Math.max(
+        48,
+        Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight)),
+      );
+      c.style.width = `${side}px`;
+      c.style.height = `${side}px`;
+      paintCanvas(c, PREVIEW_SPAN, PREVIEW_TRIS, (t) => resolveColor(painter(t)));
+    };
+
+    draw();
+    // Covers window resizes and layout shifts alike — adding a layer changes
+    // how much room is left, and that fires no resize event.
+    const ro = new ResizeObserver(draw);
+    ro.observe(wrap);
+    return () => ro.disconnect();
   }, [painter]);
 
   const active = layers[activeIdx] ?? layers[0];
@@ -216,23 +277,46 @@ export function PatternPanel({
   };
 
   return (
-    <div
-      className="absolute z-40 flex flex-col gap-2 p-3 w-64 max-h-[80vh] overflow-y-auto bg-card/80 backdrop-blur-lg border rounded-2xl shadow-2xl cursor-default
-        top-20 right-4"
+    // Full-height drawer flush to the right edge. It overlays the canvas rather
+    // than shrinking it: the drawer only exists while the pattern tool is
+    // selected, so docking it into the layout would reflow and re-centre the
+    // artwork on every tool switch.
+    <aside
+      className="absolute z-40 top-0 right-0 bottom-0 w-96 flex flex-col bg-card/95 backdrop-blur-lg border-l border-white/10 shadow-2xl cursor-default"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
       data-tour="pattern"
     >
-      <canvas
-        ref={previewRef}
-        className="w-full aspect-square rounded-lg border border-white/10 block"
-      />
+      <header className="flex items-center justify-between px-3 h-9 border-b border-white/10 shrink-0">
+        <span className="text-[10px] uppercase tracking-widest text-white/70">
+          Pattern
+        </span>
+        <span className="text-[10px] text-white/35">
+          {layers.length} layer{layers.length === 1 ? "" : "s"}
+        </span>
+      </header>
+
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-3">
+      {/* The preview is the only child allowed to flex, so it absorbs whatever
+          height the controls leave over and is the first thing to give way on a
+          short display. Everything below it is shrink-0 and stays on screen.
+          A vh cap cannot do this: the controls below are a fixed pixel height,
+          so the space left for the preview is not a fraction of the viewport. */}
+      <div
+        ref={previewWrapRef}
+        className="flex-1 min-h-[3rem] flex items-center justify-center"
+      >
+        <canvas
+          ref={previewRef}
+          className="rounded-lg border border-white/10 block"
+        />
+      </div>
 
       {/* Stack, top layer first — the reverse of storage order, matching how
           every other layer list in the app reads. */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between shrink-0">
         <span className="text-[10px] uppercase tracking-wide text-white/60">
           Layers
         </span>
@@ -245,7 +329,7 @@ export function PatternPanel({
         </button>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 max-h-[26vh] overflow-y-auto shrink-0">
         {layers
           .map((l, i) => ({ l, i }))
           .reverse()
@@ -263,7 +347,7 @@ export function PatternPanel({
               <LayerThumb layer={l} />
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] text-white/80 truncate">
-                  {TYPE_LABEL[l.type]} · {MODE_LABEL[l.mode]}
+                  {MODE_LABEL[l.mode]} · {Math.round(l.opacity * 100)}%
                 </div>
                 <div className="text-[9px] text-white/40 truncate">
                   {l.scale.toFixed(2)} · {Math.round(l.rotation)}&deg;
@@ -315,27 +399,10 @@ export function PatternPanel({
           ))}
       </div>
 
-      <div className="h-px bg-white/10" />
+      <div className="h-px bg-white/10 shrink-0" />
 
       {/* Editor for the selected layer */}
-      <div className="grid grid-cols-3 gap-1">
-        {TRI_PATTERN_TYPES.map((t) => (
-          <button
-            key={t}
-            onClick={() => update({ type: t })}
-            className={cn(
-              "text-[10px] uppercase tracking-wide py-1 rounded border transition-colors",
-              active.type === t
-                ? "border-white bg-white/15 text-white"
-                : "border-white/10 text-white/60 hover:bg-white/5",
-            )}
-          >
-            {TYPE_LABEL[t]}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid grid-cols-4 gap-1 shrink-0">
         {PATTERN_BLEND_MODES.map((m) => (
           <button
             key={m}
@@ -353,7 +420,7 @@ export function PatternPanel({
         ))}
       </div>
 
-      <label className="flex flex-col gap-0.5">
+      <label className="flex flex-col gap-0.5 shrink-0">
         <span className="text-[10px] uppercase tracking-wide text-white/60">
           Scale {active.scale.toFixed(2)}
         </span>
@@ -370,7 +437,7 @@ export function PatternPanel({
         />
       </label>
 
-      <label className="flex flex-col gap-0.5">
+      <label className="flex flex-col gap-0.5 shrink-0">
         <span className="text-[10px] uppercase tracking-wide text-white/60">
           Rotation {Math.round(active.rotation)}&deg;
         </span>
@@ -387,7 +454,7 @@ export function PatternPanel({
         />
       </label>
 
-      <label className="flex flex-col gap-0.5">
+      <label className="flex flex-col gap-0.5 shrink-0">
         <span className="text-[10px] uppercase tracking-wide text-white/60">
           Opacity {Math.round(active.opacity * 100)}%
         </span>
@@ -402,14 +469,22 @@ export function PatternPanel({
         />
       </label>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1.5 shrink-0">
+        <span className="text-[10px] uppercase tracking-wide text-white/60">
+          Palette
+        </span>
+        <PaletteChips
+          palettes={palettes}
+          value={paletteIdx}
+          onChange={onPaletteIdxChange}
+        />
         <span className="text-[10px] uppercase tracking-wide text-white/60">
           Primary
         </span>
         <Swatches
           value={active.fg}
           palette={palette}
-          paletteIdx={activePaletteIdx}
+          paletteIdx={paletteIdx}
           onChange={(c) => update({ fg: c })}
         />
         <span className="text-[10px] uppercase tracking-wide text-white/60">
@@ -418,10 +493,11 @@ export function PatternPanel({
         <Swatches
           value={active.bg}
           palette={palette}
-          paletteIdx={activePaletteIdx}
+          paletteIdx={paletteIdx}
           onChange={(c) => update({ bg: c })}
         />
       </div>
-    </div>
+      </div>
+    </aside>
   );
 }

@@ -144,6 +144,9 @@ export default function TrixelGrid() {
     makePatternLayer(),
   ]);
   const [activePatternIdx, setActivePatternIdx] = useState(0);
+  // The pattern panel picks its own palette. Sharing the paint palette meant
+  // switching colour to paint silently changed the pattern's swatch row.
+  const [patternPaletteIdx, setPatternPaletteIdx] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
   const [tooltip, setTooltip] = useState<string | null>(null);
@@ -341,6 +344,8 @@ export default function TrixelGrid() {
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
+        if (typeof data.patternPaletteIdx === "number")
+          setPatternPaletteIdx(data.patternPaletteIdx);
         if (Array.isArray(data.patternLayers) && data.patternLayers.length) {
           setPatternLayers(
             data.patternLayers.map((l: Partial<PatternLayer>) =>
@@ -387,6 +392,7 @@ export default function TrixelGrid() {
         hueOffset,
         saturationOffset: satOffset,
         patternLayers,
+        patternPaletteIdx,
         svgExport,
       }),
     );
@@ -401,6 +407,7 @@ export default function TrixelGrid() {
     hueOffset,
     satOffset,
     patternLayers,
+    patternPaletteIdx,
     svgExport,
   ]);
 
@@ -1096,8 +1103,9 @@ export default function TrixelGrid() {
             activeIdx={activePatternIdx}
             onActiveIdxChange={setActivePatternIdx}
             quantizeTargets={quantizeTargets}
-            palette={activePalette}
-            activePaletteIdx={activePaletteIdx}
+            palettes={computedPalettes}
+            paletteIdx={patternPaletteIdx}
+            onPaletteIdxChange={setPatternPaletteIdx}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}

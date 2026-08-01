@@ -2,39 +2,30 @@ import { SIDE, triCenter, worldToTri, type TriKey } from "@/lib/grid-math";
 import { encodeColor, resolveColor } from "@/lib/constants";
 
 /**
- * Procedural patterns on the triangular lattice.
+ * The triangular-lattice checker, on a rotatable and scalable sub-lattice.
  *
  * Ported from the `prismatic` cap mapping in the material-forge shader
  * (`src/lib/shader/patterns.glsl.ts`). The two grids are the same lattice —
  * `worldToTri` performs exactly the skew that `mfTriCell` does, and
  * `triCenter` already returns what `mfTriPos(mfTriCentroid(...))` computes —
- * so only the five predicates are new here.
+ * so almost nothing needed reimplementing.
  *
- * The interesting behaviour is emergent rather than designed. Each trixel
+ * The shader offers five patterns; only the checker survives here, because it
+ * is the only one whose interest is not its own predicate. Each trixel
  * point-samples the pattern at its centroid, so once `scale` pushes the pattern
- * lattice finer than the trixel lattice, the two beat against each other and
- * produce motifs that none of the five predicates describes on its own. That is
- * why rotation is continuous and why `scale` is allowed well above 1: snapping
- * the angle to the lattice's 6-fold symmetry, or capping the scale, makes that
- * whole family unreachable. `checker` at scale 2.6 / rotation 235 gives
- * interlocking hexagons.
+ * lattice finer than the trixel lattice the two beat against each other, and
+ * the checker's up/down parity turns that beat into motifs no rule in this file
+ * describes. Scale 2.6 / rotation 235 gives interlocking hexagons. The other
+ * four mostly render themselves, and stacking supplies the variety they used
+ * to. That is why rotation is continuous and `scale` runs well above 1:
+ * snapping the angle to the lattice's 6-fold symmetry, or capping the scale,
+ * makes the whole emergent family unreachable.
  *
  * Every value is a pure function of world position, so the field is global: two
  * separately painted areas line up as though revealing one continuous pattern.
  */
 
-export type TriPatternType = "checker" | "grid" | "brick" | "lines" | "rings";
-
-export const TRI_PATTERN_TYPES: TriPatternType[] = [
-  "checker",
-  "grid",
-  "brick",
-  "lines",
-  "rings",
-];
-
 export interface TriPattern {
-  type: TriPatternType;
   /** Pattern lattice size relative to a trixel. Above 1 the pattern is finer
    *  than the grid, which is where the moire lives. */
   scale: number;
@@ -43,7 +34,6 @@ export interface TriPattern {
 }
 
 export const DEFAULT_TRI_PATTERN: TriPattern = {
-  type: "checker",
   scale: 2.6,
   rotation: 235,
 };
@@ -70,26 +60,26 @@ export interface PatternLayer extends TriPattern {
 
 let layerSeq = 0;
 
+/**
+ * Fields are taken one at a time rather than by spreading `over` last. A spread
+ * lets an explicit `undefined` — which loading older settings can produce —
+ * overwrite the default with nothing, and an undefined colour throws when it
+ * reaches `resolveColor`. Picking fields also drops keys from retired versions
+ * (the old per-layer `type`) instead of carrying them back into storage.
+ */
 export function makePatternLayer(over?: Partial<PatternLayer>): PatternLayer {
   layerSeq += 1;
   return {
-    id: `pl-${Date.now().toString(36)}-${layerSeq}`,
-    ...DEFAULT_TRI_PATTERN,
-    fg: encodeColor(0, 8),
-    bg: encodeColor(0, 1),
-    mode: "normal",
-    opacity: 1,
-    visible: true,
-    ...over,
+    id: over?.id ?? `pl-${Date.now().toString(36)}-${layerSeq}`,
+    scale: over?.scale ?? DEFAULT_TRI_PATTERN.scale,
+    rotation: over?.rotation ?? DEFAULT_TRI_PATTERN.rotation,
+    fg: over?.fg ?? encodeColor(0, 8),
+    bg: over?.bg ?? encodeColor(0, 1),
+    mode: over?.mode ?? "normal",
+    opacity: over?.opacity ?? 1,
+    visible: over?.visible ?? true,
   };
 }
-
-/**
- * GLSL `mod()` is non-negative for a positive modulus; JS `%` keeps the sign of
- * the dividend. The lattice runs negative in every direction, so the shader
- * predicates only port faithfully through this.
- */
-const mod = (a: number, n: number): number => ((a % n) + n) % n;
 
 /**
  * The pattern's value at one trixel: 1 for the primary colour, 0 for the
@@ -113,41 +103,10 @@ export function triPatternValue(t: TriKey, p: TriPattern): 0 | 1 {
   const ry = (px * sn + py * cs) * p.scale;
   const cell = worldToTri(rx * SIDE, ry * SIDE);
 
-  const q = cell.q;
-  const r = cell.r;
-
-  switch (p.type) {
-    case "checker":
-      // The two-colouring of a triangular tiling is up/down parity. Note the
-      // inversion: trixelart's 'up' is the shader's `up = 0`.
-      return cell.type === "down" ? 0 : 1;
-
-    case "grid":
-      // Lines along the three lattice directions: q, r and q + r.
-      return mod(q, 4) === 0 || mod(r, 4) === 0 || mod(q + r, 4) === 0 ? 1 : 0;
-
-    case "brick":
-      // Courses of rhombi, offset half a course every other row. Running bond
-      // has no exact triangular analogue; this is a reading of it.
-      if (mod(r, 4) === 0) return 1;
-      return mod(q + mod(Math.floor(r / 4), 2) * 4, 8) === 0 ? 1 : 0;
-
-    case "lines":
-      return mod(r, 3) === 0 ? 1 : 0;
-
-    case "rings": {
-      // Hexagonal rings about the world origin. The rhombic basis is exactly
-      // the axial hex system, so the ring index is the standard axial distance.
-      //
-      // Deliberately drops the shader's `8 * scale` centre offset. That existed
-      // because material-forge evaluates over a finite 0..gridSize tile, where
-      // 8 sits inside it. Here the canvas is infinite and centred on the origin,
-      // so the same offset pins the centre ~8 edge-units away at every scale and
-      // leaves only far-field sectors in view.
-      const ring = (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) * 0.5;
-      return mod(Math.floor(ring), 2) === 0 ? 1 : 0;
-    }
-  }
+  // The two-colouring of a triangular tiling is up/down parity — adjacent
+  // triangles always differ. Note the inversion: trixelart's 'up' is the
+  // shader's `up = 0`.
+  return cell.type === "down" ? 0 : 1;
 }
 
 /**
