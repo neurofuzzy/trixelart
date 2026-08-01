@@ -1,6 +1,7 @@
 import { worldToTri, triToString, getTrianglesOnLine } from "@/lib/grid-math";
 import { triToHex, enumerateHexTrixels } from "@/lib/hex-flower";
-import { triPatternValue } from "@/lib/tri-pattern";
+import { makePatternPainter } from "@/lib/tri-pattern";
+import type { TriKey } from "@/lib/grid-math";
 import type { ToolContext, ToolHandler } from "./types";
 
 /**
@@ -23,20 +24,26 @@ export const patternBrushN = (gridDivisions: number): number =>
 /**
  * The key/colour pairs for one hex. Returned rather than applied so the
  * `setPainted` updater stays pure — React StrictMode replays it.
+ *
+ * `paint` is built once per pointer event rather than per hex: it caches the
+ * resolved layer colours and memoizes the palette search, both of which stay
+ * valid for every hex in the same event.
  */
 function hexPaint(
-  ctx: ToolContext,
+  paint: (t: TriKey) => string,
   c: number,
   k: number,
   N: number,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const t of enumerateHexTrixels(c, k, N)) {
-    const v = triPatternValue(t, ctx.pattern);
-    out.push([triToString(t), v ? ctx.color : ctx.patternSecondary]);
+    out.push([triToString(t), paint(t)]);
   }
   return out;
 }
+
+const painterFor = (ctx: ToolContext) =>
+  makePatternPainter(ctx.patternLayers, ctx.quantizeTargets);
 
 function apply(ctx: ToolContext, pairs: Array<[string, string]>): void {
   if (pairs.length === 0) return;
@@ -54,7 +61,7 @@ export const patternTool: ToolHandler = {
     const N = patternBrushN(ctx.gridDivisions);
     const hex = triToHex(tri.q, tri.r, tri.type, N);
 
-    const pairs = hexPaint(ctx, hex.c, hex.k, N);
+    const pairs = hexPaint(painterFor(ctx), hex.c, hex.k, N);
     apply(ctx, pairs);
 
     ctx.drag.current = {
@@ -82,13 +89,14 @@ export const patternTool: ToolHandler = {
     );
     drag.lastWorld = world;
 
+    const paint = painterFor(ctx);
     const pairs: Array<[string, string]> = [];
     for (const t of tris) {
       const hex = triToHex(t.q, t.r, t.type, N);
       const id = `${hex.c},${hex.k}`;
       if (drag.visited.has(id)) continue;
       drag.visited.add(id);
-      pairs.push(...hexPaint(ctx, hex.c, hex.k, N));
+      pairs.push(...hexPaint(paint, hex.c, hex.k, N));
     }
 
     if (pairs.length > 0) {

@@ -26,7 +26,7 @@ import {
   type DragState,
 } from "@/lib/tools";
 import type { Layer } from "@/hooks/use-history";
-import type { TriPattern } from "@/lib/tri-pattern";
+import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
 import { normPoint, normTouchPair } from "@/lib/touch-utils";
 
 interface UseInteractionArgs {
@@ -39,8 +39,8 @@ interface UseInteractionArgs {
   setTool: (tool: Tool) => void;
   color: string;
   setColor: (color: string) => void;
-  pattern: TriPattern;
-  patternSecondary: string;
+  patternLayers: PatternLayer[];
+  quantizeTargets: QuantizeTarget[];
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   onCommit: () => void;
@@ -77,8 +77,8 @@ export function useInteraction(args: UseInteractionArgs) {
     setTool,
     color,
     setColor,
-    pattern,
-    patternSecondary,
+    patternLayers,
+    quantizeTargets,
     painted,
     setPainted,
     onCommit,
@@ -303,8 +303,8 @@ export function useInteraction(args: UseInteractionArgs) {
     setTool,
     color,
     setColor,
-    pattern,
-    patternSecondary,
+    patternLayers,
+    quantizeTargets,
     flowerRadius,
     gridDivisions,
     symmetry,

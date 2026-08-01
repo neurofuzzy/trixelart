@@ -27,7 +27,12 @@ import {
   shiftGridPalettes,
   setPaletteOffsets,
 } from "@/lib/constants";
-import { DEFAULT_TRI_PATTERN, type TriPattern } from "@/lib/tri-pattern";
+import {
+  DEFAULT_TRI_PATTERN,
+  makePatternLayer,
+  buildQuantizeTargets,
+  type PatternLayer,
+} from "@/lib/tri-pattern";
 import { PatternPanel } from "@/components/PatternPanel";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
 import { normalizeProjectFilename, DEFAULT_PROJECT_NAME } from "@/lib/utils";
@@ -114,6 +119,14 @@ export default function TrixelGrid() {
     setPaletteOffsets(hueOffset, satOffset);
   }, [hueOffset, satOffset]);
 
+  // Compositing two palette swatches rarely lands on a third, so the result is
+  // snapped back to the nearest paintable colour — searched across every
+  // palette, not just the active one.
+  const quantizeTargets = useMemo(
+    () => buildQuantizeTargets(computedPalettes),
+    [computedPalettes],
+  );
+
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
   const activePalette =
     computedPalettes[activePaletteIdx]?.colors ?? computedPalettes[0].colors;
@@ -125,10 +138,12 @@ export default function TrixelGrid() {
   const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
   const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
   const [flowerRadius, setFlowerRadius] = useState(0);
-  const [pattern, setPattern] = useState<TriPattern>(DEFAULT_TRI_PATTERN);
-  // Encoded like every other stored colour; the pattern's primary is just the
-  // active paint colour, so only the secondary needs its own slot.
-  const [patternSecondary, setPatternSecondary] = useState(encodeColor(0, 1));
+  // Pattern brush stack, bottom-first. Each layer carries its own two colours,
+  // so the brush no longer borrows the active paint colour.
+  const [patternLayers, setPatternLayers] = useState<PatternLayer[]>(() => [
+    makePatternLayer(),
+  ]);
+  const [activePatternIdx, setActivePatternIdx] = useState(0);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   const [brushSize, setBrushSize] = useState<"single" | "hex">("single");
   const [tooltip, setTooltip] = useState<string | null>(null);
@@ -326,10 +341,27 @@ export default function TrixelGrid() {
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
         if (typeof data.saturationOffset === "number")
           setSatOffset(data.saturationOffset);
-        if (data.pattern && typeof data.pattern === "object")
-          setPattern({ ...DEFAULT_TRI_PATTERN, ...data.pattern });
-        if (typeof data.patternSecondary === "string")
-          setPatternSecondary(data.patternSecondary);
+        if (Array.isArray(data.patternLayers) && data.patternLayers.length) {
+          setPatternLayers(
+            data.patternLayers.map((l: Partial<PatternLayer>) =>
+              makePatternLayer(l),
+            ),
+          );
+        } else if (data.pattern && typeof data.pattern === "object") {
+          // Pre-stack settings: one pattern plus a secondary colour, with the
+          // primary borrowed from the active swatch. Lift it into a one-layer
+          // stack so saved setups survive.
+          setPatternLayers([
+            makePatternLayer({
+              ...DEFAULT_TRI_PATTERN,
+              ...data.pattern,
+              bg:
+                typeof data.patternSecondary === "string"
+                  ? data.patternSecondary
+                  : undefined,
+            }),
+          ]);
+        }
         if (data.svgExport && typeof data.svgExport === "object")
           setSvgExport({
             stroke: !!data.svgExport.stroke,
@@ -354,8 +386,7 @@ export default function TrixelGrid() {
         projectName,
         hueOffset,
         saturationOffset: satOffset,
-        pattern,
-        patternSecondary,
+        patternLayers,
         svgExport,
       }),
     );
@@ -369,8 +400,7 @@ export default function TrixelGrid() {
     projectName,
     hueOffset,
     satOffset,
-    pattern,
-    patternSecondary,
+    patternLayers,
     svgExport,
   ]);
 
@@ -445,8 +475,8 @@ export default function TrixelGrid() {
         setTool("paint");
       }
     },
-    pattern,
-    patternSecondary,
+    patternLayers,
+    quantizeTargets,
     painted,
     setPainted,
     onCommit,
@@ -1061,11 +1091,11 @@ export default function TrixelGrid() {
         )}
         {tool === "pattern" && (
           <PatternPanel
-            pattern={pattern}
-            onPatternChange={setPattern}
-            primary={paintKey}
-            secondary={patternSecondary}
-            onSecondaryChange={setPatternSecondary}
+            layers={patternLayers}
+            onLayersChange={setPatternLayers}
+            activeIdx={activePatternIdx}
+            onActiveIdxChange={setActivePatternIdx}
+            quantizeTargets={quantizeTargets}
             palette={activePalette}
             activePaletteIdx={activePaletteIdx}
             onPointerEnter={() => setHoveredTri(null)}

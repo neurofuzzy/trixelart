@@ -1,4 +1,5 @@
 import { SIDE, triCenter, worldToTri, type TriKey } from "@/lib/grid-math";
+import { encodeColor, resolveColor } from "@/lib/constants";
 
 /**
  * Procedural patterns on the triangular lattice.
@@ -46,6 +47,42 @@ export const DEFAULT_TRI_PATTERN: TriPattern = {
   scale: 2.6,
   rotation: 235,
 };
+
+export type PatternBlendMode = "normal" | "multiply" | "screen" | "difference";
+
+export const PATTERN_BLEND_MODES: PatternBlendMode[] = [
+  "normal",
+  "multiply",
+  "screen",
+  "difference",
+];
+
+/** One layer of the pattern stack: a pattern, two colours, and how it composites. */
+export interface PatternLayer extends TriPattern {
+  id: string;
+  /** Encoded palette colours (`"paletteIdx,colorIdx"`) for value 1 and 0. */
+  fg: string;
+  bg: string;
+  mode: PatternBlendMode;
+  opacity: number;
+  visible: boolean;
+}
+
+let layerSeq = 0;
+
+export function makePatternLayer(over?: Partial<PatternLayer>): PatternLayer {
+  layerSeq += 1;
+  return {
+    id: `pl-${Date.now().toString(36)}-${layerSeq}`,
+    ...DEFAULT_TRI_PATTERN,
+    fg: encodeColor(0, 8),
+    bg: encodeColor(0, 1),
+    mode: "normal",
+    opacity: 1,
+    visible: true,
+    ...over,
+  };
+}
 
 /**
  * GLSL `mod()` is non-negative for a positive modulus; JS `%` keeps the sign of
@@ -141,4 +178,174 @@ export function trixelsInBox(
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Stack compositing
+ * ------------------------------------------------------------------ */
+
+type Rgb = [number, number, number];
+
+function hexToRgb(hex: string): Rgb {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+      : h.padEnd(6, "0").slice(0, 6);
+  const n = parseInt(full, 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/**
+ * Blend one layer over the accumulator.
+ *
+ * Ported from `mfBlend` in material-forge's `blend.glsl.ts`, and like it this
+ * runs in authoring space — the sRGB-encoded 0-1 values, not linear light.
+ * Multiply, screen and difference all read differently in linear, and these are
+ * meant to match what the eye expects from an image editor.
+ */
+function blend(dst: Rgb, src: Rgb, alpha: number, mode: PatternBlendMode): Rgb {
+  let r: Rgb;
+  switch (mode) {
+    case "multiply":
+      r = [dst[0] * src[0], dst[1] * src[1], dst[2] * src[2]];
+      break;
+    case "screen":
+      r = [
+        1 - (1 - dst[0]) * (1 - src[0]),
+        1 - (1 - dst[1]) * (1 - src[1]),
+        1 - (1 - dst[2]) * (1 - src[2]),
+      ];
+      break;
+    case "difference":
+      r = [
+        Math.abs(dst[0] - src[0]),
+        Math.abs(dst[1] - src[1]),
+        Math.abs(dst[2] - src[2]),
+      ];
+      break;
+    default:
+      r = src;
+  }
+  return [
+    dst[0] + (r[0] - dst[0]) * alpha,
+    dst[1] + (r[1] - dst[1]) * alpha,
+    dst[2] + (r[2] - dst[2]) * alpha,
+  ];
+}
+
+/* ------------------------------------------------------------------ *
+ * Palette quantization
+ * ------------------------------------------------------------------ */
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+/**
+ * OKLab, for measuring "which palette colour is nearest".
+ *
+ * Plain RGB distance is not good enough here: the palettes span 14 hues at 9
+ * lightnesses, and Euclidean RGB routinely prefers a wrong-hue swatch over the
+ * obvious match. OKLab is near-uniform perceptually, so nearest-in-OKLab is
+ * nearest to the eye.
+ */
+function oklab(rgb: Rgb): Rgb {
+  const r = srgbToLinear(rgb[0]);
+  const g = srgbToLinear(rgb[1]);
+  const b = srgbToLinear(rgb[2]);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+export interface QuantizeTarget {
+  encoded: string;
+  lab: Rgb;
+}
+
+/**
+ * Every swatch of every palette, as quantization candidates.
+ *
+ * Compositing produces colours that are not in any palette — a multiply of two
+ * swatches generally is not a swatch — so the result has to be snapped back to
+ * something paintable. Searching across all palettes rather than the active one
+ * means a blend can legitimately land in a different palette than either input,
+ * which is usually the closest match available.
+ */
+export function buildQuantizeTargets(
+  palettes: { name: string; colors: string[] }[],
+): QuantizeTarget[] {
+  const out: QuantizeTarget[] = [];
+  palettes.forEach((p, pi) => {
+    p.colors.forEach((hex, ci) => {
+      out.push({ encoded: encodeColor(pi, ci), lab: oklab(hexToRgb(hex)) });
+    });
+  });
+  return out;
+}
+
+function nearest(rgb: Rgb, targets: QuantizeTarget[]): string {
+  const lab = oklab(rgb);
+  let best = targets[0];
+  let bestD = Infinity;
+  for (const t of targets) {
+    const dl = lab[0] - t.lab[0];
+    const da = lab[1] - t.lab[1];
+    const db = lab[2] - t.lab[2];
+    const d = dl * dl + da * da + db * db;
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best.encoded;
+}
+
+/**
+ * Builds the per-trixel colour function for a stack.
+ *
+ * Layer colours and the candidate list are resolved once, and results are
+ * memoized on the composited RGB: a stack of N two-colour layers can only
+ * produce a handful of distinct colours, so the OKLab search runs a few times
+ * rather than once per trixel.
+ */
+export function makePatternPainter(
+  layers: PatternLayer[],
+  targets: QuantizeTarget[],
+): (t: TriKey) => string {
+  const active = layers.filter((l) => l.visible);
+  const resolved = active.map((l) => ({
+    layer: l,
+    fg: hexToRgb(resolveColor(l.fg)),
+    bg: hexToRgb(resolveColor(l.bg)),
+  }));
+
+  // The stack sits on the bottom layer's background, so a single layer in
+  // `normal` at full opacity behaves exactly as it did before stacking existed.
+  const base: Rgb = resolved.length ? resolved[0].bg : [0, 0, 0];
+  const memo = new Map<number, string>();
+
+  return (t: TriKey): string => {
+    let c = base;
+    for (const r of resolved) {
+      const src = triPatternValue(t, r.layer) ? r.fg : r.bg;
+      c = blend(c, src, r.layer.opacity, r.layer.mode);
+    }
+    const key =
+      (Math.round(c[0] * 255) << 16) |
+      (Math.round(c[1] * 255) << 8) |
+      Math.round(c[2] * 255);
+    let hit = memo.get(key);
+    if (hit === undefined) {
+      hit = nearest(c, targets);
+      memo.set(key, hit);
+    }
+    return hit;
+  };
 }
