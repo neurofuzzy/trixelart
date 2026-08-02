@@ -10,8 +10,10 @@ import { stampTool } from "./stamp-tool";
 import { cloneTool } from "./clone-tool";
 import { eyedropperTool } from "./eyedropper-tool";
 import { cropTool } from "./crop-tool";
+import { hatchTool } from "./hatch-tool";
 
 export type { Tool, ToolHandler, ToolContext, DragState } from "./types";
+export { isToolAllowed } from "./types";
 export { viewPanTool } from "./view-pan-tool";
 export { patternBrushN, PATTERN_MIN_N } from "./pattern-tool";
 export { CROP_HANDLE_PX } from "./crop-tool";
@@ -32,4 +34,5 @@ export const toolMap: Record<Tool, ToolHandler> = {
   clone: cloneTool,
   eyedropper: eyedropperTool,
   crop: cropTool,
+  hatch: hatchTool,
 };

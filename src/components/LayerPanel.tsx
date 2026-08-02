@@ -1,8 +1,18 @@
 "use client";
 
-import { Eye, EyeOff, ChevronUp, ChevronDown, Plus, Trash2, Copy } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown,
+  Plus,
+  Trash2,
+  Copy,
+  AlignJustify,
+  Square,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Layer } from "@/hooks/use-history";
+import { layerKind, type Layer, type LayerKind } from "@/hooks/use-history";
 
 export function LayerPanel({
   layers,
@@ -19,7 +29,7 @@ export function LayerPanel({
   layers: Layer[];
   activeLayerIdx: number;
   onSelectLayer: (idx: number) => void;
-  onAddLayer: () => void;
+  onAddLayer: (kind?: LayerKind) => void;
   onDeleteLayer: (idx: number) => void;
   onDuplicateLayer: (idx: number) => void;
   onToggleVisibility: (idx: number) => void;
@@ -48,14 +58,26 @@ export function LayerPanel({
         <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
           Layers
         </span>
-        <button
-          className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-          onClick={onAddLayer}
-          disabled={!canAdd}
-          title="Add layer"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          {/* Adding a layer is a structural edit, so it goes through `commit`
+              and lands in the undo stack like duplicate and delete do. */}
+          <button
+            className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+            onClick={() => commit(() => onAddLayer("fill"))}
+            disabled={!canAdd}
+            title="Add fill layer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+            onClick={() => commit(() => onAddLayer("hatch"))}
+            disabled={!canAdd}
+            title="Add hatch layer"
+          >
+            <AlignJustify className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-1">
@@ -90,11 +112,16 @@ export function LayerPanel({
               </button>
 
               <button
-                className="text-xs font-medium text-muted-foreground truncate hover:text-foreground min-w-[60px] text-left"
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground truncate hover:text-foreground min-w-[60px] text-left"
                 onClick={() => onSelectLayer(i)}
-                title={layer.name}
+                title={`${layer.name} — ${layerKind(layer)} layer`}
               >
-                {layer.name}
+                {layerKind(layer) === "hatch" ? (
+                  <AlignJustify className="w-3 h-3 shrink-0 text-amber-400/80" />
+                ) : (
+                  <Square className="w-3 h-3 shrink-0 opacity-50" />
+                )}
+                <span className="truncate">{layer.name}</span>
               </button>
 
               <div className="flex items-center gap-0.5 ml-auto">

@@ -10,6 +10,7 @@ import {
   fitCropToPainted,
   type CropRect,
 } from "@/lib/crop";
+import type { Layer } from "@/hooks/use-history";
 import {
   MAX_UPLOAD_BYTES,
   SPOONFLOWER_DPI,
@@ -138,7 +139,7 @@ function NumberField({
 }
 
 export function ExportPanel({
-  painted,
+  layers,
   crop,
   onCropChange,
   gridRotation,
@@ -148,7 +149,8 @@ export function ExportPanel({
   onSettingsChange,
   onPointerEnter,
 }: {
-  painted: Record<string, string>;
+  /** Visible layers in z-order — hatch has to interleave with fills. */
+  layers: Layer[];
   crop: CropRect;
   onCropChange: (c: CropRect) => void;
   gridRotation: number;
@@ -201,7 +203,7 @@ export function ExportPanel({
       // holds — only the pixel density per tile drops.
       renderCropPreview(
         c,
-        painted,
+        layers,
         crop,
         Math.max(1, Math.round(cssW * bmpScale)),
         Math.max(1, Math.round(cssH * bmpScale)),
@@ -215,7 +217,7 @@ export function ExportPanel({
     const ro = new ResizeObserver(draw);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [painted, crop, bgHex, gridRotation, display.w, display.h]);
+  }, [layers, crop, bgHex, gridRotation, display.w, display.h]);
 
   const baseName = normalizeProjectFilename(projectName) || "trixel";
 
@@ -224,7 +226,7 @@ export function ExportPanel({
     setBusy(true);
     try {
       const canvas = document.createElement("canvas");
-      renderCropToCanvas(canvas, painted, crop, pxW, pxH, bgHex, gridRotation);
+      renderCropToCanvas(canvas, layers, crop, pxW, pxH, bgHex, gridRotation);
       const blob = await canvasToPngBlob(canvas);
       if (!blob) {
         setError("Could not encode the PNG.");
@@ -242,11 +244,11 @@ export function ExportPanel({
     } finally {
       setBusy(false);
     }
-  }, [painted, crop, pxW, pxH, bgHex, gridRotation, baseName]);
+  }, [layers, crop, pxW, pxH, bgHex, gridRotation, baseName]);
 
   const handleSvg = useCallback(() => {
     setError(null);
-    const svg = generateCroppedSVG(painted, crop, gridRotation, {
+    const svg = generateCroppedSVG(layers, crop, gridRotation, {
       ...settings.svg,
       widthInches: settings.widthInches,
     });
@@ -254,12 +256,17 @@ export function ExportPanel({
       new Blob([svg], { type: "image/svg+xml" }),
       `${baseName}_crop.svg`,
     );
-  }, [painted, crop, gridRotation, settings.svg, settings.widthInches, baseName]);
+  }, [layers, crop, gridRotation, settings.svg, settings.widthInches, baseName]);
 
   const handleFit = useCallback(() => {
-    const fitted = fitCropToPainted(painted);
+    // Union of every visible layer's keys — hatch marks are artwork and must
+    // frame in too. `fitCropToPainted` only reads keys, so the values are
+    // irrelevant here.
+    const all: Record<string, string> = {};
+    for (const l of layers) Object.assign(all, l.painted);
+    const fitted = fitCropToPainted(all);
     if (fitted) onCropChange(fitted);
-  }, [painted, onCropChange]);
+  }, [layers, onCropChange]);
 
   const setBg = (c: string) => onSettingsChange({ bgColor: c });
 

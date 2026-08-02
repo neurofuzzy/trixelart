@@ -7,6 +7,13 @@ import {
   type CropRect,
   type Rect,
 } from "@/lib/crop";
+import type { Layer } from "@/hooks/use-history";
+import {
+  buildRenderPlan,
+  hatchStrokes,
+  hatchStrokesBounds,
+  type HatchStroke,
+} from "@/lib/hatch-render";
 
 export interface TriangleData {
   points: [number, number][];
@@ -185,51 +192,106 @@ function computeBounds(triangles: TriangleData[]) {
   return { minX, minY, maxX, maxY };
 }
 
-export function generateSVG(
-  painted: Record<string, string>,
-  options?: SVGExportOptions,
+/** Emits one hatch layer as a group of `<line>`s, offset into document space. */
+function hatchMarkup(
+  strokes: HatchStroke[],
+  ox: number,
+  oy: number,
 ): string {
-  const triangles = generateTriangles(painted);
-  if (triangles.length === 0) {
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"/>';
+  if (strokes.length === 0) return "";
+  // Grouped by (colour, weight) so the stroke attributes are stated once
+  // instead of on every line.
+  const byStyle = new Map<string, HatchStroke[]>();
+  for (const s of strokes) {
+    const k = `${s.color}|${s.weight}`;
+    const list = byStyle.get(k);
+    if (list) list.push(s);
+    else byStyle.set(k, [s]);
   }
 
-  const bounds = computeBounds(triangles);
-  if (!bounds) {
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"/>';
-  }
-
-  const { minX, minY, maxX, maxY } = bounds;
-  const w = maxX - minX + PADDING * 2;
-  const h = maxY - minY + PADDING * 2;
-
-  if (options?.merge) {
-    const merged = mergeTrianglesByColor(triangles, -minX + PADDING, -minY + PADDING);
-    const paths = merged
+  const out: string[] = [];
+  for (const list of byStyle.values()) {
+    const { color, weight } = list[0];
+    const lines = list
       .map(
-        ({ fill, d }) =>
-          `  <path d="${d}" fill="${fill}"${
-            options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-          }/>`,
+        ({ seg }) =>
+          `    <line x1="${fmt(seg[0] + ox)}" y1="${fmt(seg[1] + oy)}" x2="${fmt(seg[2] + ox)}" y2="${fmt(seg[3] + oy)}"/>`,
       )
       .join("\n");
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
-${paths}
-</svg>`;
+    out.push(
+      `  <g stroke="${color}" stroke-width="${fmt(weight)}" stroke-linecap="butt">\n${lines}\n  </g>`,
+    );
   }
+  return out.join("\n");
+}
 
-  const polygons = triangles
-    .map(
-      ({ points, fill }) =>
-        `  <polygon points="${points.map((p) => `${fmt(p[0] - minX + PADDING)},${fmt(p[1] - minY + PADDING)}`).join(" ")}" fill="${fill}"${
-          options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-        }/>`,
-    )
+const EMPTY_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"/>';
+
+export function generateSVG(
+  layers: Layer[],
+  options?: SVGExportOptions,
+): string {
+  const plan = buildRenderPlan(layers);
+
+  // Resolve every step's geometry up front: the document has to be sized over
+  // hatch strokes as well as fill triangles, or a hatch-only document exports
+  // as the empty placeholder.
+  const resolved = plan.map((step) =>
+    step.kind === "fill"
+      ? { kind: "fill" as const, tris: generateTriangles(step.painted) }
+      : { kind: "hatch" as const, strokes: hatchStrokes(step.painted) },
+  );
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const grow = (b: { minX: number; minY: number; maxX: number; maxY: number } | null) => {
+    if (!b) return;
+    if (b.minX < minX) minX = b.minX;
+    if (b.minY < minY) minY = b.minY;
+    if (b.maxX > maxX) maxX = b.maxX;
+    if (b.maxY > maxY) maxY = b.maxY;
+  };
+  for (const step of resolved) {
+    if (step.kind === "fill") grow(computeBounds(step.tris));
+    else grow(hatchStrokesBounds(step.strokes));
+  }
+  if (!Number.isFinite(minX)) return EMPTY_SVG;
+
+  const w = maxX - minX + PADDING * 2;
+  const h = maxY - minY + PADDING * 2;
+  const ox = -minX + PADDING;
+  const oy = -minY + PADDING;
+
+  const body = resolved
+    .map((step) => {
+      if (step.kind === "hatch") return hatchMarkup(step.strokes, ox, oy);
+      if (step.tris.length === 0) return "";
+      if (options?.merge) {
+        return mergeTrianglesByColor(step.tris, ox, oy)
+          .map(
+            ({ fill, d }) =>
+              `  <path d="${d}" fill="${fill}"${
+                options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+              }/>`,
+          )
+          .join("\n");
+      }
+      return step.tris
+        .map(
+          ({ points, fill }) =>
+            `  <polygon points="${points.map((p) => `${fmt(p[0] + ox)},${fmt(p[1] + oy)}`).join(" ")}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`,
+        )
+        .join("\n");
+    })
+    .filter(Boolean)
     .join("\n");
 
+  if (!body) return EMPTY_SVG;
+
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
-${polygons}
+${body}
 </svg>`;
 }
 
@@ -353,7 +415,7 @@ function polygonArea(points: [number, number][]): number {
  * crop survives into the file, so the result opens clean in Inkscape.
  */
 export function generateCroppedSVG(
-  painted: Record<string, string>,
+  layers: Layer[],
   crop: CropRect,
   gridRotation: number,
   options?: CroppedSVGOptions,
@@ -372,48 +434,79 @@ export function generateCroppedSVG(
       : ` width="${w}" height="${h}"`;
   const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${dims}>`;
 
-  // Clip in world space (where the crop rect is axis-aligned), then rotate the
-  // survivors into display space and shift the crop origin to (0,0). The only
-  // rotations used are 0 and 90 degrees, so this stays exact.
-  const clipped: TriangleData[] = [];
-  for (const tri of generateTriangles(painted)) {
-    const poly = clipPolygonToRect(tri.points, world);
-    if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
-    // Rounding can merge two distinct vertices, so dedupe again afterwards —
-    // once at full precision inside the clipper is not sufficient.
-    const points = dedupeRing(
-      poly.map((p) => {
-        const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
-        return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
-      }),
-      0,
-    );
-    if (points.length < 3) continue;
-    clipped.push({ fill: tri.fill, points });
-  }
+  const worldBox = {
+    minX: world.x,
+    minY: world.y,
+    maxX: world.x + world.w,
+    maxY: world.y + world.h,
+  };
 
-  if (clipped.length === 0) return `${open}\n</svg>`;
+  const body = buildRenderPlan(layers)
+    .map((step) => {
+      if (step.kind === "hatch") {
+        // Clipped to the crop in world space, then rotated into display space —
+        // the same order the fill path uses below.
+        const strokes = hatchStrokes(step.painted, worldBox).map((s) => {
+          const [ax, ay] = rotatePoint(s.seg[0], s.seg[1], gridRotation);
+          const [bx, by] = rotatePoint(s.seg[2], s.seg[3], gridRotation);
+          return {
+            ...s,
+            seg: [
+              roundNum(ax - display.x),
+              roundNum(ay - display.y),
+              roundNum(bx - display.x),
+              roundNum(by - display.y),
+            ] as [number, number, number, number],
+          };
+        });
+        return hatchMarkup(strokes, 0, 0);
+      }
 
-  if (options?.merge) {
-    const paths = mergeTrianglesByColor(clipped)
-      .map(
-        ({ fill, d }) =>
-          `  <path d="${d}" fill="${fill}"${
-            options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-          }/>`,
-      )
-      .join("\n");
-    return `${open}\n${paths}\n</svg>`;
-  }
+      // Clip in world space (where the crop rect is axis-aligned), then rotate
+      // the survivors into display space and shift the crop origin to (0,0).
+      // The only rotations used are 0 and 90 degrees, so this stays exact.
+      const clipped: TriangleData[] = [];
+      for (const tri of generateTriangles(step.painted)) {
+        const poly = clipPolygonToRect(tri.points, world);
+        if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
+        // Rounding can merge two distinct vertices, so dedupe again afterwards
+        // — once at full precision inside the clipper is not sufficient.
+        const points = dedupeRing(
+          poly.map((p) => {
+            const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
+            return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
+          }),
+          0,
+        );
+        if (points.length < 3) continue;
+        clipped.push({ fill: tri.fill, points });
+      }
 
-  const polygons = clipped
-    .map(
-      ({ points, fill }) =>
-        `  <polygon points="${points.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${fill}"${
-          options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-        }/>`,
-    )
+      if (clipped.length === 0) return "";
+
+      if (options?.merge) {
+        return mergeTrianglesByColor(clipped)
+          .map(
+            ({ fill, d }) =>
+              `  <path d="${d}" fill="${fill}"${
+                options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+              }/>`,
+          )
+          .join("\n");
+      }
+
+      return clipped
+        .map(
+          ({ points, fill }) =>
+            `  <polygon points="${points.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`,
+        )
+        .join("\n");
+    })
+    .filter(Boolean)
     .join("\n");
 
-  return `${open}\n${polygons}\n</svg>`;
+  if (!body) return `${open}\n</svg>`;
+  return `${open}\n${body}\n</svg>`;
 }

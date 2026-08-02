@@ -1,5 +1,6 @@
 import { worldToTri, triToString } from "@/lib/grid-math";
 import type { ToolHandler } from "./types";
+import { pickValueAt } from "./pick-value";
 
 export const viewPanTool: ToolHandler = {
   onDown(ctx, e, pos, isRightClick) {
@@ -35,11 +36,8 @@ export const viewPanTool: ToolHandler = {
       if (ctx.tool !== "stamp") {
         const world = ctx.screenToWorld(pos.x, pos.y);
         const key = triToString(worldToTri(world.x, world.y));
-        const pickedColor = ctx.paintedRef.current[key];
-        if (pickedColor) {
-          ctx.setColor(pickedColor);
-          ctx.setTool("paint");
-        }
+        const picked = ctx.paintedRef.current[key];
+        if (picked) pickValueAt(ctx, picked);
       }
     }
   },

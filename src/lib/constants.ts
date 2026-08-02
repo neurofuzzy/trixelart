@@ -1,3 +1,6 @@
+// hatch.ts imports only from grid-math, so this does not create a cycle.
+import { mapEncodedColor } from "@/lib/hatch";
+
 function hslToHex(h: number, s: number, l: number): string {
   s = Math.max(0, Math.min(100, s));
   l = Math.max(0, Math.min(100, l));
@@ -137,13 +140,14 @@ export function remapGrid(
   const L = COLOR_COUNT;
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(painted)) {
-    const d = decodeColor(value);
-    if (d) {
-      const newIdx = (((d.colorIdx + direction) % L) + L) % L;
-      result[key] = encodeColor(d.paletteIdx, newIdx);
-    } else {
-      result[key] = value;
-    }
+    // Routed through `mapEncodedColor` so hatch marks shift the colour inside
+    // themselves. Without it the arrow keys are silently inert on a hatch
+    // layer — safe, but it reads as a bug.
+    result[key] = mapEncodedColor(value, (c) => {
+      const d = decodeColor(c);
+      if (!d) return c;
+      return encodeColor(d.paletteIdx, (((d.colorIdx + direction) % L) + L) % L);
+    });
   }
   return result;
 }
@@ -169,15 +173,14 @@ export function shiftGridPalettes(
 ): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(painted)) {
-    const d = decodeColor(value);
-    if (d) {
+    result[key] = mapEncodedColor(value, (c) => {
+      const d = decodeColor(c);
+      if (!d) return c;
       const newPalette =
         (((d.paletteIdx + direction) % paletteCount) + paletteCount) %
         paletteCount;
-      result[key] = encodeColor(newPalette, d.colorIdx);
-    } else {
-      result[key] = value;
-    }
+      return encodeColor(newPalette, d.colorIdx);
+    });
   }
   return result;
 }

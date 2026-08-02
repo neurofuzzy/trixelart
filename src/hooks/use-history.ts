@@ -3,9 +3,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
 
+/** What a layer's `painted` values mean. Absent is `"fill"`, so every document
+ *  saved before hatch layers existed keeps working with no migration. */
+export type LayerKind = "fill" | "hatch";
+
+/** Reads a layer's kind, defaulting an absent field to `"fill"`. Use this
+ *  everywhere rather than touching `.kind` directly, or old saves misbehave. */
+export const layerKind = (l: { kind?: LayerKind }): LayerKind => l.kind ?? "fill";
+
 export interface Layer {
   id: string;
   name: string;
+  /** `"fill"` (or absent): values are encoded colours `"p,c"`.
+   *  `"hatch"`: values are encoded hatch marks — see `lib/hatch.ts`. */
+  kind?: LayerKind;
   painted: Record<string, string>;
   visible: boolean;
 }
@@ -27,10 +38,11 @@ const STORAGE_KEY = "trixel-save";
 const MAX_HISTORY = 50;
 const MAX_LAYERS = 5;
 
-function makeLayer(name: string): Layer {
+function makeLayer(name: string, kind: LayerKind = "fill"): Layer {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
+    kind,
     painted: {},
     visible: true,
   };
@@ -166,12 +178,15 @@ export function useHistory() {
     setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
 
-  const addLayer = useCallback(() => {
+  // Both kinds share the "Layer N" numbering: the next number is derived by
+  // parsing that prefix, so naming hatch layers anything else makes the parse
+  // yield 0 and the next fill layer collides on a name already in use.
+  const addLayer = useCallback((kind: LayerKind = "fill") => {
     setLayers((prev) => {
       if (prev.length >= MAX_LAYERS) return prev;
       const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
       const nextNum = Math.max(0, ...nameNums) + 1;
-      const next = [...prev, makeLayer(`Layer ${nextNum}`)];
+      const next = [...prev, makeLayer(`Layer ${nextNum}`, kind)];
       setActiveLayerIdx(next.length - 1);
       return next;
     });
@@ -199,7 +214,7 @@ export function useHistory() {
         const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
         const nextNum = Math.max(0, ...nameNums) + 1;
         const dup: Layer = {
-          ...makeLayer(`Layer ${nextNum}`),
+          ...makeLayer(`Layer ${nextNum}`, layerKind(src)),
           painted: { ...src.painted },
           visible: src.visible,
         };
@@ -243,6 +258,11 @@ export function useHistory() {
   return {
     mounted,
     layers,
+    // Exposed so project import can restore a whole layer array. Without it
+    // `handleFileChange` could only write the active layer's pixels into
+    // whatever layer happened to be selected, and the imported stack only
+    // materialised after an undo/redo round trip.
+    setLayers,
     activeLayerIdx,
     painted,
     setPainted,
