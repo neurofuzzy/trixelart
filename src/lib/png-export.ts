@@ -46,7 +46,14 @@ export function renderCropToCanvas(
 
   const display = cropDisplayBounds(crop, gridRotation);
   if (display.w <= 0 || display.h <= 0) return;
-  const pxPerWorld = pxW / display.w;
+  // Each axis is scaled to fit its own dimension rather than sharing one factor.
+  // `cropPixelSize` has snapped the row axis to a whole number of triangle rows,
+  // and only an exact fit puts those rows on integer pixel boundaries — a shared
+  // scale would leave the snapped axis short by up to `2n` pixels and reopen the
+  // sub-pixel straddle the snap exists to remove. The two factors differ by well
+  // under 0.1%, so nothing is visibly distorted.
+  const sx = pxW / display.w;
+  const sy = pxH / display.h;
 
   ctx.save();
   ctx.beginPath();
@@ -56,12 +63,14 @@ export function renderCropToCanvas(
   // Same forward transform GridCanvas uses, minus pan/zoom: scale the crop to
   // fill the bitmap, put the crop's display origin at (0,0), then rotate world
   // space into display space so pointy-top exports match what is on screen.
-  ctx.scale(pxPerWorld, pxPerWorld);
+  ctx.scale(sx, sy);
   ctx.translate(-display.x, -display.y);
   ctx.rotate(gridRotation);
 
   // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
-  const overdraw = 1 / pxPerWorld;
+  // Sized off the smaller scale so the overdraw is at least one device pixel on
+  // both axes.
+  const overdraw = 1 / Math.min(sx, sy);
   for (const step of buildRenderPlan(layers)) {
     if (step.kind === "hatch") {
       // No zoom clamp: exports use the true world weight.
@@ -77,16 +86,20 @@ export function renderCropToCanvas(
     }
 
     // One path per colour: adjacent same-coloured triangles then share a filled
-    // region with no seam between them. Across a colour boundary the two fills
-    // still each cover only half of the shared antialiased pixel, so every
-    // group is also stroked with its own colour at ~1 device pixel to close the
-    // gap. The SVG exporter offers the same overdraw as an option; for raster it
-    // is unconditional because there is no downside.
+    // region with no seam between them. Across a colour boundary two abutting
+    // fills are each composited separately, so a boundary pixel ends up part
+    // background however their coverages divide — hence the overdraw stroke in
+    // the group's own colour, at ~1 device pixel, to close the gap.
+    //
+    // **The flat edges are excluded from that stroke.** `cropPixelSize` has put
+    // every horizontal lattice line on an integer pixel boundary, so those fills
+    // already meet exactly and have no gap to close; a stroke centred there
+    // instead straddles the boundary by half a pixel each way and reintroduces
+    // the very blend it was meant to prevent — as a discoloured line running the
+    // full width of the export at every row. Only the two diagonal edges of each
+    // triangle, which cannot be pixel-aligned, still get overdrawn.
     for (const [fill, polys] of byColor) {
       ctx.fillStyle = fill;
-      ctx.strokeStyle = fill;
-      ctx.lineWidth = overdraw;
-      ctx.lineJoin = "round";
       ctx.beginPath();
       for (const points of polys) {
         ctx.moveTo(points[0][0], points[0][1]);
@@ -96,6 +109,23 @@ export function renderCropToCanvas(
         ctx.closePath();
       }
       ctx.fill();
+
+      ctx.strokeStyle = fill;
+      ctx.lineWidth = overdraw;
+      ctx.lineCap = "butt";
+      ctx.beginPath();
+      for (const points of polys) {
+        for (let k = 0; k < points.length; k++) {
+          const [x0, y0] = points[k];
+          const [x1, y1] = points[(k + 1) % points.length];
+          // World-space y equality identifies the lattice's flat edges. Under a
+          // quarter turn they become display-vertical, and the width is the
+          // snapped axis there, so they are pixel-aligned either way.
+          if (y0 === y1) continue;
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+        }
+      }
       ctx.stroke();
     }
   }
@@ -125,27 +155,36 @@ export function renderCropPreview(
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  canvas.width = pxW;
-  canvas.height = pxH;
+  // Integer tile dimensions, with the same row-axis snap the real export uses,
+  // and the bitmap sized to an exact multiple of them. Blitting at fractional
+  // positions or sizes resamples every tile and paints blurred seams the export
+  // does not have — which would be a preview that lies about the one thing it
+  // exists to show. The caller sets the element's CSS size separately, so
+  // adjusting the backing store here is free.
+  const display = cropDisplayBounds(crop, gridRotation);
+  const rows = Math.max(1, 2 * crop.n);
+  const rotated = Boolean(gridRotation);
+
+  // Fit within both requested dimensions — snapping only ever grows a tile, so
+  // sizing off the width alone could overflow the caller's height budget.
+  const byH =
+    display.h > 0 ? (pxH / repeat) * (display.w / display.h) : pxW / repeat;
+  let tw = Math.max(1, Math.round(Math.min(pxW / repeat, byH)));
+  if (rotated) tw = snapUp(tw, rows);
+  let th =
+    display.w > 0 ? Math.max(1, Math.round((tw * display.h) / display.w)) : 1;
+  if (!rotated) th = snapUp(th, rows);
+
+  canvas.width = tw * repeat;
+  canvas.height = th * repeat;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = bgHex;
-  ctx.fillRect(0, 0, pxW, pxH);
-
-  const tw = pxW / repeat;
-  const th = pxH / repeat;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // One tile, rendered once and blitted — the field is a pure function of world
   // position, so every tile is the same bitmap by construction.
   const tile = document.createElement("canvas");
-  renderCropToCanvas(
-    tile,
-    layers,
-    crop,
-    Math.max(1, Math.round(tw)),
-    Math.max(1, Math.round(th)),
-    bgHex,
-    gridRotation,
-  );
+  renderCropToCanvas(tile, layers, crop, tw, th, bgHex, gridRotation);
 
   const mid = Math.floor(repeat / 2);
   for (let gy = 0; gy < repeat; gy++) {
@@ -158,11 +197,30 @@ export function renderCropPreview(
 
   // Mark the tile that is actually exported.
   ctx.strokeStyle = "rgba(251, 191, 36, 0.9)"; // amber-400
-  ctx.lineWidth = Math.max(1, pxW / 400);
+  ctx.lineWidth = Math.max(1, canvas.width / 400);
   ctx.strokeRect(mid * tw, mid * th, tw, th);
 }
 
-/** Output pixel dimensions for a crop at a given physical width. */
+const snapUp = (v: number, k: number) => Math.max(k, Math.ceil(v / k) * k);
+
+/**
+ * Output pixel dimensions for a crop at a given physical width.
+ *
+ * **The row-axis dimension is snapped to a whole multiple of `2n`.** The crop is
+ * exactly `n` vertical periods tall, i.e. `2n` triangle rows, and the lattice's
+ * only axis-aligned edges are the horizontal ones at every multiple of `H`. Left
+ * unsnapped, `H` scales to an irrational number of device pixels (`n*sqrt(3)/m`
+ * is irrational), so *every* horizontal edge straddles a pixel row, antialiases
+ * against its neighbour, and the export grows a discoloured 1-2px line across its
+ * full width at every row — the whole way down the image, at any resolution.
+ * Snapping puts every row on an integer boundary, where there is nothing to
+ * blend. Diagonal edges are unaffected and still antialias, which is what you
+ * want there.
+ *
+ * The cost is at most `2n` pixels of height, under 0.1% at print sizes, and it is
+ * paid on the axis the user did *not* pin. Under a quarter turn the row axis is
+ * horizontal, so the snap moves to the width instead.
+ */
 export function cropPixelSize(
   crop: CropRect,
   gridRotation: number,
@@ -170,8 +228,14 @@ export function cropPixelSize(
   dpi: number,
 ): { pxW: number; pxH: number } {
   const display = cropDisplayBounds(crop, gridRotation);
-  const pxW = Math.max(1, Math.round(widthInches * dpi));
-  const pxH = Math.max(1, Math.round((pxW * display.h) / display.w));
+  const rows = Math.max(1, 2 * crop.n);
+  const rotated = Boolean(gridRotation);
+
+  let pxW = Math.max(1, Math.round(widthInches * dpi));
+  if (rotated) pxW = snapUp(pxW, rows);
+  let pxH = Math.max(1, Math.round((pxW * display.h) / display.w));
+  if (!rotated) pxH = snapUp(pxH, rows);
+
   return { pxW, pxH };
 }
 
