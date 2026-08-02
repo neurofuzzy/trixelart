@@ -127,6 +127,10 @@ export function Footer({
               ? "click on an area to create a stamp"
               : "ALT click on a hex region to sample a pattern"}
           </span>
+        ) : tool === "hatch" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            drag to hatch
+          </span>
         ) : tool === "crop" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
             drag the handles to set the export region

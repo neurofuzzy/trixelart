@@ -1,5 +1,6 @@
 import { SIDE, H, worldToTri, triToString, triCenter, type TriKey, type TriType } from "./grid-math";
 import { encodeColor } from "./constants";
+import { flipHatchValue, mapEncodedColor, rotateHatchValue } from "./hatch";
 
 /**
  * Hex coordinates of the home hex containing trixel (q, r, type).
@@ -284,7 +285,10 @@ export function rotateHexCW(
       delete result[key];
       let cur: TriKey = t;
       cur = rotateTrixelCCW(cur, qc, rc);
-      moved.push({ q: cur.q, r: cur.r, type: cur.type, color });
+      // A 60 degree turn permutes the three line families cyclically, so a
+      // rotated hatch mark must carry its direction round with it. Moving the
+      // value alone would leave the strokes pointing the old way.
+      moved.push({ q: cur.q, r: cur.r, type: cur.type, color: rotateHatchValue(color, 1) });
     }
   }
   for (const m of moved) {
@@ -311,7 +315,8 @@ export function rotateHexCCW(
       delete result[key];
       let cur: TriKey = t;
       for (let i = 0; i < 5; i++) cur = rotateTrixelCCW(cur, qc, rc);
-      moved.push({ q: cur.q, r: cur.r, type: cur.type, color });
+      // Five 60 degree steps, i.e. -1 turn: +2 on the 3-cycle of families.
+      moved.push({ q: cur.q, r: cur.r, type: cur.type, color: rotateHatchValue(color, 2) });
     }
   }
   for (const m of moved) {
@@ -343,7 +348,7 @@ export function flipHexVertical(
       const dx = centX - cx;
       const dy = centY - cy;
       const flipped = worldToTri(cx + dx, cy - dy);
-      moved.push({ q: flipped.q, r: flipped.r, type: flipped.type, color });
+      moved.push({ q: flipped.q, r: flipped.r, type: flipped.type, color: flipHatchValue(color) });
     }
   }
   for (const m of moved) {
@@ -374,7 +379,10 @@ export function flipHexHorizontal(
       const centY = t.type === "up" ? by + H / 3 : by + (2 * H) / 3;
       const dx = centX - cx;
       const flipped = worldToTri(cx - dx, centY);
-      moved.push({ q: flipped.q, r: flipped.r, type: flipped.type, color });
+      // Mirroring about either axis swaps the two diagonal families and fixes
+      // the horizontal one; the axes differ by a 180 degree turn, which is the
+      // identity on undirected lines.
+      moved.push({ q: flipped.q, r: flipped.r, type: flipped.type, color: flipHatchValue(color) });
     }
   }
   for (const m of moved) {
@@ -397,13 +405,14 @@ export function remapHex(
     const key = triToString(t);
     const encoded = painted[key];
     if (!encoded) continue;
-    const parts = encoded.split(",");
-    if (parts.length !== 2) continue;
-    const p = Number(parts[0]);
-    const i = Number(parts[1]);
-    if (isNaN(p) || isNaN(i)) continue;
-    const newIdx = ((i + direction) % colorCount + colorCount) % colorCount;
-    result[key] = encodeColor(p, newIdx);
+    result[key] = mapEncodedColor(encoded, (c) => {
+      const parts = c.split(",");
+      if (parts.length !== 2) return c;
+      const p = Number(parts[0]);
+      const i = Number(parts[1]);
+      if (isNaN(p) || isNaN(i)) return c;
+      return encodeColor(p, ((i + direction) % colorCount + colorCount) % colorCount);
+    });
   }
   return result;
 }
@@ -422,13 +431,14 @@ export function shiftHexPalettes(
     const key = triToString(t);
     const encoded = painted[key];
     if (!encoded) continue;
-    const parts = encoded.split(",");
-    if (parts.length !== 2) continue;
-    const p = Number(parts[0]);
-    const i = Number(parts[1]);
-    if (isNaN(p) || isNaN(i)) continue;
-    const newPalette = ((p + direction) % paletteCount + paletteCount) % paletteCount;
-    result[key] = encodeColor(newPalette, i);
+    result[key] = mapEncodedColor(encoded, (c) => {
+      const parts = c.split(",");
+      if (parts.length !== 2) return c;
+      const p = Number(parts[0]);
+      const i = Number(parts[1]);
+      if (isNaN(p) || isNaN(i)) return c;
+      return encodeColor(((p + direction) % paletteCount + paletteCount) % paletteCount, i);
+    });
   }
   return result;
 }

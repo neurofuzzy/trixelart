@@ -28,6 +28,7 @@ import {
 import type { Layer } from "@/hooks/use-history";
 import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
 import type { CropRect } from "@/lib/crop";
+import type { HatchBrush } from "@/lib/hatch";
 import { normPoint, normTouchPair } from "@/lib/touch-utils";
 
 interface UseInteractionArgs {
@@ -69,6 +70,8 @@ interface UseInteractionArgs {
   activeLayerIdx: number;
   crop: CropRect;
   setCrop: React.Dispatch<React.SetStateAction<CropRect>>;
+  hatchBrush: HatchBrush;
+  setHatchBrush: (patch: Partial<HatchBrush>) => void;
 }
 
 export function useInteraction(args: UseInteractionArgs) {
@@ -109,6 +112,8 @@ export function useInteraction(args: UseInteractionArgs) {
     activeLayerIdx,
     crop,
     setCrop,
+    hatchBrush,
+    setHatchBrush,
   } = args;
 
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
@@ -341,6 +346,8 @@ export function useInteraction(args: UseInteractionArgs) {
     setSelectedHexes,
     crop,
     setCrop,
+    hatchBrush,
+    setHatchBrush,
   };
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;

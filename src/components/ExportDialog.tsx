@@ -11,6 +11,7 @@ import {
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
+import type { Layer } from "@/hooks/use-history";
 import { normalizeProjectFilename } from "@/lib/utils";
 
 function stripSvgDimensions(svg: string): string {
@@ -24,14 +25,15 @@ function stripSvgDimensions(svg: string): string {
 export function ExportDialog({
   open,
   onOpenChange,
-  painted,
+  layers,
   projectName,
   settings,
   onSettingsChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  painted: Record<string, string>;
+  /** Visible layers in z-order — hatch layers have to interleave with fills. */
+  layers: Layer[];
   projectName: string;
   settings: SVGExportOptions;
   onSettingsChange: (patch: Partial<SVGExportOptions>) => void;
@@ -40,8 +42,8 @@ export function ExportDialog({
   const merge = settings.merge ?? false;
 
   const svg = useMemo(
-    () => generateSVG(painted, { stroke, merge }),
-    [painted, stroke, merge],
+    () => generateSVG(layers, { stroke, merge }),
+    [layers, stroke, merge],
   );
 
   const previewSvg = useMemo(() => stripSvgDimensions(svg), [svg]);

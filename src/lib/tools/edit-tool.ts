@@ -16,6 +16,11 @@ type KeyOp = (
 interface EditToolOpts {
   dedup?: boolean;
   toggle?: boolean;
+  /** Decides whether a no-move click landed on what the brush would paint, in
+   *  which case `toggle` clears the cell instead. Defaults to comparing
+   *  resolved colours, which is what paint wants; the hatch brush overrides it
+   *  because its values are hatch marks, not colours. */
+  sameAsBrush?: (existing: string | undefined, ctx: ToolContext) => boolean;
 }
 
 /** Shared shell for paint / erase / dodge / burn. All four follow the same
@@ -28,6 +33,10 @@ export function makeEditTool(
 ): ToolHandler {
   const dedup = !!opts?.dedup;
   const toggle = !!opts?.toggle;
+  const sameAsBrush =
+    opts?.sameAsBrush ??
+    ((existing: string | undefined, ctx: ToolContext) =>
+      resolveColor(existing ?? "") === resolveColor(ctx.color));
 
   return {
     onDown(ctx, e, pos) {
@@ -145,10 +154,7 @@ export function makeEditTool(
           ctx.setPainted((prev) => {
             const next = { ...prev };
             if (toggle && ck.length === 1) {
-              if (
-                resolveColor(prev[ck[0]] ?? "") ===
-                resolveColor(ctx.color)
-              ) {
+              if (sameAsBrush(prev[ck[0]], ctx)) {
                 delete next[ck[0]];
               } else {
                 keyOp(next, ck[0], ctx);

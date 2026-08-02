@@ -4,12 +4,14 @@ import type { Symmetry, SelectionSnapshot } from "@/lib/hex-flower";
 import type { Layer } from "@/hooks/use-history";
 import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
 import type { CropHandle, CropRect } from "@/lib/crop";
+import type { HatchBrush } from "@/lib/hatch";
 
 export type Tool =
   | "paint"
   | "erase"
   | "fill"
   | "pattern"
+  | "hatch"
   | "pan"
   | "select"
   | "stamp"
@@ -18,6 +20,33 @@ export type Tool =
   | "burn"
   | "eyedropper"
   | "crop";
+
+/**
+ * Tools that would write colour values, which is meaningless on a hatch layer —
+ * they'd corrupt the map. Stamp is the one that matters most: its snapshots are
+ * persisted and can later be pasted onto a fill layer, so it is the only real
+ * cross-layer leak path.
+ *
+ * Erase (value-agnostic), pan and select (pure key translation), eyedropper
+ * (reads the hatch brush instead) and crop (view-only) stay available on both
+ * kinds.
+ */
+const HATCH_BLOCKED_TOOLS: readonly Tool[] = [
+  "paint",
+  "fill",
+  "pattern",
+  "stamp",
+  "clone",
+  "dodge",
+  "burn",
+];
+
+/** The single source of truth for which tools a layer kind permits. Enforced by
+ *  wrapping `setTool` in TrixelGrid, so every path — toolbar, keyboard, and the
+ *  tools that switch tools themselves — is covered by one check. */
+export function isToolAllowed(t: Tool, kind: "fill" | "hatch"): boolean {
+  return kind === "fill" ? t !== "hatch" : !HATCH_BLOCKED_TOOLS.includes(t);
+}
 
 export interface View {
   x: number;
@@ -98,6 +127,10 @@ export interface ToolContext {
   /** Pattern brush stack, bottom-first. Each layer carries its own two colours,
    *  so the brush is independent of the active paint colour. */
   patternLayers: PatternLayer[];
+  /** Hatch brush settings. Like the pattern stack, this carries its own colour
+   *  rather than borrowing the paint swatch. */
+  hatchBrush: HatchBrush;
+  setHatchBrush: (patch: Partial<HatchBrush>) => void;
   /** Palette swatches the composited colour is snapped to. */
   quantizeTargets: QuantizeTarget[];
   flowerRadius: number;

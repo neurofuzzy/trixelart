@@ -1,5 +1,7 @@
 import { generateTriangles } from "@/lib/svg-export";
 import { cropDisplayBounds, type CropRect } from "@/lib/crop";
+import type { Layer } from "@/hooks/use-history";
+import { buildRenderPlan, drawHatchLayer } from "@/lib/hatch-render";
 
 /**
  * Raster export of a crop region.
@@ -25,7 +27,7 @@ export const SPOONFLOWER_DPI = 150;
  */
 export function renderCropToCanvas(
   canvas: HTMLCanvasElement,
-  painted: Record<string, string>,
+  layers: Layer[],
   crop: CropRect,
   pxW: number,
   pxH: number,
@@ -58,35 +60,44 @@ export function renderCropToCanvas(
   ctx.translate(-display.x, -display.y);
   ctx.rotate(gridRotation);
 
-  const byColor = new Map<string, [number, number][][]>();
-  for (const tri of generateTriangles(painted)) {
-    const list = byColor.get(tri.fill);
-    if (list) list.push(tri.points);
-    else byColor.set(tri.fill, [tri.points]);
-  }
-
-  // One path per colour: adjacent same-coloured triangles then share a filled
-  // region with no seam between them. Across a colour boundary the two fills
-  // still each cover only half of the shared antialiased pixel, so every group
-  // is also stroked with its own colour at ~1 device pixel to close the gap.
-  // The SVG exporter offers the same overdraw as an option; for raster it is
-  // unconditional because there is no downside.
+  // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
   const overdraw = 1 / pxPerWorld;
-  for (const [fill, polys] of byColor) {
-    ctx.fillStyle = fill;
-    ctx.strokeStyle = fill;
-    ctx.lineWidth = overdraw;
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    for (const points of polys) {
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (let k = 1; k < points.length; k++) {
-        ctx.lineTo(points[k][0], points[k][1]);
-      }
-      ctx.closePath();
+  for (const step of buildRenderPlan(layers)) {
+    if (step.kind === "hatch") {
+      // No zoom clamp: exports use the true world weight.
+      drawHatchLayer(ctx, step.painted);
+      continue;
     }
-    ctx.fill();
-    ctx.stroke();
+
+    const byColor = new Map<string, [number, number][][]>();
+    for (const tri of generateTriangles(step.painted)) {
+      const list = byColor.get(tri.fill);
+      if (list) list.push(tri.points);
+      else byColor.set(tri.fill, [tri.points]);
+    }
+
+    // One path per colour: adjacent same-coloured triangles then share a filled
+    // region with no seam between them. Across a colour boundary the two fills
+    // still each cover only half of the shared antialiased pixel, so every
+    // group is also stroked with its own colour at ~1 device pixel to close the
+    // gap. The SVG exporter offers the same overdraw as an option; for raster it
+    // is unconditional because there is no downside.
+    for (const [fill, polys] of byColor) {
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = fill;
+      ctx.lineWidth = overdraw;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      for (const points of polys) {
+        ctx.moveTo(points[0][0], points[0][1]);
+        for (let k = 1; k < points.length; k++) {
+          ctx.lineTo(points[k][0], points[k][1]);
+        }
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   ctx.restore();
@@ -103,7 +114,7 @@ export function renderCropToCanvas(
  */
 export function renderCropPreview(
   canvas: HTMLCanvasElement,
-  painted: Record<string, string>,
+  layers: Layer[],
   crop: CropRect,
   pxW: number,
   pxH: number,
@@ -128,7 +139,7 @@ export function renderCropPreview(
   const tile = document.createElement("canvas");
   renderCropToCanvas(
     tile,
-    painted,
+    layers,
     crop,
     Math.max(1, Math.round(tw)),
     Math.max(1, Math.round(th)),

@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
-import { useHistory, type ProjectSnapshot, type Layer } from "@/hooks/use-history";
+import {
+  useHistory,
+  layerKind,
+  type ProjectSnapshot,
+  type Layer,
+  type LayerKind,
+} from "@/hooks/use-history";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
@@ -50,7 +56,7 @@ import {
   shiftHexPalettes,
   enumerateHexTrixels,
 } from "@/lib/hex-flower";
-import type { Tool } from "@/lib/tools";
+import { isToolAllowed, type Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
 import { Export3DDialog } from "@/components/Export3DDialog";
 import { CutExportDialog } from "@/components/CutExportDialog";
@@ -62,6 +68,25 @@ import {
   type ExportSettings,
 } from "@/components/ExportPanel";
 import { DEFAULT_CROP, type CropRect } from "@/lib/crop";
+import { HatchBar } from "@/components/HatchBar";
+import {
+  DEFAULT_HATCH_BRUSH,
+  MAX_DENSITY,
+  MAX_WEIGHT,
+  MIN_DENSITY,
+  MIN_WEIGHT,
+  type HatchBrush,
+} from "@/lib/hatch";
+import { HatchifyDialog } from "@/components/HatchifyDialog";
+import {
+  DEFAULT_HATCHIFY,
+  MAX_LEVELS,
+  MAX_SKIP,
+  MIN_LEVELS,
+  MIN_SKIP,
+  hatchify,
+  type HatchifySettings,
+} from "@/lib/hatchify";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
 import { HelpDialog } from "@/components/onboarding/HelpDialog";
@@ -81,6 +106,7 @@ export default function TrixelGrid() {
   const {
     mounted,
     layers,
+    setLayers,
     activeLayerIdx,
     painted,
     setPainted,
@@ -133,6 +159,28 @@ export default function TrixelGrid() {
     [],
   );
 
+  // Hatch brush. Like the pattern stack it carries its own colour, so it is a
+  // view setting rather than authored content — `trixel-settings`, never
+  // ProjectSnapshot.
+  const [hatchBrush, setHatchBrushState] =
+    useState<HatchBrush>(DEFAULT_HATCH_BRUSH);
+  const setHatchBrush = useCallback(
+    (patch: Partial<HatchBrush>) =>
+      setHatchBrushState((b) => ({ ...b, ...patch })),
+    [],
+  );
+
+  // Hatchify settings sit with the brush, for the same reason: they describe how
+  // the tool behaves, not what the document contains.
+  const [hatchifyOpen, setHatchifyOpen] = useState(false);
+  const [hatchifySettings, setHatchifySettingsState] =
+    useState<HatchifySettings>(DEFAULT_HATCHIFY);
+  const setHatchifySettings = useCallback(
+    (patch: Partial<HatchifySettings>) =>
+      setHatchifySettingsState((s) => ({ ...s, ...patch })),
+    [],
+  );
+
   const computedPalettes = useMemo(
     () => computePaletteColors(PALETTE_DEFS, hueOffset, satOffset),
     [hueOffset, satOffset],
@@ -157,6 +205,17 @@ export default function TrixelGrid() {
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
+
+  // On a hatch layer the ordinary swatch row drives the hatch brush, so it
+  // shows the brush's *own* palette rather than the paint palette. Anything
+  // else and an eyedropper pick landing on a mark authored in another palette
+  // would highlight the wrong swatch, or none. Both `hatchHex` and the row come
+  // out of the same array, so identity by hex is safe here.
+  const hatchColor = decodeColor(hatchBrush.color);
+  const hatchPaletteIdx = hatchColor?.paletteIdx ?? activePaletteIdx;
+  const hatchPalette = computedPalettes[hatchPaletteIdx]?.colors ?? activePalette;
+  const hatchColorIdx = hatchColor?.colorIdx ?? 8;
+  const hatchHex = hatchPalette[hatchColorIdx] ?? hatchPalette[8];
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
   const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
@@ -220,14 +279,65 @@ export default function TrixelGrid() {
   const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
 
-  const mergedPainted = useMemo(() => {
+  // Visible **fill** layers only. Hatch values are not colours, so letting them
+  // through here would reach the 3D and cutting exporters as garbage "colours".
+  // This one filter is what protects both of them — they take nothing else.
+  const mergedFillPainted = useMemo(() => {
     const out: Record<string, string> = {};
     for (const layer of layers) {
-      if (!layer.visible) continue;
+      if (!layer.visible || layerKind(layer) === "hatch") continue;
       Object.assign(out, layer.painted);
     }
     return out;
   }, [layers]);
+
+  // What a hatch layer's marks actually sit on: the visible fill layers
+  // *strictly below* the active one, merged bottom-to-top so the topmost wins.
+  // Bounded above by the active layer because a fill painted over the hatch
+  // hides it, and hatching the tone of something that covers you is nonsense.
+  const hatchifySource = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (let i = 0; i < activeLayerIdx; i++) {
+      const layer = layers[i];
+      if (!layer?.visible || layerKind(layer) === "hatch") continue;
+      Object.assign(out, layer.painted);
+    }
+    return out;
+  }, [layers, activeLayerIdx]);
+
+  // Only the layers an exporter should draw, in z-order. PNG/SVG take this
+  // rather than a flattened map, because hatch has to interleave with fills.
+  const visibleLayers = useMemo(
+    () => layers.filter((l) => l.visible),
+    [layers],
+  );
+
+  const activeLayerKind: LayerKind = layerKind(layers[activeLayerIdx] ?? {});
+  const isHatchLayer = activeLayerKind === "hatch";
+  const activeLayerKindRef = useRef(activeLayerKind);
+  activeLayerKindRef.current = activeLayerKind;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+
+  // Every tool change funnels through here, so the layer-kind policy is
+  // enforced once instead of at each of the toolbar, the keyboard bindings
+  // (including 1-9, which force paint), the eyedropper and the right-click
+  // pick. Because `tool` can then never hold a disallowed value, the dispatch
+  // in use-interaction needs no guard of its own.
+  const changeTool = useCallback((t: Tool) => {
+    if (isToolAllowed(t, activeLayerKindRef.current)) setTool(t);
+  }, []);
+
+  // Move to a usable tool when the active layer's kind changes. Keyed on the
+  // kind rather than on `layers`, so it doesn't re-run on every stroke, and it
+  // fires for layer selection, add, delete, reorder, undo/redo and project load
+  // alike. Only switches when the current tool is actually disallowed, so
+  // clicking between layers while holding erase doesn't yank the tool away.
+  useEffect(() => {
+    if (!isToolAllowed(toolRef.current, activeLayerKind)) {
+      setTool(activeLayerKind === "hatch" ? "hatch" : "paint");
+    }
+  }, [activeLayerKind]);
 
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
@@ -411,6 +521,56 @@ export default function TrixelGrid() {
             stroke: !!data.svgExport.stroke,
             merge: !!data.svgExport.merge,
           });
+        if (data.hatchBrush && typeof data.hatchBrush === "object") {
+          const h = data.hatchBrush;
+          const num = (v: unknown, lo: number, hi: number, dflt: number) =>
+            typeof v === "number" && Number.isFinite(v)
+              ? Math.min(hi, Math.max(lo, v))
+              : dflt;
+          setHatchBrushState({
+            // Clamped on ingest — this is a file-format boundary, and a mask of
+            // 0 would be a brush that silently paints nothing.
+            dirMask: num(h.dirMask, 1, 7, DEFAULT_HATCH_BRUSH.dirMask),
+            density: num(h.density, MIN_DENSITY, MAX_DENSITY, DEFAULT_HATCH_BRUSH.density),
+            weight: num(h.weight, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_HATCH_BRUSH.weight),
+            color:
+              typeof h.color === "string" ? h.color : DEFAULT_HATCH_BRUSH.color,
+          });
+        }
+        if (data.hatchify && typeof data.hatchify === "object") {
+          const hf = data.hatchify;
+          const num = (v: unknown, lo: number, hi: number, dflt: number) =>
+            typeof v === "number" && Number.isFinite(v)
+              ? Math.min(hi, Math.max(lo, v))
+              : dflt;
+          const minDensity = num(
+            hf.minDensity,
+            MIN_DENSITY,
+            MAX_DENSITY,
+            DEFAULT_HATCHIFY.minDensity,
+          );
+          setHatchifySettingsState({
+            mode: hf.mode === "reduce" ? "reduce" : "single",
+            minDensity,
+            // Clamped against the ingested minimum, not against MIN_DENSITY: an
+            // inverted range would flatten every mark to one density.
+            maxDensity: num(
+              hf.maxDensity,
+              minDensity,
+              MAX_DENSITY,
+              Math.max(minDensity, DEFAULT_HATCHIFY.maxDensity),
+            ),
+            weight: num(hf.weight, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_HATCHIFY.weight),
+            densitySkip: Math.round(
+              num(hf.densitySkip, MIN_SKIP, MAX_SKIP, DEFAULT_HATCHIFY.densitySkip),
+            ),
+            color:
+              typeof hf.color === "string" ? hf.color : DEFAULT_HATCHIFY.color,
+            levels: Math.round(
+              num(hf.levels, MIN_LEVELS, MAX_LEVELS, DEFAULT_HATCHIFY.levels),
+            ),
+          });
+        }
         if (data.crop && typeof data.crop === "object") {
           const { i, j, m, n } = data.crop;
           if ([i, j, m, n].every((v) => typeof v === "number")) {
@@ -462,6 +622,8 @@ export default function TrixelGrid() {
         svgExport,
         crop,
         exportSettings,
+        hatchBrush,
+        hatchify: hatchifySettings,
       }),
     );
   }, [
@@ -479,6 +641,8 @@ export default function TrixelGrid() {
     svgExport,
     crop,
     exportSettings,
+    hatchBrush,
+    hatchifySettings,
   ]);
 
   useEffect(() => {
@@ -542,14 +706,14 @@ export default function TrixelGrid() {
     view,
     setView,
     tool,
-    setTool,
+    setTool: changeTool,
     color: paintKey,
     setColor: (encoded) => {
       const d = decodeColor(encoded);
       if (d && PALETTE_DEFS[d.paletteIdx]) {
         setActivePaletteIdx(d.paletteIdx);
         setColorIdx(d.colorIdx);
-        setTool("paint");
+        changeTool("paint");
       }
     },
     patternLayers,
@@ -581,6 +745,8 @@ export default function TrixelGrid() {
     activeLayerIdx,
     crop,
     setCrop,
+    hatchBrush,
+    setHatchBrush,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -754,7 +920,12 @@ export default function TrixelGrid() {
                   ? data.lastPaintTri
                   : null,
             };
-            setPainted(snapLayers[snapActive]?.painted ?? {});
+            // Apply the whole layer array, not just the active layer's pixels —
+            // otherwise an imported multi-layer project writes into whatever
+            // layer is currently selected and the real stack (kinds included)
+            // only appears after an undo/redo round trip.
+            setLayers(snapLayers);
+            setActiveLayerIdx(Math.max(0, Math.min(snapActive, snapLayers.length - 1)));
             pushHistory(snap);
 
             if (data.settings) {
@@ -799,7 +970,8 @@ export default function TrixelGrid() {
               patternPresets: [],
               lastPaintTri: null,
             };
-            setPainted(snap.layers[0].painted);
+            setLayers(snap.layers);
+            setActiveLayerIdx(0);
             pushHistory(snap);
           }
         } catch (err) {
@@ -810,7 +982,8 @@ export default function TrixelGrid() {
       e.target.value = "";
     },
     [
-      setPainted,
+      setLayers,
+      setActiveLayerIdx,
       pushHistory,
       setGridDivisions,
       setHexMode,
@@ -971,15 +1144,80 @@ export default function TrixelGrid() {
     });
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
+  /**
+   * Rewrites the selected hexes as hatch marks derived from the fills below.
+   *
+   * Reduce mode writes into layers *other* than the active one, so this cannot
+   * go through `setPainted`/`snapshotWithPainted` — both address only
+   * `layers[activeLayerIdx]`. The whole array is rebuilt and pushed once, which
+   * keeps the golden rule intact: one editing action, one undo entry covering
+   * both the new marks and the requantised fills.
+   */
+  const applyHatchify = useCallback(() => {
+    if (selectedHexes.length === 0 || gridDivisions <= 0 || !isHatchLayer) return;
+
+    const res = hatchify(
+      hatchifySource,
+      selectedHexes,
+      gridDivisions,
+      hatchifySettings,
+    );
+
+    const next = layers.map((l) => ({ ...l, painted: { ...l.painted } }));
+
+    // Clear the selection wholesale before merging, so re-running with new
+    // settings replaces the previous result rather than layering onto it.
+    const active = next[activeLayerIdx];
+    if (!active) return;
+    for (const key of res.covered) delete active.painted[key];
+    Object.assign(active.painted, res.hatch);
+
+    // Each requantised fill goes back into the layer that won the merge — the
+    // topmost visible fill layer below the hatch that already holds that trixel.
+    // Writing it anywhere else would change which value the composite shows.
+    for (const [key, fill] of Object.entries(res.fills)) {
+      for (let i = activeLayerIdx - 1; i >= 0; i--) {
+        const l = next[i];
+        if (!l.visible || layerKind(l) === "hatch") continue;
+        if (l.painted[key] !== undefined) {
+          l.painted[key] = fill;
+          break;
+        }
+      }
+    }
+
+    setLayers(next);
+    pushHistory({ ...buildSnapshot(), layers: next });
+  }, [
+    selectedHexes,
+    gridDivisions,
+    isHatchLayer,
+    hatchifySource,
+    hatchifySettings,
+    layers,
+    activeLayerIdx,
+    setLayers,
+    pushHistory,
+    buildSnapshot,
+  ]);
+
   const onboarding = useOnboarding();
 
   useKeyboardShortcuts(
     onUndo,
     onRedo,
-    setTool,
+    changeTool,
     (c) => {
+      // On a hatch layer the number keys retint the hatch brush instead of
+      // jumping to a tool that layer doesn't allow.
+      if (activeLayerKindRef.current === "hatch") {
+        // Against the *hatch* palette, so the number keys pick out of the row
+        // the swatch strip is actually showing.
+        setHatchBrush({ color: encodeColor(hatchPaletteIdx, c) });
+        return;
+      }
       setColorIdx(c);
-      setTool("paint");
+      changeTool("paint");
     },
     COLOR_COUNT,
     clearSelection,
@@ -1087,7 +1325,8 @@ export default function TrixelGrid() {
 
       <Toolbar
         tool={tool}
-        onToolChange={setTool}
+        onToolChange={changeTool}
+        activeLayerKind={activeLayerKind}
         onExport={handleExport}
         onExportSVG={handleExportSVG}
         onExport3D={handleExport3D}
@@ -1192,6 +1431,28 @@ export default function TrixelGrid() {
             onCapture={() => setCaptureMode(true)}
             gridRotation={gridRotation}
           />
+        ) : isHatchLayer ? (
+          /* Same swatch row, pointed at the hatch brush. The brush takes its
+             colour from here, so there is only ever one colour control. */
+          <ColorPalette
+            color={hatchHex}
+            palette={hatchPalette}
+            palettes={computedPalettes}
+            onColorChange={(c) => {
+              const idx = hatchPalette.indexOf(c);
+              if (idx >= 0) setHatchBrush({ color: encodeColor(hatchPaletteIdx, idx) });
+            }}
+            onPaletteChange={(colors, idx) => {
+              setActivePaletteIdx(idx);
+              setHatchBrush({ color: encodeColor(idx, hatchColorIdx) });
+            }}
+            onPointerEnter={() => setHoveredTri(null)}
+            hueOffset={hueOffset}
+            onHueOffsetChange={setHueOffset}
+            saturationOffset={satOffset}
+            onSaturationOffsetChange={setSatOffset}
+            raised
+          />
         ) : (
           <ColorPalette
             color={colorHex}
@@ -1223,9 +1484,21 @@ export default function TrixelGrid() {
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
+        {/* Keyed on the layer's kind, not the tool: erase and pan are legal on
+            a hatch layer, and the bar shouldn't flicker away when reached for. */}
+        {isHatchLayer && (
+          <HatchBar
+            brush={hatchBrush}
+            onBrushChange={setHatchBrush}
+            onPointerEnter={() => setHoveredTri(null)}
+            tool={tool}
+            hasSelection={selectedHexes.length > 0 && gridDivisions > 0}
+            onConvert={() => setHatchifyOpen(true)}
+          />
+        )}
         {tool === "crop" && (
           <ExportPanel
-            painted={mergedPainted}
+            layers={visibleLayers}
             crop={crop}
             onCropChange={setCrop}
             gridRotation={gridRotation}
@@ -1274,24 +1547,38 @@ export default function TrixelGrid() {
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
-        painted={mergedPainted}
+        layers={visibleLayers}
         projectName={projectName}
         settings={svgExport}
         onSettingsChange={updateSvgExport}
       />
 
+      {/* 3D and cutting consume solid regions, so they take the fill-only
+          flatten — hatch has no meaning as an extruded body or a cut path. */}
       <Export3DDialog
         open={export3DOpen}
         onOpenChange={setExport3DOpen}
-        painted={mergedPainted}
+        painted={mergedFillPainted}
         projectName={projectName}
       />
 
       <CutExportDialog
         open={exportCutOpen}
         onOpenChange={setExportCutOpen}
-        painted={mergedPainted}
+        painted={mergedFillPainted}
         projectName={projectName}
+      />
+
+      <HatchifyDialog
+        open={hatchifyOpen}
+        onClose={() => setHatchifyOpen(false)}
+        onApply={applyHatchify}
+        settings={hatchifySettings}
+        onSettingsChange={setHatchifySettings}
+        source={hatchifySource}
+        hexes={selectedHexes}
+        gridDivisions={gridDivisions}
+        palettes={computedPalettes}
       />
 
       <SplashDialog

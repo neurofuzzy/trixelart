@@ -5,9 +5,10 @@ import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
-import type { Layer } from "@/hooks/use-history";
+import { layerKind, type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
 import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
+import { drawHatchLayer } from "@/lib/hatch-render";
 
 export function GridCanvas({
   size,
@@ -126,10 +127,24 @@ export function GridCanvas({
         Math.max(minX, maxX) / SIDE - minR * 0.5,
       ) + buffer;
 
-    // Filled triangles — group by color for fewer fillStyle changes,
-    // rendered bottom-to-top through all visible layers.
+    // Artwork — rendered bottom-to-top through all visible layers. Fill layers
+    // group by colour for fewer fillStyle changes; hatch layers draw line work.
+    // The branch is not optional: a hatch value fed to `resolveColor` comes back
+    // as the raw string, and canvas silently *keeps the previous* fillStyle
+    // rather than erroring, so the marks would paint as arbitrary solid colour.
     for (const layer of layers) {
       if (!layer.visible) continue;
+
+      if (layerKind(layer) === "hatch") {
+        drawHatchLayer(ctx, layer.painted, {
+          minX,
+          minY,
+          maxX,
+          maxY,
+        }, view.zoom);
+        continue;
+      }
+
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {
         for (let q = minQ; q <= maxQ; q++) {

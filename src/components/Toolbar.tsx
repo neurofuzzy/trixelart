@@ -49,7 +49,8 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { Tool } from "@/lib/tools";
+import { isToolAllowed, type Tool } from "@/lib/tools";
+import type { LayerKind } from "@/hooks/use-history";
 import type { Symmetry, BrushSize, HexMode } from "@/components/Footer";
 import { ProjectName } from "@/components/ProjectName";
 
@@ -66,7 +67,20 @@ const editTools = [
   { tool: "pan" as Tool, icon: Move, label: "Move", shortcut: "H" },
 ] as const;
 
+/**
+ * Hatch takes over the Paint slot rather than getting a button of its own.
+ * It is the same action — lay down marks with the current brush — and which of
+ * the two you get is decided by the active layer's kind, so there is never a
+ * moment when both are meaningful. Two pencils side by side, one of them always
+ * dead, is worse than one that changes what it means.
+ */
+const brushTool = (kind: LayerKind) =>
+  kind === "hatch"
+    ? ({ tool: "hatch" as Tool, icon: Pencil, label: "Hatch", shortcut: "G" } as const)
+    : editTools[0];
+
 const isEditTool = (t: string): boolean =>
+  t === "hatch" ||
   t === "paint" ||
   t === "erase" ||
   t === "fill" ||
@@ -95,6 +109,7 @@ const sliderClass =
 export function Toolbar({
   tool,
   onToolChange,
+  activeLayerKind,
   onExport,
   onExportSVG,
   onExport3D,
@@ -120,6 +135,8 @@ export function Toolbar({
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
+  /** Kind of the active layer — decides which tools are usable. */
+  activeLayerKind: LayerKind;
   onExport: () => void;
   onExportSVG: () => void;
   onExport3D: () => void;
@@ -143,7 +160,11 @@ export function Toolbar({
   projectName: string;
   onProjectNameChange: (name: string) => void;
 }) {
-  const activeEdit = editTools.find((e) => e.tool === tool);
+  // The Paint entry stands in for whichever brush this layer kind allows.
+  const shownTools = editTools.map((e) =>
+    e.tool === "paint" ? brushTool(activeLayerKind) : e,
+  );
+  const activeEdit = shownTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -246,19 +267,21 @@ export function Toolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={6}>
-              {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
-                <DropdownMenuItem
-                  key={t}
-                  onClick={() => onToolChange(t)}
-                  className={tool === t ? "bg-accent" : undefined}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="flex-1">{label}</span>
-                  <span className="text-[10px] text-muted-foreground font-mono">
-                    {shortcut}
-                  </span>
-                </DropdownMenuItem>
-              ))}
+              {shownTools
+                .filter(({ tool: t }) => isToolAllowed(t, activeLayerKind))
+                .map(({ tool: t, icon: Icon, label, shortcut }) => (
+                  <DropdownMenuItem
+                    key={t}
+                    onClick={() => onToolChange(t)}
+                    className={tool === t ? "bg-accent" : undefined}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className="flex-1">{label}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {shortcut}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -267,19 +290,29 @@ export function Toolbar({
           className="hidden lg:flex lg:items-center lg:gap-0.5"
           data-tour="tools"
         >
-          {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => (
-            <Button
-              key={t}
-              variant={tool === t ? "default" : "ghost"}
-              size="icon"
-              onClick={() => onToolChange(t)}
-              title={`${label} (${shortcut})`}
-              onMouseEnter={() => onSetTooltip(label)}
-              onMouseLeave={() => onSetTooltip("")}
-            >
-              <Icon className="w-4 h-4" />
-            </Button>
-          ))}
+          {/* Disabled rather than hidden: a tool vanishing when you switch
+              layers is more confusing than one that is visibly unavailable. */}
+          {shownTools.map(({ tool: t, icon: Icon, label, shortcut }) => {
+            const allowed = isToolAllowed(t, activeLayerKind);
+            return (
+              <Button
+                key={t}
+                variant={tool === t ? "default" : "ghost"}
+                size="icon"
+                onClick={() => onToolChange(t)}
+                disabled={!allowed}
+                title={
+                  allowed
+                    ? `${label} (${shortcut})`
+                    : `${label} — not available on a ${activeLayerKind} layer`
+                }
+                onMouseEnter={() => onSetTooltip(label)}
+                onMouseLeave={() => onSetTooltip("")}
+              >
+                <Icon className="w-4 h-4" />
+              </Button>
+            );
+          })}
         </div>
 
         <div className="hidden lg:block w-px h-6 bg-border mx-0.5 self-center" />
