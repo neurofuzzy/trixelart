@@ -3,6 +3,7 @@ import type { TriKey } from "@/lib/grid-math";
 import type { Symmetry, SelectionSnapshot } from "@/lib/hex-flower";
 import type { Layer } from "@/hooks/use-history";
 import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
+import type { CropHandle, CropRect } from "@/lib/crop";
 
 export type Tool =
   | "paint"
@@ -15,7 +16,8 @@ export type Tool =
   | "clone"
   | "dodge"
   | "burn"
-  | "eyedropper";
+  | "eyedropper"
+  | "crop";
 
 export interface View {
   x: number;
@@ -59,6 +61,12 @@ export type DragState =
       hasMoved: boolean;
       startPos: Pt;
       lastPos: Pt;
+    }
+  | {
+      kind: "crop";
+      handle: CropHandle;
+      startCrop: CropRect;
+      startWorld: Pt;
     }
   | {
       kind: "selectMove";
@@ -118,6 +126,10 @@ export interface ToolContext {
   captureMode: boolean;
   setCaptureMode: (v: boolean) => void;
   setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
+  /** Export crop region. View state, not authored content — it never enters the
+   *  undo stack, so the crop tool deliberately does not call `onCommit`. */
+  crop: CropRect;
+  setCrop: React.Dispatch<React.SetStateAction<CropRect>>;
 }
 
 export interface ToolHandler {

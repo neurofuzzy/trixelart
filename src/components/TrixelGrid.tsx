@@ -56,6 +56,12 @@ import { Export3DDialog } from "@/components/Export3DDialog";
 import { CutExportDialog } from "@/components/CutExportDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
+import {
+  ExportPanel,
+  DEFAULT_EXPORT_SETTINGS,
+  type ExportSettings,
+} from "@/components/ExportPanel";
+import { DEFAULT_CROP, type CropRect } from "@/lib/crop";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
 import { HelpDialog } from "@/components/onboarding/HelpDialog";
@@ -111,6 +117,19 @@ export default function TrixelGrid() {
   const updateSvgExport = useCallback(
     (patch: Partial<SVGExportOptions>) =>
       setSvgExport((s) => ({ ...s, ...patch })),
+    [],
+  );
+
+  // Crop region and export options are view state, like zoom or the grid
+  // settings — deliberately *not* part of ProjectSnapshot, or dragging a crop
+  // handle would land in the undo stack and Ctrl+Z would stop undoing paint.
+  const [crop, setCrop] = useState<CropRect>(DEFAULT_CROP);
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(
+    DEFAULT_EXPORT_SETTINGS,
+  );
+  const updateExportSettings = useCallback(
+    (patch: Partial<ExportSettings>) =>
+      setExportSettings((s) => ({ ...s, ...patch })),
     [],
   );
 
@@ -392,6 +411,33 @@ export default function TrixelGrid() {
             stroke: !!data.svgExport.stroke,
             merge: !!data.svgExport.merge,
           });
+        if (data.crop && typeof data.crop === "object") {
+          const { i, j, m, n } = data.crop;
+          if ([i, j, m, n].every((v) => typeof v === "number")) {
+            setCrop({ i, j, m: Math.max(1, m), n: Math.max(1, n) });
+          }
+        }
+        if (data.exportSettings && typeof data.exportSettings === "object") {
+          const es = data.exportSettings;
+          setExportSettings({
+            dpi:
+              typeof es.dpi === "number" && es.dpi > 0
+                ? es.dpi
+                : DEFAULT_EXPORT_SETTINGS.dpi,
+            widthInches:
+              typeof es.widthInches === "number" && es.widthInches > 0
+                ? es.widthInches
+                : DEFAULT_EXPORT_SETTINGS.widthInches,
+            bgColor:
+              typeof es.bgColor === "string"
+                ? es.bgColor
+                : DEFAULT_EXPORT_SETTINGS.bgColor,
+            svg: {
+              stroke: !!es.svg?.stroke,
+              merge: !!es.svg?.merge,
+            },
+          });
+        }
       }
     } catch {
       /* ignore parse errors */
@@ -414,6 +460,8 @@ export default function TrixelGrid() {
         patternLayers,
         patternPaletteIdx,
         svgExport,
+        crop,
+        exportSettings,
       }),
     );
   }, [
@@ -429,6 +477,8 @@ export default function TrixelGrid() {
     patternLayers,
     patternPaletteIdx,
     svgExport,
+    crop,
+    exportSettings,
   ]);
 
   useEffect(() => {
@@ -529,6 +579,8 @@ export default function TrixelGrid() {
     brushSize,
     layers,
     activeLayerIdx,
+    crop,
+    setCrop,
   });
 
   lastPaintTriBridgeRef.current = lastPaintTriRef;
@@ -1101,6 +1153,8 @@ export default function TrixelGrid() {
           symmetry={symmetry}
           hueOffset={hueOffset}
           saturationOffset={satOffset}
+          crop={crop}
+          showCrop={tool === "crop"}
         />
 
         {tool === "select" ? (
@@ -1166,6 +1220,19 @@ export default function TrixelGrid() {
             palettes={computedPalettes}
             paletteIdx={patternPaletteIdx}
             onPaletteIdxChange={setPatternPaletteIdx}
+            onPointerEnter={() => setHoveredTri(null)}
+          />
+        )}
+        {tool === "crop" && (
+          <ExportPanel
+            painted={mergedPainted}
+            crop={crop}
+            onCropChange={setCrop}
+            gridRotation={gridRotation}
+            projectName={projectName}
+            palettes={computedPalettes}
+            settings={exportSettings}
+            onSettingsChange={updateExportSettings}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}

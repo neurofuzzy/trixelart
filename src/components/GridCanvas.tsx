@@ -7,6 +7,7 @@ import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 import type { Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
+import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
 
 export function GridCanvas({
   size,
@@ -30,6 +31,8 @@ export function GridCanvas({
   symmetry,
   hueOffset,
   saturationOffset,
+  crop,
+  showCrop = false,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -52,6 +55,8 @@ export function GridCanvas({
   symmetry?: "off" | "sym60" | "sym120";
   hueOffset?: number;
   saturationOffset?: number;
+  crop?: CropRect;
+  showCrop?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -369,6 +374,37 @@ export function GridCanvas({
       }
     }
 
+    // Export crop overlay. Drawn inside the world transform, so the rotation
+    // that makes a pointy-top grid is already applied — a quarter turn keeps the
+    // rect axis-aligned on screen, so no separate screen-space pass is needed.
+    if (showCrop && crop) {
+      const c = cropWorldBounds(crop);
+
+      // Dim everything outside the crop: one even-odd path of a very large
+      // rectangle with the crop punched out of it.
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.beginPath();
+      ctx.rect(-1e6, -1e6, 2e6, 2e6);
+      ctx.rect(c.x, c.y, c.w, c.h);
+      ctx.fill("evenodd");
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = "rgb(251, 191, 36)"; // amber-400
+      ctx.lineWidth = Math.max(1.5 / view.zoom, 1);
+      ctx.strokeRect(c.x, c.y, c.w, c.h);
+
+      // Handles keep a constant on-screen size, so they stay grabbable at any
+      // zoom — matching the hit radius the crop tool tests against.
+      const hs = 8 / view.zoom;
+      ctx.fillStyle = "rgb(251, 191, 36)";
+      for (const p of handlePositions(crop)) {
+        ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+      }
+      ctx.restore();
+    }
+
     // Stamp flash — yellow highlight on the source hex that fades out.
     if (stampFlash && gridDivisions > 0) {
       ctx.save();
@@ -637,7 +673,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, layers, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset]);
+  }, [size, view, layers, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
 
   return (
     <canvas

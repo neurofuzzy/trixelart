@@ -112,6 +112,8 @@ export function useKeyboardShortcuts(
         setTool("burn");
       } else if (e.key.toLowerCase() === "i") {
         setTool("eyedropper");
+      } else if (e.key.toLowerCase() === "x") {
+        setTool("crop");
       } else if (e.key.toLowerCase() === "r") {
         if (e.shiftKey && onRotateCCW) {
           setTool("select");

@@ -1,5 +1,12 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
+import {
+  cropDisplayBounds,
+  cropWorldBounds,
+  rotatePoint,
+  type CropRect,
+  type Rect,
+} from "@/lib/crop";
 
 export interface TriangleData {
   points: [number, number][];
@@ -224,4 +231,189 @@ ${paths}
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
 ${polygons}
 </svg>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cropped export                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface CroppedSVGOptions extends SVGExportOptions {
+  /** Physical width of the exported document, in inches. Emitted so Inkscape
+   *  and friends open the file at true print size. Omit for unitless output. */
+  widthInches?: number;
+}
+
+/**
+ * Sutherland–Hodgman clip of a convex polygon against an axis-aligned rect.
+ * Both inputs are convex, so the result is a single convex polygon — no
+ * multi-ring bookkeeping needed. Returns [] when the polygon is fully outside.
+ *
+ * The clip is exact: a vertex generated on the crop boundary is computed from
+ * the same edge equation for both triangles that share it, so neighbours still
+ * agree to the last bit and `mergeTrianglesByColor` can weld them afterwards.
+ */
+export function clipPolygonToRect(
+  points: [number, number][],
+  rect: Rect,
+): [number, number][] {
+  const x0 = rect.x;
+  const y0 = rect.y;
+  const x1 = rect.x + rect.w;
+  const y1 = rect.y + rect.h;
+
+  // side < 0 is outside for each of the four half-planes.
+  const edges: Array<(p: [number, number]) => number> = [
+    (p) => p[0] - x0,
+    (p) => x1 - p[0],
+    (p) => p[1] - y0,
+    (p) => y1 - p[1],
+  ];
+
+  let out = points;
+  for (const inside of edges) {
+    if (out.length === 0) return [];
+    const next: [number, number][] = [];
+    for (let k = 0; k < out.length; k++) {
+      const cur = out[k];
+      const prev = out[(k + out.length - 1) % out.length];
+      const dCur = inside(cur);
+      const dPrev = inside(prev);
+      if (dCur >= 0) {
+        if (dPrev < 0) {
+          const t = dPrev / (dPrev - dCur);
+          next.push([
+            prev[0] + t * (cur[0] - prev[0]),
+            prev[1] + t * (cur[1] - prev[1]),
+          ]);
+        }
+        next.push(cur);
+      } else if (dPrev >= 0) {
+        const t = dPrev / (dPrev - dCur);
+        next.push([
+          prev[0] + t * (cur[0] - prev[0]),
+          prev[1] + t * (cur[1] - prev[1]),
+        ]);
+      }
+    }
+    out = next;
+  }
+
+  // A triangle corner sitting exactly on a clip edge makes the algorithm emit
+  // the intersection *and* the original vertex — the same point twice.
+  return dedupeRing(out, 1e-9);
+}
+
+/**
+ * Drops consecutive (and wrap-around) duplicate vertices, returning [] if what
+ * is left cannot be a polygon.
+ *
+ * A repeated vertex is a zero-length edge, which `mergeTrianglesByColor` keys as
+ * a self-loop (`ka === kb`) and then follows into a dead end. Duplicates arise
+ * twice over: exactly, from clipping a corner that lies on the crop boundary,
+ * and again after coordinates are rounded to PRECISION for output, which can
+ * collapse two genuinely distinct points onto one.
+ */
+function dedupeRing(
+  points: [number, number][],
+  tol: number,
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (const p of points) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(last[0] - p[0]) <= tol && Math.abs(last[1] - p[1]) <= tol) {
+      continue;
+    }
+    out.push(p);
+  }
+  while (
+    out.length > 1 &&
+    Math.abs(out[0][0] - out[out.length - 1][0]) <= tol &&
+    Math.abs(out[0][1] - out[out.length - 1][1]) <= tol
+  ) {
+    out.pop();
+  }
+  return out.length >= 3 ? out : [];
+}
+
+/** Drops degenerate polygons the clip can produce when a triangle only grazes
+ *  the crop edge — they would otherwise emit zero-area paths. */
+function polygonArea(points: [number, number][]): number {
+  let a = 0;
+  for (let k = 0; k < points.length; k++) {
+    const [px, py] = points[k];
+    const [qx, qy] = points[(k + 1) % points.length];
+    a += px * qy - qx * py;
+  }
+  return Math.abs(a) / 2;
+}
+
+/**
+ * SVG of just the crop region, with edge triangles genuinely clipped into
+ * 4- and 5-gons rather than hidden behind a <clipPath>. Nothing outside the
+ * crop survives into the file, so the result opens clean in Inkscape.
+ */
+export function generateCroppedSVG(
+  painted: Record<string, string>,
+  crop: CropRect,
+  gridRotation: number,
+  options?: CroppedSVGOptions,
+): string {
+  const world = cropWorldBounds(crop);
+  const display = cropDisplayBounds(crop, gridRotation);
+  const w = roundNum(display.w);
+  const h = roundNum(display.h);
+
+  // Physical size so the document opens at true print scale; unitless
+  // otherwise. viewBox stays in world units either way.
+  const inches = options?.widthInches;
+  const dims =
+    inches && inches > 0
+      ? ` width="${fmt(inches)}in" height="${fmt((inches * display.h) / display.w)}in"`
+      : ` width="${w}" height="${h}"`;
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${dims}>`;
+
+  // Clip in world space (where the crop rect is axis-aligned), then rotate the
+  // survivors into display space and shift the crop origin to (0,0). The only
+  // rotations used are 0 and 90 degrees, so this stays exact.
+  const clipped: TriangleData[] = [];
+  for (const tri of generateTriangles(painted)) {
+    const poly = clipPolygonToRect(tri.points, world);
+    if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
+    // Rounding can merge two distinct vertices, so dedupe again afterwards —
+    // once at full precision inside the clipper is not sufficient.
+    const points = dedupeRing(
+      poly.map((p) => {
+        const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
+        return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
+      }),
+      0,
+    );
+    if (points.length < 3) continue;
+    clipped.push({ fill: tri.fill, points });
+  }
+
+  if (clipped.length === 0) return `${open}\n</svg>`;
+
+  if (options?.merge) {
+    const paths = mergeTrianglesByColor(clipped)
+      .map(
+        ({ fill, d }) =>
+          `  <path d="${d}" fill="${fill}"${
+            options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+          }/>`,
+      )
+      .join("\n");
+    return `${open}\n${paths}\n</svg>`;
+  }
+
+  const polygons = clipped
+    .map(
+      ({ points, fill }) =>
+        `  <polygon points="${points.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${fill}"${
+          options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+        }/>`,
+    )
+    .join("\n");
+
+  return `${open}\n${polygons}\n</svg>`;
 }

@@ -31,12 +31,53 @@ import {
 
 
 const MODE_LABEL: Record<PatternBlendMode, string> = {
-  normal: "Norm",
-  multiply: "Mult",
-  screen: "Scrn",
+  normal: "Normal",
+  multiply: "Multiply",
+  screen: "Screen",
   difference: "Diff",
 };
 
+/** Label above a slider, value right-aligned in mono so it stops jittering as
+ *  the thumb moves. */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  display,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  display: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 shrink-0">
+      <span className="flex items-baseline justify-between">
+        <span className="text-xs uppercase tracking-wide text-white/60">
+          {label}
+        </span>
+        <span className="text-xs font-mono text-white/50 tabular-nums">
+          {display}
+        </span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-2 accent-white"
+      />
+    </label>
+  );
+}
 
 function LayerThumb({ layer }: { layer: PatternLayer }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -53,7 +94,7 @@ function LayerThumb({ layer }: { layer: PatternLayer }) {
     );
   }, [layer, fg, bg]);
 
-  return <canvas ref={ref} className="w-7 h-7 rounded shrink-0 block" />;
+  return <canvas ref={ref} className="w-9 h-9 rounded shrink-0 block" />;
 }
 
 function Swatches({
@@ -77,7 +118,7 @@ function Swatches({
             onClick={() => onChange(encoded)}
             title={c}
             className={cn(
-              "flex-1 h-5 rounded-sm border transition-all",
+              "flex-1 h-7 rounded border transition-all",
               // Compared by encoding, not by resolved hex: separate palettes can
               // land on the same colour and would both light up.
               value === encoded
@@ -109,14 +150,17 @@ function PaletteChips({
   onChange: (i: number) => void;
 }) {
   return (
-    <div className="flex gap-1 flex-nowrap">
+    // The chips flex rather than take a fixed width: fourteen of them have to
+    // share the drawer's inner width on one line, so they are as tall as they
+    // can be but only as wide as the division allows.
+    <div className="flex gap-0.5 flex-nowrap">
       {palettes.map((p, i) => (
         <button
           key={p.name}
           onClick={() => onChange(i)}
           title={p.name}
           className={cn(
-            "w-5 h-5 shrink-0 rounded border overflow-hidden flex flex-col transition-all",
+            "flex-1 min-w-0 h-6 rounded border overflow-hidden flex flex-col transition-all",
             value === i ? "border-white scale-110" : "border-white/10 opacity-70",
           )}
         >
@@ -236,16 +280,16 @@ export function PatternPanel({
       onPointerEnter={onPointerEnter}
       data-tour="pattern"
     >
-      <header className="flex items-center justify-between px-3 h-9 border-b border-white/10 shrink-0">
-        <span className="text-[10px] uppercase tracking-widest text-white/70">
+      <header className="flex items-center justify-between px-4 h-11 border-b border-white/10 shrink-0">
+        <span className="text-xs uppercase tracking-widest text-white/70">
           Pattern
         </span>
-        <span className="text-[10px] text-white/35">
+        <span className="text-xs text-white/40">
           {layers.length} layer{layers.length === 1 ? "" : "s"}
         </span>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5 p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
       {/* The preview is the only child allowed to flex, so it absorbs whatever
           height the controls leave over and is the first thing to give way on a
           short display. Everything below it is shrink-0 and stays on screen.
@@ -264,19 +308,20 @@ export function PatternPanel({
       {/* Stack, top layer first — the reverse of storage order, matching how
           every other layer list in the app reads. */}
       <div className="flex items-center justify-between shrink-0">
-        <span className="text-[10px] uppercase tracking-wide text-white/60">
+        <span className="text-xs uppercase tracking-wide text-white/60">
           Layers
         </span>
         <button
           onClick={addLayer}
           title="Add pattern layer"
-          className="p-1 rounded hover:bg-white/10 text-white/70"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 text-white/70 text-xs"
         >
-          <Plus className="w-3 h-3" />
+          <Plus className="w-3.5 h-3.5" />
+          Add
         </button>
       </div>
 
-      <div className="flex flex-col gap-1 max-h-[26vh] overflow-y-auto shrink-0">
+      <div className="flex flex-col gap-1.5 max-h-[26vh] overflow-y-auto shrink-0">
         {layers
           .map((l, i) => ({ l, i }))
           .reverse()
@@ -285,7 +330,7 @@ export function PatternPanel({
               key={l.id}
               onClick={() => onActiveIdxChange(i)}
               className={cn(
-                "flex items-center gap-1.5 p-1 rounded border cursor-pointer",
+                "flex items-center gap-2 p-1.5 rounded-md border cursor-pointer",
                 i === activeIdx
                   ? "border-white/60 bg-white/10"
                   : "border-white/10 hover:bg-white/5",
@@ -293,10 +338,10 @@ export function PatternPanel({
             >
               <LayerThumb layer={l} />
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-white/80 truncate">
+                <div className="text-xs text-white/85 truncate">
                   {MODE_LABEL[l.mode]} · {Math.round(l.opacity * 100)}%
                 </div>
-                <div className="text-[9px] text-white/40 truncate">
+                <div className="text-[11px] font-mono text-white/40 truncate tabular-nums">
                   {l.scale.toFixed(2)} · {Math.round(l.rotation)}&deg;
                 </div>
               </div>
@@ -310,37 +355,37 @@ export function PatternPanel({
                   );
                 }}
                 title={l.visible ? "Hide" : "Show"}
-                className="p-0.5 rounded hover:bg-white/10 text-white/60"
+                className="p-1.5 rounded hover:bg-white/10 text-white/60"
               >
                 {l.visible ? (
-                  <Eye className="w-3 h-3" />
+                  <Eye className="w-4 h-4" />
                 ) : (
-                  <EyeOff className="w-3 h-3" />
+                  <EyeOff className="w-4 h-4" />
                 )}
               </button>
               <div className="flex flex-col">
                 <button
                   onClick={(e) => { e.stopPropagation(); move(i, 1); }}
                   title="Move up"
-                  className="p-0 rounded hover:bg-white/10 text-white/50"
+                  className="px-1 rounded hover:bg-white/10 text-white/50"
                 >
-                  <ChevronUp className="w-3 h-3" />
+                  <ChevronUp className="w-4 h-4" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); move(i, -1); }}
                   title="Move down"
-                  className="p-0 rounded hover:bg-white/10 text-white/50"
+                  className="px-1 rounded hover:bg-white/10 text-white/50"
                 >
-                  <ChevronDown className="w-3 h-3" />
+                  <ChevronDown className="w-4 h-4" />
                 </button>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); removeLayer(i); }}
                 title="Delete layer"
                 disabled={layers.length <= 1}
-                className="p-0.5 rounded hover:bg-white/10 text-white/50 disabled:opacity-20"
+                className="p-1.5 rounded hover:bg-white/10 text-white/50 disabled:opacity-20"
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           ))}
@@ -351,13 +396,13 @@ export function PatternPanel({
       {/* Tabbed so each half stays short: the preview takes whatever the
           controls leave over, so fewer controls on screen means a bigger
           preview and a drawer that fits on shorter displays. */}
-      <div className="grid grid-cols-2 gap-1 shrink-0">
+      <div className="grid grid-cols-2 gap-1.5 shrink-0">
         {(["pattern", "color"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "text-[10px] uppercase tracking-widest py-1 rounded border transition-colors",
+              "text-xs uppercase tracking-widest py-1.5 rounded-md border transition-colors",
               tab === t
                 ? "border-white bg-white/15 text-white"
                 : "border-white/10 text-white/50 hover:bg-white/5",
@@ -370,62 +415,57 @@ export function PatternPanel({
 
       {tab === "pattern" ? (
         <>
-          <div className="grid grid-cols-4 gap-1 shrink-0">
-            {PATTERN_BLEND_MODES.map((m) => (
-              <button
-                key={m}
-                onClick={() => update({ mode: m })}
-                title={m}
-                className={cn(
-                  "text-[10px] uppercase tracking-wide py-1 rounded border transition-colors",
-                  active.mode === m
-                    ? "border-white bg-white/15 text-white"
-                    : "border-white/10 text-white/60 hover:bg-white/5",
-                )}
-              >
-                {MODE_LABEL[m]}
-              </button>
-            ))}
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Blend
+            </span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {PATTERN_BLEND_MODES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => update({ mode: m })}
+                  title={m}
+                  className={cn(
+                    "text-xs py-1.5 rounded-md border transition-colors",
+                    active.mode === m
+                      ? "border-white bg-white/15 text-white"
+                      : "border-white/10 text-white/60 hover:bg-white/5",
+                  )}
+                >
+                  {MODE_LABEL[m]}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <label className="flex flex-col gap-0.5 shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-white/60">
-              Scale {active.scale.toFixed(2)}
-            </span>
-            {/* Above 1 the pattern lattice is finer than the grid, which is
-                where the emergent motifs live — so the range runs well past it. */}
-            <input
-              type="range"
-              min={0.1}
-              max={6}
-              step={0.01}
-              value={active.scale}
-              onChange={(e) => update({ scale: Number(e.target.value) })}
-              className="w-full accent-white"
-            />
-          </label>
+          {/* Above 1 the pattern lattice is finer than the grid, which is where
+              the emergent motifs live — so the range runs well past it. */}
+          <SliderField
+            label="Scale"
+            value={active.scale}
+            min={0.1}
+            max={6}
+            step={0.01}
+            display={active.scale.toFixed(2)}
+            onChange={(scale) => update({ scale })}
+          />
 
-          <label className="flex flex-col gap-0.5 shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-white/60">
-              Rotation {Math.round(active.rotation)}&deg;
-            </span>
-            {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
-                would remove every pattern that depends on being off-axis. */}
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={0.1}
-              value={active.rotation}
-              onChange={(e) => update({ rotation: Number(e.target.value) })}
-              className="w-full accent-white"
-            />
-          </label>
+          {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
+              would remove every pattern that depends on being off-axis. */}
+          <SliderField
+            label="Rotation"
+            value={active.rotation}
+            min={0}
+            max={360}
+            step={0.1}
+            display={`${Math.round(active.rotation)}°`}
+            onChange={(rotation) => update({ rotation })}
+          />
         </>
       ) : (
         <>
-          <div className="flex flex-col gap-1.5 shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-white/60">
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
               Palette
             </span>
             {/* Keeps its own row: inlining the label would squeeze the chips
@@ -435,48 +475,41 @@ export function PatternPanel({
               value={paletteIdx}
               onChange={onPaletteIdxChange}
             />
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-wide text-white/60 w-14 shrink-0">
-                Primary
-              </span>
-              <div className="flex-1">
-                <Swatches
-                  value={active.fg}
-                  palette={palette}
-                  paletteIdx={paletteIdx}
-                  onChange={(c) => update({ fg: c })}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-wide text-white/60 w-14 shrink-0">
-                Secondary
-              </span>
-              <div className="flex-1">
-                <Swatches
-                  value={active.bg}
-                  palette={palette}
-                  paletteIdx={paletteIdx}
-                  onChange={(c) => update({ bg: c })}
-                />
-              </div>
-            </div>
           </div>
 
-          <label className="flex flex-col gap-0.5 shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-white/60">
-              Opacity {Math.round(active.opacity * 100)}%
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Primary
             </span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={active.opacity}
-              onChange={(e) => update({ opacity: Number(e.target.value) })}
-              className="w-full accent-white"
+            <Swatches
+              value={active.fg}
+              palette={palette}
+              paletteIdx={paletteIdx}
+              onChange={(c) => update({ fg: c })}
             />
-          </label>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Secondary
+            </span>
+            <Swatches
+              value={active.bg}
+              palette={palette}
+              paletteIdx={paletteIdx}
+              onChange={(c) => update({ bg: c })}
+            />
+          </div>
+
+          <SliderField
+            label="Opacity"
+            value={active.opacity}
+            min={0}
+            max={1}
+            step={0.01}
+            display={`${Math.round(active.opacity * 100)}%`}
+            onChange={(opacity) => update({ opacity })}
+          />
         </>
       )}
 

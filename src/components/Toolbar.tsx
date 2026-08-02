@@ -11,6 +11,7 @@ import {
   Maximize,
   Minimize,
   SquareDashed,
+  Crop,
   Stamp,
   Sun,
   Moon,
@@ -19,11 +20,12 @@ import {
   FilePlus,
   ImageDown,
   Box,
+  Shirt,
   Scissors,
   Aperture,
   Paintbrush,
   PaintBucket,
-  Hexagon,
+  Puzzle,
   Snowflake,
   Pipette,
   GitCompareArrows,
@@ -55,7 +57,7 @@ const editTools = [
   { tool: "paint" as Tool, icon: Pencil, label: "Paint", shortcut: "P" },
   { tool: "erase" as Tool, icon: Eraser, label: "Erase", shortcut: "E" },
   { tool: "fill" as Tool, icon: PaintBucket, label: "Fill", shortcut: "F" },
-  { tool: "pattern" as Tool, icon: Hexagon, label: "Pattern", shortcut: "N" },
+  { tool: "pattern" as Tool, icon: Puzzle, label: "Pattern", shortcut: "N" },
   { tool: "dodge" as Tool, icon: Sun, label: "Dodge", shortcut: "D" },
   { tool: "burn" as Tool, icon: Moon, label: "Burn", shortcut: "B" },
   { tool: "stamp" as Tool, icon: Stamp, label: "Stamp", shortcut: "T" },
@@ -198,6 +200,17 @@ export function Toolbar({
               <ImageDown className="w-4 h-4" />
               <span>Export Project</span>
             </DropdownMenuItem>
+            {/* Not a dialog — fabric export is a whole editing mode (crop
+                handles on the canvas), so the menu just selects the tool. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onToolChange("crop");
+              }}
+            >
+              <Shirt className="w-4 h-4" />
+              <span>Export for Fabric</span>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 setHamburgerOpen(false);
@@ -302,6 +315,17 @@ export function Toolbar({
           onMouseLeave={() => onSetTooltip("")}
         >
           <SquareDashed className="w-4 h-4" />
+        </Button>
+
+        <Button
+          variant={tool === "crop" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => onToolChange("crop")}
+          title="Crop & export (X)"
+          onMouseEnter={() => onSetTooltip("Crop & export")}
+          onMouseLeave={() => onSetTooltip("")}
+        >
+          <Crop className="w-4 h-4" />
         </Button>
 
         <button
