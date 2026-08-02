@@ -68,6 +68,12 @@ import {
   type ExportSettings,
 } from "@/components/ExportPanel";
 import { DEFAULT_CROP, type CropRect } from "@/lib/crop";
+import {
+  DEFAULT_PLOTTER,
+  normalizePlotterSettings,
+  type PlotterSettings,
+} from "@/lib/plotter-export";
+import { PlotterDialog } from "@/components/PlotterDialog";
 import { HatchBar } from "@/components/HatchBar";
 import {
   DEFAULT_HATCH_BRUSH,
@@ -156,6 +162,17 @@ export default function TrixelGrid() {
   const updateExportSettings = useCallback(
     (patch: Partial<ExportSettings>) =>
       setExportSettings((s) => ({ ...s, ...patch })),
+    [],
+  );
+
+  // Plotter settings live on their own rather than inside `exportSettings`:
+  // the plot is not cropped and shares nothing with the fabric drawer.
+  const [plotterOpen, setPlotterOpen] = useState(false);
+  const [plotterSettings, setPlotterSettingsState] =
+    useState<PlotterSettings>(DEFAULT_PLOTTER);
+  const setPlotterSettings = useCallback(
+    (patch: Partial<PlotterSettings>) =>
+      setPlotterSettingsState((s) => ({ ...s, ...patch })),
     [],
   );
 
@@ -571,6 +588,9 @@ export default function TrixelGrid() {
             ),
           });
         }
+        if (data.plotter && typeof data.plotter === "object") {
+          setPlotterSettingsState(normalizePlotterSettings(data.plotter));
+        }
         if (data.crop && typeof data.crop === "object") {
           const { i, j, m, n } = data.crop;
           if ([i, j, m, n].every((v) => typeof v === "number")) {
@@ -624,6 +644,7 @@ export default function TrixelGrid() {
         exportSettings,
         hatchBrush,
         hatchify: hatchifySettings,
+        plotter: plotterSettings,
       }),
     );
   }, [
@@ -643,6 +664,7 @@ export default function TrixelGrid() {
     exportSettings,
     hatchBrush,
     hatchifySettings,
+    plotterSettings,
   ]);
 
   useEffect(() => {
@@ -1331,6 +1353,7 @@ export default function TrixelGrid() {
         onExportSVG={handleExportSVG}
         onExport3D={handleExport3D}
         onExportCut={handleExportCut}
+        onExportPlotter={() => setPlotterOpen(true)}
         onImportClick={handleImportClick}
         onClear={handleClear}
         onCenterView={onCenterView}
@@ -1567,6 +1590,17 @@ export default function TrixelGrid() {
         onOpenChange={setExportCutOpen}
         painted={mergedFillPainted}
         projectName={projectName}
+      />
+
+      <PlotterDialog
+        open={plotterOpen}
+        onOpenChange={setPlotterOpen}
+        layers={visibleLayers}
+        gridRotation={gridRotation}
+        gridDivisions={gridDivisions}
+        projectName={projectName}
+        settings={plotterSettings}
+        onSettingsChange={setPlotterSettings}
       />
 
       <HatchifyDialog

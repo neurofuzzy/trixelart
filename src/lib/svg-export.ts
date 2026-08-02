@@ -30,14 +30,15 @@ export interface SVGExportOptions {
   merge?: boolean;
 }
 
-const PRECISION = 3;
+export const PRECISION = 3;
 const PADDING = 20;
 
-function fmt(n: number): string {
+/** Shared with the plotter export so every vector file rounds identically. */
+export function fmt(n: number): string {
   return n.toFixed(PRECISION);
 }
 
-function roundNum(n: number): number {
+export function roundNum(n: number): number {
   const factor = Math.pow(10, PRECISION);
   return Math.round(n * factor) / factor;
 }

@@ -34,6 +34,10 @@ import {
  * every trixel in every direction**, which is also the semantics worth exposing
  * on the slider.
  *
+ * The pen plotter is the one caller that wants the unshifted ladder anyway, for
+ * reasons that only apply once the shape boundaries are being drawn as strokes
+ * — see `HatchAlign`.
+ *
  * `u` is a pure function of world position, so the line field is **global**:
  * trixels hatched in separate strokes line up as continuous lines rather than
  * per-triangle tufts. Getting this wrong is the obvious failure mode.
@@ -47,8 +51,8 @@ export const HATCH_DIRS: readonly HatchDir[] = [0, 1, 2];
 export const DIR_BIT: Record<HatchDir, number> = { 0: 1, 1: 2, 2: 4 };
 export const DIR_LABEL: Record<HatchDir, string> = { 0: "—", 1: "/", 2: "\\" };
 
-export const MIN_DENSITY = 1;
-export const MAX_DENSITY = 8;
+export const MIN_DENSITY = 4;
+export const MAX_DENSITY = 16;
 export const MIN_WEIGHT = 0.5;
 export const MAX_WEIGHT = 8;
 
@@ -187,6 +191,27 @@ export interface Box {
 export type Seg = [number, number, number, number];
 
 /**
+ * Where a family's lines sit within a base cell.
+ *
+ * - `"center"` — at `(n + ½)·step`. The screen default: at density 1 the single
+ *   line runs down the middle of the triangle, so `density` reads as *lines per
+ *   triangle*, and no line lands on a lattice edge where the neighbouring
+ *   triangle would draw it a second time.
+ * - `"grid"` — at `n·step`, i.e. on the division lines **including** the
+ *   lattice's own. For the pen plotter, where the shape boundaries are already
+ *   drawn as outlines: a centred line sits half a division from the outline, so
+ *   the tone crowds at every boundary. On the division lines the ladder is
+ *   uniform straight across an edge — but only if the lattice lines are kept,
+ *   since a same-coloured edge has no outline on it to stand in for the missing
+ *   line, and dropping it opens a double gap every `density` lines.
+ *
+ * A `"grid"` line therefore *can* coincide with an outline, and the caller is
+ * responsible for not drawing both — see `plotter-export.ts`, which subtracts
+ * the outline spans from the hatch.
+ */
+export type HatchAlign = "center" | "grid";
+
+/**
  * Every line of family `dir` at `density` that crosses `box`, as segments
  * spanning the box. Callers clip them — to a canvas clip region, or per
  * triangle for SVG.
@@ -195,6 +220,7 @@ export function hatchLinesInBox(
   dir: HatchDir,
   density: number,
   box: Box,
+  align: HatchAlign = "center",
 ): Seg[] {
   const step = hatchStep(dir, density);
   if (!(step > 0)) return [];
@@ -207,14 +233,15 @@ export function hatchLinesInBox(
   ];
   // Half-step offset — see the file header. Without it density 1 lands on the
   // triangle edges and draws nothing inside.
-  const nMin = Math.ceil(Math.min(...us) / step - 0.5);
-  const nMax = Math.floor(Math.max(...us) / step - 0.5);
+  const shift = align === "grid" ? 0 : 0.5;
+  const nMin = Math.ceil(Math.min(...us) / step - shift);
+  const nMax = Math.floor(Math.max(...us) / step - shift);
   // A pathological box/density combination shouldn't be able to hang the render.
   if (nMax - nMin > 20000) return [];
 
   const out: Seg[] = [];
   for (let n = nMin; n <= nMax; n++) {
-    const u = (n + 0.5) * step;
+    const u = (n + shift) * step;
     if (dir === 0) {
       // y = u, parameterised by x.
       out.push([box.minX, u, box.maxX, u]);

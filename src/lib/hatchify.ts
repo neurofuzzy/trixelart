@@ -118,7 +118,11 @@ export function reduceLevels(levels: number): number[] {
  * combination that guarantees it; `allOdd` reports whether the current settings
  * land there, so the UI can say so rather than leaving it to be discovered.
  */
-export function reachableDensities(s: HatchifySettings): {
+export function reachableDensities(s: {
+  minDensity: number;
+  maxDensity: number;
+  densitySkip: number;
+}): {
   densities: number[];
   allOdd: boolean;
 } {

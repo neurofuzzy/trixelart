@@ -21,6 +21,7 @@ import {
   ImageDown,
   Box,
   Shirt,
+  PenLine,
   Scissors,
   Aperture,
   Paintbrush,
@@ -114,6 +115,7 @@ export function Toolbar({
   onExportSVG,
   onExport3D,
   onExportCut,
+  onExportPlotter,
   onImportClick,
   onClear,
   onCenterView,
@@ -141,6 +143,7 @@ export function Toolbar({
   onExportSVG: () => void;
   onExport3D: () => void;
   onExportCut: () => void;
+  onExportPlotter: () => void;
   onImportClick: () => void;
   onClear: () => void;
   onCenterView: () => void;
@@ -219,7 +222,7 @@ export function Toolbar({
               }}
             >
               <ImageDown className="w-4 h-4" />
-              <span>Export Project</span>
+              <span>Export Project...</span>
             </DropdownMenuItem>
             {/* Not a dialog — fabric export is a whole editing mode (crop
                 handles on the canvas), so the menu just selects the tool. */}
@@ -230,7 +233,7 @@ export function Toolbar({
               }}
             >
               <Shirt className="w-4 h-4" />
-              <span>Export for Fabric</span>
+              <span>Export for Fabric...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -239,7 +242,7 @@ export function Toolbar({
               }}
             >
               <Box className="w-4 h-4" />
-              <span>Export for 3D Print</span>
+              <span>Export for 3D Print...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -248,7 +251,18 @@ export function Toolbar({
               }}
             >
               <Scissors className="w-4 h-4" />
-              <span>Export for Cutting</span>
+              <span>Export for Cutting...</span>
+            </DropdownMenuItem>
+            {/* A dialog, not a canvas mode: a plot takes the whole artwork, so
+                unlike fabric there is no region to drag out on the canvas. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExportPlotter();
+              }}
+            >
+              <PenLine className="w-4 h-4" />
+              <span>Export for Plotter...</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

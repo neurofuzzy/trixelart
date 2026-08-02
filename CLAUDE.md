@@ -208,6 +208,46 @@ Measured on dense random art: full-width anomalous rows 6 → 0, and the **tile 
 
 Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` inputs, 16px icons, `p-4`/`gap-3` shell. `PatternPanel`'s 14 palette chips must stay `flex-1` rather than fixed-width — fourteen of them share the drawer's inner width on one line and cannot grow past ~23px.
 
+## Plotter export
+
+Its own dialog, off the hamburger menu ("Export for plotter..."), in `src/lib/plotter-export.ts` (pure) + `PlotterDialog.tsx`. A pen plotter draws **strokes**, carries **one pen**, and charges for every pen-down millimetre — and a retraced line is a visible blot of doubled ink, not just wasted time. So this is convert-to-hatches aimed at paper: brightness becomes density, hex wedges give direction, output is a stroke-only SVG at true physical size.
+
+**Deliberately not cropped, and deliberately not in `ExportPanel`.** The fabric exports exist to cut a seamless *repeat tile* out of the artwork. A plot is a drawing on a sheet: it takes the **whole** artwork and lays it out on a page. Sharing the crop drawer would have meant every plot silently inheriting a tiling rectangle that has nothing to do with it — so the settings live under their own `plotter` key in `trixel-settings`, not inside `ExportSettings`.
+
+**Page, margin and fit** are `plotterLayout` (pure), which is the only place the artwork's world units meet inches. Named sheets are stored **portrait** and `landscape` swaps them, so the two orientations cannot disagree. Two modes, differing in which variable is free: on a sheet the **page** is given and the drawing is auto-scaled to fit inside the margins and centred there (so a plot always fits the paper in the machine); under `fit` the **drawing** is given (`artWidthIn`) and the page grows to hold it plus margins, which is the older artwork-shaped page. `scale` is inches per world unit and is `0` when the margin has eaten the page — `invalid`, and the export button goes with it.
+
+The margin is floored at **half a nib**: the stroke is centred on its path, so a cap on an edge stroke would otherwise be sliced in half by the page edge. That is the same half-nib bleed the SVG used to carry implicitly, now expressed as the smallest legal margin.
+
+**The SVG's user unit is the inch and its `viewBox` is the sheet.** Strokes stay in world coordinates and ride on one `translate/scale` per layer, so re-sizing the page changes one number per layer rather than every path, and `stroke-width` is divided by that scale to come out at the true nib. The transform and the page dimensions are emitted through `fmtHi` (12 significant digits), **not** the shared `fmt`: three decimals are a rounding error on a world coordinate and a **7% size error** on a scale factor of ~0.019. Path coordinates still use `fmt`, where a thousandth of a world unit is nanometres on the page.
+
+Marks are built by walking the **painted keys**, not by scanning a region — with no crop there is no box to enumerate, and walking what exists is both exact and cheaper than sweeping mostly-empty area. `PlotterPlot.width/height` is the artwork's own extent in world units, taken **after** the display rotation, because under a quarter turn width and height swap and measuring first would size it wrongly; the page comes from `plotterLayout` on top of that.
+
+**Brightness is OKLab lightness** (`oklabLightness`, exported from `tri-pattern.ts`), *not* `colorIdx` as hatchify uses. Reproducing colour in a single ink needs a brightness comparable **across** palettes; index 8 of Glacier is 68% lightness and index 8 of Ocean is 88%, and they would otherwise plot identically. Black pen on white: `a = 1 − L`. White pen on black: the exact reverse. Measured, the two modes are exact mirrors and ink is exactly proportional to density.
+
+**Hatch layers are ignored**, unlike every other export, which is why `plotterMarks` reads only the fills. A plot puts its lines on the lattice's division lines while an authored hatch layer is centred between them; the two schemes on one sheet read as a mistake rather than as emphasis. Hand-drawn line work stays a screen and vector feature.
+
+**Solids are outlined too.** Every lattice edge whose two sides read as different colours is drawn, plus the outside of the artwork. **An edge between two cells of the same colour is never drawn** — that is what makes it an outline of the shapes rather than a wireframe of every trixel (measured: a 162-trixel flat field outlines to its perimeter, ~1800 units, not the ~24000 every-edge would give). Each undirected edge is accumulated once in a map, so an interior edge cannot be emitted twice even though two triangles claim it — overdraw is impossible before the interval union even runs. Colours are compared **resolved, not encoded**, deliberately breaking the usual rule: elsewhere encoded comparison is right because painted data must follow palette shifts, but here the only question is whether the eye sees a boundary, and two swatches from different palettes resolving to the same hex are one region.
+
+**The plotter's hatch is grid-aligned, not centred** — the one place its line work differs in *geometry* from the screen's (`hatchLinesInBox`'s `align` parameter; `"center"` everywhere else). On paper the shape boundaries are already drawn as outlines, so a centred hatch sits half a division from them and the tone crowds at every boundary. On the division lines the ladder is uniform straight across an edge.
+
+**The lattice's own lines are kept, not skipped**, even though the outlines sit there too. Skipping them looks right only where an outline stands in for the missing line, and an edge between two cells of the *same* colour has no outline — so skipping opens a double gap every `density` lines through the middle of every flat region (measured: gaps alternating `0.25H, 0.25H, 0.5H` instead of a constant `0.25H`).
+
+So a hatch span **can** coincide with an outline, and `joinRuns` takes an optional `mask`: the outlines are joined first, then the hatch is joined and has them subtracted. Subtraction, not exclusion at generation time — the hatch line must survive wherever there is no outline, which is most of a flat region, and only the joined outline set knows where that is. Verified on a flat field (one gap value in the histogram, 0 overlapping stroke pairs across both layers) and on a two-colour boundary (the shared row comes out outline-only, full width, no gap).
+
+**Joining and overdraw removal are the same operation, and it is not segment chaining.** The obvious reading of the data — a pile of little segments — suggests chasing matching endpoints. Don't. Every segment already lies on a *known line of a known family*, so the join is a **one-dimensional interval union per line**: bucket by `(dir, u)`, project onto the line's parameter (x for family 0, y for 1 and 2 — the parameterisation `hatchLinesInBox` generates with), and union. A union is disjoint by construction, so overdraw does not need detecting and removing; it cannot survive. It also cannot mis-chain at a crossing, which endpoint chasing can.
+
+**Lines are grouped by sweeping sorted `u`, not by hashing a rounded key.** Coincident lines arriving from different densities are *not* bitwise equal — at densities 1, 3 and 7 the shared line computes to the identical double, but at density 5 it differs by one ulp. An exact key silently fails to join exactly those, and a rounded key can still split a pair straddling a bucket boundary. A sweep has neither failure mode.
+
+**Grid alignment makes the odd/even ladder argument moot here.** With lines at `n·base/d`, *every* density contains the lattice lines themselves, so those run unbroken across the whole artwork whatever the settings — and one density's lines are a subset of another's exactly when `d1 | d2`. (The all-odd reasoning in `reachableDensities` is still correct for hatchify, which stays centred at `(n + ½)·step`.) `densitySkip` is now only a tone-count control for the plotter.
+
+Outlining and travel ordering are **unconditional** — the two checkboxes were removed. Travel ordering cannot change what is drawn, only how long the pen spends in the air (greedy nearest-neighbour with stroke reversal, `O(n²)`, skipped above 8000 strokes; measured 272568 → 7988 world units of pen-up on a full-artwork plot), so there was nothing to opt out of. And with the hatch on the division lines, the outlines are what bound each tone: without them the ladder reads as an open field of parallel lines rather than as shapes.
+
+**Output is three Inkscape layers** — Paper, Hatch, Outlines — as `inkscape:groupmode="layer"` groups with the `xmlns:inkscape` declaration, which is what makes Inkscape read them as layers rather than anonymous groups. Each can be hidden, re-penned, reordered or plotted on its own, which is how a two-pen or two-pass plot is actually produced; the paper layer switches off before plotting. Hatch precedes Outlines so outlines draw on top. Travel is optimised **within** each layer, since the plotter draws one layer at a time and interleaving would only add travel.
+
+The paper is a filled `<rect>` covering the page, with no stroke: plotters follow strokes and ignore it, but it makes a white-on-black plot legible on screen. `renderPlotterPreview` draws the paper at the *page's* aspect, not the canvas box's, or the sheet is misrepresented, and dashes in the margin box — on a fixed sheet the margin is what decides how big the drawing comes out and is otherwise invisible.
+
+**Dialog.** The controls are grouped into four `Section`s — Pen, Page, Tone, Line work — because they are four unrelated decisions and eighteen rows at one rhythm read as an undifferentiated list. `densitySkip`'s trade-off caption was removed as noise; the ladder it described is still what `reachableDensities` computes.
+
 ## Symmetry function panel
 
 - Uses `new Function()` to eval user formulas against `a,b,c` coordinates
@@ -222,7 +262,7 @@ Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` 
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 `ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the exported project JSON — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
@@ -244,10 +284,11 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, 40 MB limit |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
-| `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox`, `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
+| `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox` (+ `HatchAlign`), `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
 | `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
 | `src/lib/hatchify.ts` | Convert-to-hatches maths: `hatchify`, `WEDGE_DIR`, `reduceLevels`, `HatchifySettings`. Pure, no DOM |
 | `src/lib/hatchify-render.ts` | `renderHatchifyPreview` — fits a trixel set to a canvas and runs the GridCanvas draw loop |
+| `src/lib/plotter-export.ts` | Single-pen plotter export: `buildPlotterPlot`, `plotterLayout` (page/margin/fit), `plotterSVG`, the interval union + outline subtraction, travel ordering. Pure except `renderPlotterPreview` |
 | `src/lib/pattern-render.ts` | Canvas rendering for pattern previews, thumbnails and palette slots |
 | `src/lib/utils.ts` | `cn()` — clsx + tailwind-merge |
 | `src/hooks/use-canvas-size.ts` | Container measurement via `ResizeObserver` |
@@ -272,8 +313,9 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
 - `LayerKind = "fill" | "hatch"`, `Layer` — `src/hooks/use-history.ts`
-- `HatchBrush`, `HatchDir` — `src/lib/hatch.ts`
+- `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`
+- `PlotterSettings`, `PenMode`, `PageSizeId`, `PlotterLayout`, `PlotterPlot`, `PlotterStroke` — `src/lib/plotter-export.ts`
 - `CropRect`, `CropHandle` — `src/lib/crop.ts`
 - `ExportSettings` — `src/components/ExportPanel.tsx`
 - `PatternLayer`, `PatternPreset`, `PatternBlendMode`, `QuantizeTarget` — `src/lib/tri-pattern.ts`
