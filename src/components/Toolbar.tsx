@@ -20,6 +20,7 @@ import {
   FilePlus,
   ImageDown,
   Box,
+  Shirt,
   Scissors,
   Aperture,
   Paintbrush,
@@ -198,6 +199,17 @@ export function Toolbar({
             >
               <ImageDown className="w-4 h-4" />
               <span>Export Project</span>
+            </DropdownMenuItem>
+            {/* Not a dialog — fabric export is a whole editing mode (crop
+                handles on the canvas), so the menu just selects the tool. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onToolChange("crop");
+              }}
+            >
+              <Shirt className="w-4 h-4" />
+              <span>Export for Fabric</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {

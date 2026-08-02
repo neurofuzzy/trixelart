@@ -65,26 +65,30 @@ function Stepper({
   min?: number;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      <span className="text-[10px] text-white/50 w-3">{label}</span>
-      <button
-        onClick={() => onChange(Math.max(min, value - 1))}
-        className="p-1 rounded hover:bg-white/10 text-white/70 disabled:opacity-30"
-        disabled={value <= min}
-        title={`Decrease ${label}`}
-      >
-        <Minus className="w-3 h-3" />
-      </button>
-      <span className="text-[11px] font-mono text-white/85 w-6 text-center">
-        {value}
+    <div className="flex-1 flex flex-col gap-1">
+      <span className="text-[11px] uppercase tracking-wide text-white/45">
+        {label}
       </span>
-      <button
-        onClick={() => onChange(value + 1)}
-        className="p-1 rounded hover:bg-white/10 text-white/70"
-        title={`Increase ${label}`}
-      >
-        <Plus className="w-3 h-3" />
-      </button>
+      <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-md p-0.5">
+        <button
+          onClick={() => onChange(Math.max(min, value - 1))}
+          className="p-1.5 rounded hover:bg-white/10 text-white/70 disabled:opacity-25"
+          disabled={value <= min}
+          title={`Decrease ${label}`}
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <span className="flex-1 text-sm font-mono text-white/90 text-center tabular-nums">
+          {value}
+        </span>
+        <button
+          onClick={() => onChange(value + 1)}
+          className="p-1.5 rounded hover:bg-white/10 text-white/70"
+          title={`Increase ${label}`}
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -105,11 +109,13 @@ function NumberField({
   suffix?: string;
 }) {
   return (
-    <label className="flex-1 min-w-0 flex flex-col gap-0.5">
-      <span className="text-[9px] uppercase tracking-wide text-white/45">
+    <label className="flex-1 min-w-0 flex flex-col gap-1">
+      <span className="text-[11px] uppercase tracking-wide text-white/45">
         {label}
       </span>
-      <span className="flex items-center gap-1">
+      {/* Unit sits inside the field rather than beside it — at this width a
+          trailing label steals more room than it explains. */}
+      <span className="relative flex items-center">
         <input
           type="number"
           value={value}
@@ -119,10 +125,12 @@ function NumberField({
             const n = Number(e.target.value);
             if (Number.isFinite(n) && n >= min) onChange(n);
           }}
-          className="w-full min-w-0 bg-white/5 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white/85 focus:outline-none focus:border-white/40"
+          className="w-full min-w-0 bg-white/5 border border-white/10 rounded-md pl-2.5 pr-9 py-2 text-sm font-mono text-white/90 focus:outline-none focus:border-white/40"
         />
         {suffix && (
-          <span className="text-[10px] text-white/40 shrink-0">{suffix}</span>
+          <span className="absolute right-2.5 text-xs text-white/40 pointer-events-none">
+            {suffix}
+          </span>
         )}
       </span>
     </label>
@@ -266,16 +274,16 @@ export function ExportPanel({
       onPointerEnter={onPointerEnter}
       data-tour="export"
     >
-      <header className="flex items-center justify-between px-3 h-9 border-b border-white/10 shrink-0">
-        <span className="text-[10px] uppercase tracking-widest text-white/70">
+      <header className="flex items-center justify-between px-4 h-11 border-b border-white/10 shrink-0">
+        <span className="text-xs uppercase tracking-widest text-white/70">
           Crop &amp; Export
         </span>
-        <span className="text-[10px] font-mono text-white/35">
+        <span className="text-xs font-mono text-white/40 tabular-nums">
           {pxW} &times; {pxH} px
         </span>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
         {/* The only flex child, so it absorbs leftover height and is the first
             thing to give way on a short display. */}
         <div
@@ -290,38 +298,38 @@ export function ExportPanel({
 
         {/* --- Crop ------------------------------------------------------ */}
         <div className="flex items-center justify-between shrink-0">
-          <span className="text-[10px] uppercase tracking-wide text-white/60">
+          <span className="text-xs uppercase tracking-wide text-white/60">
             Crop
+            <span className="ml-2 font-mono normal-case tracking-normal text-white/35 tabular-nums">
+              {display.w.toFixed(0)} &times; {display.h.toFixed(0)}
+            </span>
           </span>
           <button
             onClick={handleFit}
             title="Fit crop to painted artwork"
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 text-white/70 text-[10px]"
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 text-white/70 text-xs"
           >
-            <Scan className="w-3 h-3" />
+            <Scan className="w-3.5 h-3.5" />
             Fit to artwork
           </button>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-end gap-3 shrink-0">
           <Stepper
-            label="W"
+            label="Tiles across"
             value={crop.m}
             onChange={(m) => onCropChange({ ...crop, m })}
           />
           <Stepper
-            label="H"
+            label="Tiles down"
             value={crop.n}
             onChange={(n) => onCropChange({ ...crop, n })}
           />
-          <span className="ml-auto text-[10px] font-mono text-white/35">
-            {display.w.toFixed(0)} &times; {display.h.toFixed(0)}
-          </span>
         </div>
 
         {/* --- Output ---------------------------------------------------- */}
         <div className="flex items-center justify-between shrink-0 pt-1">
-          <span className="text-[10px] uppercase tracking-wide text-white/60">
+          <span className="text-xs uppercase tracking-wide text-white/60">
             Output
           </span>
           <button
@@ -329,13 +337,13 @@ export function ExportPanel({
               onSettingsChange({ dpi: SPOONFLOWER_DPI, widthInches: 24 })
             }
             title="Spoonflower wallpaper: 24 in at 150 DPI = 3600 px"
-            className="px-1.5 py-0.5 rounded hover:bg-white/10 text-white/70 text-[10px]"
+            className="px-2 py-1 rounded-md hover:bg-white/10 text-white/70 text-xs"
           >
             24 in @ 150
           </button>
         </div>
 
-        <div className="flex items-end gap-2 shrink-0">
+        <div className="flex items-end gap-3 shrink-0">
           <NumberField
             label="Width"
             value={settings.widthInches}
@@ -353,74 +361,74 @@ export function ExportPanel({
           />
           {/* Background opens the shared colour modal rather than inlining a
               palette: the drawer's height is better spent on the preview. */}
-          <div className="flex flex-col gap-0.5 shrink-0">
-            <span className="text-[9px] uppercase tracking-wide text-white/45">
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-[11px] uppercase tracking-wide text-white/45">
               Bg
             </span>
             <button
               onClick={() => setPickerOpen(true)}
               title={`Background: ${bgHex}`}
-              className="w-8 h-[26px] rounded border border-white/20 hover:border-white/60 transition-colors"
+              className="w-11 h-[38px] rounded-md border border-white/20 hover:border-white/60 transition-colors"
               style={{ backgroundColor: bgHex }}
             />
           </div>
         </div>
 
-        <div className="text-[10px] font-mono text-white/40 shrink-0">
+        <div className="text-xs font-mono text-white/40 shrink-0 tabular-nums">
           {settings.widthInches.toFixed(2)} &times; {heightInches.toFixed(2)} in
           &middot; {pxW} &times; {pxH} px
         </div>
 
         {/* --- Vector options -------------------------------------------- */}
-        <span className="text-[10px] uppercase tracking-wide text-white/60 shrink-0 pt-1">
+        <span className="text-xs uppercase tracking-wide text-white/60 shrink-0 pt-1">
           SVG options
         </span>
-        <label className="flex items-center gap-2 cursor-pointer shrink-0">
+        <label className="flex items-center gap-2.5 cursor-pointer shrink-0">
           <input
             type="checkbox"
             checked={settings.svg.merge ?? false}
             onChange={(e) =>
               onSettingsChange({ svg: { ...settings.svg, merge: e.target.checked } })
             }
-            className="rounded"
+            className="size-4 rounded accent-amber-400"
           />
-          <span className="text-[10px] text-white/60">
+          <span className="text-xs text-white/70">
             Merge same-colour triangles
           </span>
         </label>
-        <label className="flex items-center gap-2 cursor-pointer shrink-0">
+        <label className="flex items-center gap-2.5 cursor-pointer shrink-0">
           <input
             type="checkbox"
             checked={settings.svg.stroke ?? false}
             onChange={(e) =>
               onSettingsChange({ svg: { ...settings.svg, stroke: e.target.checked } })
             }
-            className="rounded"
+            className="size-4 rounded accent-amber-400"
           />
-          <span className="text-[10px] text-white/60">
+          <span className="text-xs text-white/70">
             Add 0.5pt stroke for overdraw
           </span>
         </label>
 
         {error && (
-          <p className="text-[10px] leading-snug text-red-400 shrink-0">{error}</p>
+          <p className="text-xs leading-snug text-red-400 shrink-0">{error}</p>
         )}
       </div>
 
-      <div className="flex gap-2 p-3 border-t border-white/10 shrink-0">
+      <div className="flex gap-2 p-4 border-t border-white/10 shrink-0">
         <button
           onClick={handlePng}
           disabled={busy}
-          className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-md bg-white/10 hover:bg-white/20 disabled:opacity-40 text-[11px] text-white/90"
+          className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md bg-white/10 hover:bg-white/20 disabled:opacity-40 text-sm text-white/90"
         >
-          <Download className="w-3.5 h-3.5" />
+          <Download className="w-4 h-4" />
           PNG
         </button>
         <button
           onClick={handleSvg}
-          className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-md bg-white/10 hover:bg-white/20 text-[11px] text-white/90"
+          className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md bg-white/10 hover:bg-white/20 text-sm text-white/90"
         >
-          <CropIcon className="w-3.5 h-3.5" />
+          <CropIcon className="w-4 h-4" />
           SVG
         </button>
       </div>
