@@ -16,7 +16,7 @@ import {
   trisBox,
   type HatchDir,
 } from "@/lib/hatch";
-import { MAX_SKIP, MIN_SKIP, WEDGE_DIR, reachableDensities } from "@/lib/hatchify";
+import { WEDGE_DIR } from "@/lib/hatchify";
 import { fmt } from "@/lib/svg-export";
 
 /**
@@ -88,9 +88,16 @@ export const PAGE_SIZES: { id: PageSizeId; label: string; w: number; h: number }
 
 export interface PlotterSettings {
   pen: PenMode;
+  /** The tone ramp's two ends, in divisions per triangle. Every integer between
+   *  them is a tone level — the plotter's hatch sits on the lattice's division
+   *  lines, where every density already contains the lattice ladder, so there is
+   *  nothing for a skip to buy (it existed to keep coincident lines joinable
+   *  under the centred scheme). */
   minDensity: number;
   maxDensity: number;
-  densitySkip: number;
+  /** Leave the no-ink end of the ramp unhatched — outlines only. That is the
+   *  lightest tone with a black pen and the darkest with a white one. */
+  blankLightest: boolean;
   /** The physical nib, in millimetres. Drives the SVG `stroke-width` only — it
    *  never changes which lines are drawn. */
   strokeWidthMm: number;
@@ -112,12 +119,9 @@ export interface PlotterSettings {
 
 export const DEFAULT_PLOTTER: PlotterSettings = {
   pen: "black-on-white",
-  minDensity: 1,
-  maxDensity: 7,
-  // {1,3,5,7} — all odd, so every density contains the density-1 ladder and a
-  // stroke survives a tone change instead of breaking at every boundary. See
-  // `reachableDensities`.
-  densitySkip: 2,
+  minDensity: MIN_DENSITY,
+  maxDensity: 10,
+  blankLightest: false,
   strokeWidthMm: 0.3,
   pageSize: "letter",
   customWidthIn: 8,
@@ -155,6 +159,23 @@ export interface PlotterPlot {
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
+
+/**
+ * The tone ladder, lightest first: every density from `min` to `max`, optionally
+ * led by `0` — the "leave it blank" rung, which is outlines only.
+ *
+ * Unlike hatchify's `reachableDensities` there is no skip. That existed so the
+ * reachable densities would share lines under the centred scheme; on the
+ * division lines every density already contains the lattice ladder, so a skip
+ * would only throw away tone levels.
+ */
+export function plotterDensities(s: PlotterSettings): number[] {
+  const lo = clamp(Math.round(s.minDensity), MIN_DENSITY, MAX_DENSITY);
+  const hi = clamp(Math.round(s.maxDensity), lo, MAX_DENSITY);
+  const out: number[] = s.blankLightest ? [0] : [];
+  for (let d = lo; d <= hi; d++) out.push(d);
+  return out;
+}
 
 /**
  * Two lines of the same family are the same physical line when their `u` values
@@ -204,25 +225,57 @@ export function plotterMarks(
 
   const fills = mergeKind(layers, "fill");
   const ink = PEN_INK[s.pen];
-  const { densities } = reachableDensities(s);
-  if (densities.length === 0) return marks;
+  const ladder = plotterDensities(s);
+  if (ladder.length === 0) return marks;
 
-  for (const key of Object.keys(fills)) {
-    const tri = stringToTri(key);
-    if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
+  // Lightness per *encoded* colour, not per trixel: an artwork uses a handful of
+  // swatches over thousands of cells, and this is two colour-space conversions.
+  const lightness = new Map<string, number>();
+  const lightnessOf = (encoded: string) => {
+    let l = lightness.get(encoded);
+    if (l === undefined) {
+      l = oklabLightness(resolveColor(encoded));
+      lightness.set(encoded, l);
+    }
+    return l;
+  };
 
-    const fill = fills[key];
-    if (!fill) continue;
+  const keys = Object.keys(fills).filter((key) => {
     // Rejects a hatch value structurally — it has pipes and no valid "p,c".
-    if (!decodeColor(fill)) continue;
+    if (!decodeColor(fills[key])) return false;
+    const tri = stringToTri(key);
+    return Number.isFinite(tri.q) && Number.isFinite(tri.r);
+  });
 
-    const lightness = oklabLightness(resolveColor(fill));
+  // The tone range is normalised to what is actually painted, so the darkest
+  // colour present always plots at the top of the ladder and the lightest at the
+  // bottom. Absolute lightness wastes most of the ramp: the palettes span
+  // roughly 12%–88%, and four of them top out at 68%, so a piece drawn from one
+  // of those would never reach either end of the density range.
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const key of keys) {
+    const l = lightnessOf(fills[key]);
+    if (l < lo) lo = l;
+    if (l > hi) hi = l;
+  }
+  const span = hi - lo;
+
+  for (const key of keys) {
+    const tri = stringToTri(key);
+    const l = lightnessOf(fills[key]);
+    // 1 = the darkest thing in the artwork, 0 = the lightest. A single-tone
+    // piece has no range to normalise against, so it falls back to absolute
+    // lightness rather than dividing by zero and plotting one arbitrary density.
+    const dark = span > 1e-6 ? (hi - l) / span : 1 - l;
     // Black pen on white paper: dark artwork needs more ink. White on black is
     // the exact reverse — the paper is already the darkest thing on the page.
-    const a = s.pen === "black-on-white" ? 1 - lightness : lightness;
+    const a = s.pen === "black-on-white" ? dark : 1 - dark;
 
-    const j = clamp(Math.round(a * (densities.length - 1)), 0, densities.length - 1);
-    const density = clamp(densities[j], MIN_DENSITY, MAX_DENSITY);
+    const j = clamp(Math.round(a * (ladder.length - 1)), 0, ladder.length - 1);
+    const density = ladder[j];
+    // Density 0 is the `blankLightest` rung: outlines only, no hatching.
+    if (density <= 0) continue;
 
     const { c, k } = triToHex(tri.q, tri.r, tri.type, gridDivisions);
     const dir = WEDGE_DIR[hexWedgeIndex(tri, c, k, gridDivisions)];
@@ -915,9 +968,10 @@ export function normalizePlotterSettings(raw: unknown): PlotterSettings {
         Math.max(minDensity, DEFAULT_PLOTTER.maxDensity),
       ),
     ),
-    densitySkip: Math.round(
-      num(r.densitySkip, MIN_SKIP, MAX_SKIP, DEFAULT_PLOTTER.densitySkip),
-    ),
+    blankLightest:
+      typeof r.blankLightest === "boolean"
+        ? r.blankLightest
+        : DEFAULT_PLOTTER.blankLightest,
     strokeWidthMm: num(r.strokeWidthMm, 0.05, 5, DEFAULT_PLOTTER.strokeWidthMm),
     pageSize: PAGE_SIZES.some((p) => p.id === r.pageSize)
       ? (r.pageSize as PageSizeId)

@@ -8,7 +8,6 @@ import { cn, normalizeProjectFilename } from "@/lib/utils";
 import type { Layer } from "@/hooks/use-history";
 import { downloadBlob } from "@/lib/png-export";
 import { MAX_DENSITY, MIN_DENSITY } from "@/lib/hatch";
-import { MAX_SKIP, MIN_SKIP } from "@/lib/hatchify";
 import {
   MAX_MARGIN_IN,
   MAX_PAGE_IN,
@@ -16,6 +15,7 @@ import {
   PAGE_SIZES,
   allStrokes,
   buildPlotterPlot,
+  plotterDensities,
   plotterLayout,
   plotterSVG,
   renderPlotterPreview,
@@ -176,6 +176,8 @@ export function PlotterDialog({
     () => (plot ? plotterLayout(plot, settings) : null),
     [plot, settings],
   );
+  const ladder = useMemo(() => plotterDensities(settings), [settings]);
+  const darkPaper = settings.pen === "white-on-black";
 
   useEffect(() => {
     if (!open) return;
@@ -418,30 +420,27 @@ export function PlotterDialog({
                 }
               />
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs uppercase tracking-wide text-muted-foreground w-24 shrink-0">
-                  Skip
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.blankLightest}
+                  onChange={(e) =>
+                    onSettingsChange({ blankLightest: e.target.checked })
+                  }
+                  className="size-4 rounded accent-amber-400"
+                />
+                <span className="text-xs text-muted-foreground">
+                  {/* Which end of the ramp goes blank follows the pen: white on
+                      black spends ink on the *light* areas. */}
+                  Leave the {darkPaper ? "darkest" : "lightest"} tone unhatched
                 </span>
-                <div className="flex flex-1 rounded-md overflow-hidden border border-white/10">
-                  {Array.from(
-                    { length: MAX_SKIP - MIN_SKIP + 1 },
-                    (_, i) => i + MIN_SKIP,
-                  ).map((skip) => (
-                    <button
-                      key={skip}
-                      onClick={() => onSettingsChange({ densitySkip: skip })}
-                      className={cn(
-                        "flex-1 py-1.5 text-xs font-mono transition-colors",
-                        settings.densitySkip === skip
-                          ? "bg-amber-400/20 text-amber-200"
-                          : "text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {skip}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              </label>
+
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {ladder.length} tone level{ladder.length === 1 ? "" : "s"}
+                {settings.blankLightest ? ", the first blank" : ""} &middot;
+                normalised to the artwork
+              </p>
             </Section>
           </div>
         </div>

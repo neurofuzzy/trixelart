@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-02 22:18:38
+# Last updated: 2026-08-02 22:23:45
 # Files: 77
-# Lines of code: ~16380
+# Lines of code: ~16437
 ```
 - **/app**
   - **/lib**
@@ -343,6 +343,7 @@
     - Variable: `DEFAULT_PLOTTER`
     - Interface: `PlotterStroke` - A pen-down run. Always two points today — a mer...
     - Interface: `PlotterPlot`
+    - Function: `plotterDensities` - The tone ladder, lightest first: every density ...
     - Function: `plotterMarks` - Turns the whole artwork into hatch marks, all i...
     - Function: `buildPlotterPlot`
     - Function: `allStrokes` - Every pen-down run, in plot order.
