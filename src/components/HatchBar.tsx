@@ -12,6 +12,7 @@ import {
   type HatchBrush,
   type HatchDir,
 } from "@/lib/hatch";
+import type { Tool } from "@/lib/tools/types";
 
 /**
  * Hatch brush controls: three direction toggles and two sliders.
@@ -93,10 +94,16 @@ export function HatchBar({
   brush,
   onBrushChange,
   onPointerEnter,
+  tool,
+  hasSelection,
+  onConvert,
 }: {
   brush: HatchBrush;
   onBrushChange: (patch: Partial<HatchBrush>) => void;
   onPointerEnter: () => void;
+  tool: Tool;
+  hasSelection: boolean;
+  onConvert: () => void;
 }) {
   const toggleDir = (dir: HatchDir) => {
     const next = brush.dirMask ^ DIR_BIT[dir];
@@ -158,6 +165,20 @@ export function HatchBar({
         display={brush.weight.toFixed(2)}
         onChange={(weight) => onBrushChange({ weight })}
       />
+
+      {/* Only under Select, and only with hexes picked: the operation is defined
+          on a hex selection, so a button that is always visible would be dead
+          most of the time. The bar itself is already hatch-layer-only. */}
+      {tool === "select" && hasSelection && (
+        <button
+          onClick={onConvert}
+          title="Convert the selected hexes' colours below into hatch marks"
+          className="inline-flex items-center gap-2 h-9 px-3 rounded-md shrink-0 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 transition-colors text-xs whitespace-nowrap"
+        >
+          <HatchGlyph className="w-4 h-4" />
+          Convert to hatches
+        </button>
+      )}
       </div>
     </div>
   );

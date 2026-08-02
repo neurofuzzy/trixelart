@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-02 08:17:31
-# Files: 72
-# Lines of code: ~13819
+# Last updated: 2026-08-02 17:56:55
+# Files: 75
+# Lines of code: ~14697
 ```
 - **/app**
   - **/lib**
@@ -67,6 +67,8 @@
   - [HatchBar.tsx](../src/components/HatchBar.tsx)
     - Function: `HatchGlyph` - Lines at the family's true angle. Used both for...
     - Function: `HatchBar`
+  - [HatchifyDialog.tsx](../src/components/HatchifyDialog.tsx)
+    - Function: `HatchifyDialog`
   - [LayerPanel.tsx](../src/components/LayerPanel.tsx)
     - Function: `LayerPanel`
   - [Model3DPreview.tsx](../src/components/Model3DPreview.tsx)
@@ -262,6 +264,21 @@
     - Function: `groupHatchMarks` - Buckets a hatch layer's marks into one group pe...
     - Function: `trisBox` - World-space bounding box of a set of triangles.
     - Function: `intersectBox` - Intersection of two boxes, or null when they do...
+  - [hatchify-render.ts](../src/lib/hatchify-render.ts)
+    - Function: `renderHatchifyPreview` - Canvas preview for the hatchify dialog. Unlike ...
+  - [hatchify.ts](../src/lib/hatchify.ts)
+    - Variable: `WEDGE_DIR` - Which line family runs parallel to the outer he...
+    - Type: `HatchifyMode`
+    - Interface: `HatchifySettings`
+    - Variable: `MIN_LEVELS`
+    - Variable: `MAX_LEVELS`
+    - Variable: `MIN_SKIP`
+    - Variable: `MAX_SKIP`
+    - Variable: `DEFAULT_HATCHIFY`
+    - Interface: `HatchifyResult`
+    - Function: `reduceLevels` - The `levels` representative colour indices, spr...
+    - Function: `reachableDensities` - The densities a run may actually produce: `minD...
+    - Function: `hatchify`
   - [hex-flower.ts](../src/lib/hex-flower.ts)
     - Function: `triToHex` - Hex coordinates of the home hex containing trix...
     - Function: `flowerOffsets` - Tri-axial offsets (dq, dr) to mirror a trixel f...

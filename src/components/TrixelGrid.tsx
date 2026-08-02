@@ -77,6 +77,16 @@ import {
   MIN_WEIGHT,
   type HatchBrush,
 } from "@/lib/hatch";
+import { HatchifyDialog } from "@/components/HatchifyDialog";
+import {
+  DEFAULT_HATCHIFY,
+  MAX_LEVELS,
+  MAX_SKIP,
+  MIN_LEVELS,
+  MIN_SKIP,
+  hatchify,
+  type HatchifySettings,
+} from "@/lib/hatchify";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { SplashDialog } from "@/components/onboarding/SplashDialog";
 import { HelpDialog } from "@/components/onboarding/HelpDialog";
@@ -157,6 +167,17 @@ export default function TrixelGrid() {
   const setHatchBrush = useCallback(
     (patch: Partial<HatchBrush>) =>
       setHatchBrushState((b) => ({ ...b, ...patch })),
+    [],
+  );
+
+  // Hatchify settings sit with the brush, for the same reason: they describe how
+  // the tool behaves, not what the document contains.
+  const [hatchifyOpen, setHatchifyOpen] = useState(false);
+  const [hatchifySettings, setHatchifySettingsState] =
+    useState<HatchifySettings>(DEFAULT_HATCHIFY);
+  const setHatchifySettings = useCallback(
+    (patch: Partial<HatchifySettings>) =>
+      setHatchifySettingsState((s) => ({ ...s, ...patch })),
     [],
   );
 
@@ -269,6 +290,20 @@ export default function TrixelGrid() {
     }
     return out;
   }, [layers]);
+
+  // What a hatch layer's marks actually sit on: the visible fill layers
+  // *strictly below* the active one, merged bottom-to-top so the topmost wins.
+  // Bounded above by the active layer because a fill painted over the hatch
+  // hides it, and hatching the tone of something that covers you is nonsense.
+  const hatchifySource = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (let i = 0; i < activeLayerIdx; i++) {
+      const layer = layers[i];
+      if (!layer?.visible || layerKind(layer) === "hatch") continue;
+      Object.assign(out, layer.painted);
+    }
+    return out;
+  }, [layers, activeLayerIdx]);
 
   // Only the layers an exporter should draw, in z-order. PNG/SVG take this
   // rather than a flattened map, because hatch has to interleave with fills.
@@ -502,6 +537,40 @@ export default function TrixelGrid() {
               typeof h.color === "string" ? h.color : DEFAULT_HATCH_BRUSH.color,
           });
         }
+        if (data.hatchify && typeof data.hatchify === "object") {
+          const hf = data.hatchify;
+          const num = (v: unknown, lo: number, hi: number, dflt: number) =>
+            typeof v === "number" && Number.isFinite(v)
+              ? Math.min(hi, Math.max(lo, v))
+              : dflt;
+          const minDensity = num(
+            hf.minDensity,
+            MIN_DENSITY,
+            MAX_DENSITY,
+            DEFAULT_HATCHIFY.minDensity,
+          );
+          setHatchifySettingsState({
+            mode: hf.mode === "reduce" ? "reduce" : "single",
+            minDensity,
+            // Clamped against the ingested minimum, not against MIN_DENSITY: an
+            // inverted range would flatten every mark to one density.
+            maxDensity: num(
+              hf.maxDensity,
+              minDensity,
+              MAX_DENSITY,
+              Math.max(minDensity, DEFAULT_HATCHIFY.maxDensity),
+            ),
+            weight: num(hf.weight, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_HATCHIFY.weight),
+            densitySkip: Math.round(
+              num(hf.densitySkip, MIN_SKIP, MAX_SKIP, DEFAULT_HATCHIFY.densitySkip),
+            ),
+            color:
+              typeof hf.color === "string" ? hf.color : DEFAULT_HATCHIFY.color,
+            levels: Math.round(
+              num(hf.levels, MIN_LEVELS, MAX_LEVELS, DEFAULT_HATCHIFY.levels),
+            ),
+          });
+        }
         if (data.crop && typeof data.crop === "object") {
           const { i, j, m, n } = data.crop;
           if ([i, j, m, n].every((v) => typeof v === "number")) {
@@ -554,6 +623,7 @@ export default function TrixelGrid() {
         crop,
         exportSettings,
         hatchBrush,
+        hatchify: hatchifySettings,
       }),
     );
   }, [
@@ -572,6 +642,7 @@ export default function TrixelGrid() {
     crop,
     exportSettings,
     hatchBrush,
+    hatchifySettings,
   ]);
 
   useEffect(() => {
@@ -1073,6 +1144,63 @@ export default function TrixelGrid() {
     });
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
+  /**
+   * Rewrites the selected hexes as hatch marks derived from the fills below.
+   *
+   * Reduce mode writes into layers *other* than the active one, so this cannot
+   * go through `setPainted`/`snapshotWithPainted` — both address only
+   * `layers[activeLayerIdx]`. The whole array is rebuilt and pushed once, which
+   * keeps the golden rule intact: one editing action, one undo entry covering
+   * both the new marks and the requantised fills.
+   */
+  const applyHatchify = useCallback(() => {
+    if (selectedHexes.length === 0 || gridDivisions <= 0 || !isHatchLayer) return;
+
+    const res = hatchify(
+      hatchifySource,
+      selectedHexes,
+      gridDivisions,
+      hatchifySettings,
+    );
+
+    const next = layers.map((l) => ({ ...l, painted: { ...l.painted } }));
+
+    // Clear the selection wholesale before merging, so re-running with new
+    // settings replaces the previous result rather than layering onto it.
+    const active = next[activeLayerIdx];
+    if (!active) return;
+    for (const key of res.covered) delete active.painted[key];
+    Object.assign(active.painted, res.hatch);
+
+    // Each requantised fill goes back into the layer that won the merge — the
+    // topmost visible fill layer below the hatch that already holds that trixel.
+    // Writing it anywhere else would change which value the composite shows.
+    for (const [key, fill] of Object.entries(res.fills)) {
+      for (let i = activeLayerIdx - 1; i >= 0; i--) {
+        const l = next[i];
+        if (!l.visible || layerKind(l) === "hatch") continue;
+        if (l.painted[key] !== undefined) {
+          l.painted[key] = fill;
+          break;
+        }
+      }
+    }
+
+    setLayers(next);
+    pushHistory({ ...buildSnapshot(), layers: next });
+  }, [
+    selectedHexes,
+    gridDivisions,
+    isHatchLayer,
+    hatchifySource,
+    hatchifySettings,
+    layers,
+    activeLayerIdx,
+    setLayers,
+    pushHistory,
+    buildSnapshot,
+  ]);
+
   const onboarding = useOnboarding();
 
   useKeyboardShortcuts(
@@ -1363,6 +1491,9 @@ export default function TrixelGrid() {
             brush={hatchBrush}
             onBrushChange={setHatchBrush}
             onPointerEnter={() => setHoveredTri(null)}
+            tool={tool}
+            hasSelection={selectedHexes.length > 0 && gridDivisions > 0}
+            onConvert={() => setHatchifyOpen(true)}
           />
         )}
         {tool === "crop" && (
@@ -1436,6 +1567,18 @@ export default function TrixelGrid() {
         onOpenChange={setExportCutOpen}
         painted={mergedFillPainted}
         projectName={projectName}
+      />
+
+      <HatchifyDialog
+        open={hatchifyOpen}
+        onClose={() => setHatchifyOpen(false)}
+        onApply={applyHatchify}
+        settings={hatchifySettings}
+        onSettingsChange={setHatchifySettings}
+        source={hatchifySource}
+        hexes={selectedHexes}
+        gridDivisions={gridDivisions}
+        palettes={computedPalettes}
       />
 
       <SplashDialog

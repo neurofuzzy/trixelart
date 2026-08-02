@@ -162,6 +162,22 @@ Brush settings are view state → `trixel-settings`, not `ProjectSnapshot` (same
 
 3D-print and cutting exports take `mergedFillPainted`, which filters hatch layers out — hatch lines have no meaning as an extruded body or a cut path.
 
+### Convert to hatches
+
+Re-renders existing flat colour as line work: reads the merged fills **below** the active hatch layer, inside the hex selection, and writes a whole selection's worth of marks in one undoable step. `src/lib/hatchify.ts` is the maths (pure); `HatchifyDialog` is the UI; the button lives in `HatchBar` and shows only under Select with a live selection.
+
+**Direction is concentric.** `hexWedgeIndex` already gives the 0–5 sector; `WEDGE_DIR = [2, 0, 1, 2, 0, 1]` (i.e. `(w + 2) % 3`) picks the family running parallel to that wedge's outer hex edge, so the marks nest as rings rather than one uniform screen. Hexes are flat-top, so vertices sit at 0°, 60°, … and wedge `w`'s edge runs at `60w + 120`; the families run at 0°, 60°, 120°. **Derive from `hatchU`, never from `DIR_LABEL`** — the slash/backslash naming is inverted relative to screen space because world y points down. An off-by-one here silently destroys the concentric look; a correct run over one hex splits its marks evenly across all three families (18/18/18 at N=3).
+
+**Density** comes from `colorIdx` alone (`a = 1 − colorIdx/8`, index 0 being the darkest swatch), mapped onto the dialog's min/max. Deliberately *not* perceptual lightness — simple and predictable, at the cost that the four custom-lightness palettes top out at 68% yet still map to the minimum.
+
+**`densitySkip` exists for pen plotting.** Lines sit at `(n + ½)·base/density`, so two densities share lines exactly when their **ratio is odd** — 1 and 3 share, 1 and 2 share nothing, 4 shares with nothing but itself. So when every reachable density is *odd* they all contain the density-1 ladder, and those coarse lines run unbroken across the whole selection: a plotter draws them in one pass instead of lifting the pen at every tone change. `reachableDensities` returns the ladder plus an `allOdd` flag, and the dialog reports which case you are in rather than leaving it to be discovered. Odd `minDensity` + even skip is the combination that guarantees it (min 1, skip 2 → `{1,3,5,7}`). Rounding happens in **step units**, not on the raw density then snapped — snapping afterwards lets a value land off the ladder and quietly breaks the property.
+
+**Reduce mode** collapses the 9 tones to `K` representatives `L[j] = round(j·8/(K−1))` and dithers between adjacent levels. **The fill takes the *lighter* neighbour and the ink the *darker* one** — this is load-bearing. Only that pairing averages back to the original tone; snapping the fill down *and* hatching darker over it drives the whole selection toward black. Verified: reconstructed lightness tracks the original within ~1–3% at every `K`. Chunking is per palette, so hue is preserved.
+
+Reduce writes to layers *other* than the active one, so `applyHatchify` rebuilds the whole `layers` array and calls `pushHistory` directly — `setPainted`/`snapshotWithPainted` only address `layers[activeLayerIdx]` and cannot express it. Each requantised fill goes back into the topmost visible fill layer below that already held that trixel, i.e. the one that won the merge. Still one action, one history entry.
+
+The selection is cleared wholesale before the new marks are merged, so re-running with different settings replaces rather than accumulates. Settings are view state → `trixel-settings`, like the brush.
+
 ## Crop & export
 
 Rectangular export region for print-on-demand (Spoonflower et al.) and for handing vector work to Inkscape. Separate from the whole-artwork `ExportDialog` in the hamburger menu, which is untouched.
@@ -199,7 +215,7 @@ Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` 
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 `ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the exported project JSON — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
@@ -223,6 +239,8 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
 | `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox`, `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
 | `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
+| `src/lib/hatchify.ts` | Convert-to-hatches maths: `hatchify`, `WEDGE_DIR`, `reduceLevels`, `HatchifySettings`. Pure, no DOM |
+| `src/lib/hatchify-render.ts` | `renderHatchifyPreview` — fits a trixel set to a canvas and runs the GridCanvas draw loop |
 | `src/lib/pattern-render.ts` | Canvas rendering for pattern previews, thumbnails and palette slots |
 | `src/lib/utils.ts` | `cn()` — clsx + tailwind-merge |
 | `src/hooks/use-canvas-size.ts` | Container measurement via `ResizeObserver` |
@@ -248,6 +266,7 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
 - `LayerKind = "fill" | "hatch"`, `Layer` — `src/hooks/use-history.ts`
 - `HatchBrush`, `HatchDir` — `src/lib/hatch.ts`
+- `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`
 - `CropRect`, `CropHandle` — `src/lib/crop.ts`
 - `ExportSettings` — `src/components/ExportPanel.tsx`
 - `PatternLayer`, `PatternPreset`, `PatternBlendMode`, `QuantizeTarget` — `src/lib/tri-pattern.ts`
