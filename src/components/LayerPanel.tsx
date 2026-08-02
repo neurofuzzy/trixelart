@@ -8,10 +8,16 @@ import {
   Plus,
   Trash2,
   Copy,
-  AlignJustify,
   Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { HatchGlyph } from "@/components/HatchBar";
 import { layerKind, type Layer, type LayerKind } from "@/hooks/use-history";
 
 export function LayerPanel({
@@ -46,9 +52,11 @@ export function LayerPanel({
 
   return (
     <div
+      /* Middle-right at every width. The small-screen layout used to sit
+         bottom-centre, on top of the colour swatches — and, once hatch layers
+         added a bar along the bottom, on top of that too. */
       className="absolute z-40 flex flex-col gap-1.5 p-3 bg-card/80 backdrop-blur-lg border rounded-2xl shadow-2xl cursor-default
-        bottom-12 left-1/2 -translate-x-1/2
-        lg:bottom-1/2 lg:right-4 lg:left-auto lg:translate-x-0 lg:translate-y-1/2"
+        bottom-1/2 right-4 translate-y-1/2"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
@@ -58,26 +66,29 @@ export function LayerPanel({
         <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
           Layers
         </span>
-        <div className="flex items-center gap-0.5">
-          {/* Adding a layer is a structural edit, so it goes through `commit`
-              and lands in the undo stack like duplicate and delete do. */}
-          <button
-            className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-            onClick={() => commit(() => onAddLayer("fill"))}
-            disabled={!canAdd}
-            title="Add fill layer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-            onClick={() => commit(() => onAddLayer("hatch"))}
-            disabled={!canAdd}
-            title="Add hatch layer"
-          >
-            <AlignJustify className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* Adding a layer is a structural edit, so it goes through `commit`
+            and lands in the undo stack like duplicate and delete do. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+              disabled={!canAdd}
+              title={canAdd ? "Add layer" : "Layer limit reached"}
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={6}>
+            <DropdownMenuItem onClick={() => commit(() => onAddLayer("fill"))}>
+              <Square className="w-3.5 h-3.5 opacity-50" />
+              Normal layer
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => commit(() => onAddLayer("hatch"))}>
+              <HatchGlyph className="w-3.5 h-3.5 text-amber-400/80" />
+              Hatch layer
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="flex flex-col gap-1">
@@ -117,7 +128,7 @@ export function LayerPanel({
                 title={`${layer.name} — ${layerKind(layer)} layer`}
               >
                 {layerKind(layer) === "hatch" ? (
-                  <AlignJustify className="w-3 h-3 shrink-0 text-amber-400/80" />
+                  <HatchGlyph className="w-3 h-3 shrink-0 text-amber-400/80" />
                 ) : (
                   <Square className="w-3 h-3 shrink-0 opacity-50" />
                 )}

@@ -17,6 +17,7 @@ export function ColorPalette({
   onHueOffsetChange,
   saturationOffset,
   onSaturationOffsetChange,
+  raised = false,
 }: {
   color: string;
   palette: string[];
@@ -28,15 +29,21 @@ export function ColorPalette({
   onHueOffsetChange?: (v: number) => void;
   saturationOffset?: number;
   onSaturationOffsetChange?: (v: number) => void;
+  /** Lifts the small-screen position clear of the hatch bar, which occupies the
+   *  bottom of the canvas. The `lg:` layout is on the left edge and unaffected. */
+  raised?: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <div
-      className="absolute z-40 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl cursor-default
-        bottom-12 left-1/2 -translate-x-1/2
+      className={cn(
+        `absolute z-40 flex items-center gap-2 p-3 bg-card/80 backdrop-blur-lg border rounded-full shadow-2xl cursor-default
+        left-1/2 -translate-x-1/2
         lg:flex-col lg:bottom-1/2 lg:left-4 lg:translate-x-0 lg:translate-y-1/2
-        lg:rounded-full"
+        lg:rounded-full`,
+        raised ? "bottom-24" : "bottom-12",
+      )}
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}

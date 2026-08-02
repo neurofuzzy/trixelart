@@ -43,6 +43,7 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Erase | `E` | Erase (clear) triangles |
 | Fill | `F` | Edge-connected flood fill (`computeFillRegion`), bounded by `FILL_MAX_RADIUS` or clipped to the hex selection |
 | Pattern | `N` | Procedural pattern brush; paints whole hexes. See "Pattern brush" |
+| Hatch | `G` | Line-work brush; only on a hatch layer. See "Hatch layers" |
 | Dodge / Burn | `D` / `B` | Step the palette index lighter/darker |
 | Clone | `C` | Clone-stamp from a captured source |
 | Eyedropper | `I` | Pick a painted color |
@@ -68,6 +69,7 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | `T` | Stamp tool |
 | `F` | Fill tool |
 | `N` | Pattern brush |
+| `G` | Hatch brush (hatch layers only) |
 | `D` / `B` | Dodge / Burn |
 | `C` | Clone |
 | `I` | Eyedropper |
@@ -133,6 +135,33 @@ Load-bearing consequences — all three were tried the other way and reverted:
 
 `PatternPalette` replaces `ColorPalette` while the tool is active — the brush takes every color from its own stack, so the paint swatches control nothing, and clicking one would silently switch tools. Slots save/load whole stacks, deep-copied in both directions.
 
+## Hatch layers
+
+A **second layer kind** holding line work instead of fills, so hatching composites over flats the way an inker works. `Layer.kind` is optional and **absent means `"fill"`** — read it through `layerKind(l)` (`use-history.ts`), never `l.kind` directly, and every pre-existing save, project JSON and history snapshot keeps working with no migration.
+
+**Three directions**, one per grid-line family, each the level set of a linear functional `u` (`hatchU`): `y` (horizontal), `x − y·SKEW` (`/`), `x + y·SKEW` (`\`). All three have perpendicular spacing exactly `H`, so density `k` steps `u` by `H/k` for family 0 and `SIDE/k` for the other two. Lines sit at `(n + ½)·step`: **the half-step offset is load-bearing** — without it density 1 lands exactly on the triangle edges and draws nothing inside. With it, `density` reads as *lines per triangle*.
+
+`u` is a pure function of world position, so the line field is **global** — trixels hatched in separate strokes line up as continuous lines rather than per-triangle tufts. Same reasoning as the pattern brush, and the same obvious failure mode.
+
+**Storage.** Hatch marks live in the *same* `painted` map as fills, encoded `"dirMask|density|weight|paletteIdx,colorIdx"` (e.g. `"5|3|2|0,8"`; dirMask 1/2/4, so 5 = horizontal + `\`). Reusing `painted` is what makes it cheap — `setPainted`, undo, `trixel-save`, project JSON, and layer duplicate/delete/reorder/visibility all work unchanged. **The pipes are load-bearing**: a fill value is `"p,c"` with exactly one comma and no pipes, so `decodeColor` returns `null` on a hatch value and every existing decode site rejects it structurally. Palette shifts route through `mapEncodedColor` so the arrow keys shift the colour *inside* a mark and leave direction, density and weight intact.
+
+**Rendering** — one shape, two backends, both driven by `buildRenderPlan(layers)` so hatch interleaves with fills in z-order. Canvas (`GridCanvas`, PNG export): one `ctx.clip()` over the group's triangles plus one stroke of the whole line family — the shared clip is what makes lines continuous across trixel boundaries, and the cost is per *line on screen*, not per mark × density. SVG: `clipSegmentToTriangle` clips each line to each triangle into real `<line>` elements, consistent with the crop exporter's refusal to use `<clipPath>`. That clipper derives each half-plane's inside sign **from the third vertex** — `getTriVertices` returns opposite windings for the two triangle types, which is also why `svg-export.ts` carries `ensureCW`.
+
+**Lock-out.** `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`, so the toolbar, keyboard, `1`–`9`, the eyedropper and the right-click pick are all covered without per-call-site wiring. Colour-writing tools (paint, fill, pattern, stamp, clone, dodge, burn) are blocked on a hatch layer; erase, pan, select, eyedropper and crop stay available on both. An effect keyed on the *kind* — not on `layers`, so it doesn't re-fire per stroke — moves to a usable tool on layer select, add, delete, reorder, undo/redo and project load alike.
+
+Select **is** allowed: `rotateHatchValue`/`flipHatchValue` permute the direction mask alongside the geometry (a 60° rotation is a 3-cycle on the bits), so rotating a hatched selection carries its angles round with it.
+
+**UI.** Deliberately *not* a drawer — hatch has four scalars and a colour, not a stack to edit, and it reuses the controls the app already has:
+
+- The `+` in `LayerPanel` is a dropdown ("Normal layer" / "Hatch layer"); each row carries a kind icon.
+- **Hatch is not in `editTools`.** It takes over the Paint slot via `brushTool(kind)` in `Toolbar.tsx`, so the toolbar shows *one* pencil that means Paint on a fill layer and Hatch on a hatch layer. Two pencils side by side, one of them permanently disabled, is worse than one button that changes meaning — so hatch is the documented exception to the "add the tool to `editTools`" rule at the top of this file. It is still in `isEditTool`.
+- The ordinary `ColorPalette` swatch row drives the hatch brush, pointed at the brush's **own** palette (`hatchPaletteIdx`, derived from `decodeColor(hatchBrush.color)`) rather than the paint palette — otherwise an eyedropper pick landing on a mark authored elsewhere highlights the wrong swatch, or none. `1`–`9` must encode against the same index for the same reason.
+- `HatchBar` is a footer-sized strip overlaid at the bottom of the canvas holding the three direction toggles and the density and weight sliders. Keyed on `activeLayerKind`, not `tool`, so it doesn't flicker away when the user reaches for erase; `ColorPalette` takes `raised` to clear it on small screens.
+
+Brush settings are view state → `trixel-settings`, not `ProjectSnapshot` (same split as the crop rect).
+
+3D-print and cutting exports take `mergedFillPainted`, which filters hatch layers out — hatch lines have no meaning as an extruded body or a cut path.
+
 ## Crop & export
 
 Rectangular export region for print-on-demand (Spoonflower et al.) and for handing vector work to Inkscape. Separate from the whole-artwork `ExportDialog` in the hamburger menu, which is untouched.
@@ -170,7 +199,7 @@ Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` 
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 `ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the exported project JSON — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
@@ -192,6 +221,8 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, 40 MB limit |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
+| `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox`, `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
+| `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
 | `src/lib/pattern-render.ts` | Canvas rendering for pattern previews, thumbnails and palette slots |
 | `src/lib/utils.ts` | `cn()` — clsx + tailwind-merge |
 | `src/hooks/use-canvas-size.ts` | Container measurement via `ResizeObserver` |
@@ -214,7 +245,9 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 - `HexMode = "off" | "outlines" | "centers"` — `src/components/Footer.tsx`
 - `HexCoord { c, k }` — `src/lib/hex-flower.ts`
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
-- `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
+- `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
+- `LayerKind = "fill" | "hatch"`, `Layer` — `src/hooks/use-history.ts`
+- `HatchBrush`, `HatchDir` — `src/lib/hatch.ts`
 - `CropRect`, `CropHandle` — `src/lib/crop.ts`
 - `ExportSettings` — `src/components/ExportPanel.tsx`
 - `PatternLayer`, `PatternPreset`, `PatternBlendMode`, `QuantizeTarget` — `src/lib/tri-pattern.ts`

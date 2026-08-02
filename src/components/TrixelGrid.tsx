@@ -68,7 +68,7 @@ import {
   type ExportSettings,
 } from "@/components/ExportPanel";
 import { DEFAULT_CROP, type CropRect } from "@/lib/crop";
-import { HatchPanel } from "@/components/HatchPanel";
+import { HatchBar } from "@/components/HatchBar";
 import {
   DEFAULT_HATCH_BRUSH,
   MAX_DENSITY,
@@ -184,6 +184,17 @@ export default function TrixelGrid() {
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
   const paintKey = encodeColor(activePaletteIdx, colorIdx);
+
+  // On a hatch layer the ordinary swatch row drives the hatch brush, so it
+  // shows the brush's *own* palette rather than the paint palette. Anything
+  // else and an eyedropper pick landing on a mark authored in another palette
+  // would highlight the wrong swatch, or none. Both `hatchHex` and the row come
+  // out of the same array, so identity by hex is safe here.
+  const hatchColor = decodeColor(hatchBrush.color);
+  const hatchPaletteIdx = hatchColor?.paletteIdx ?? activePaletteIdx;
+  const hatchPalette = computedPalettes[hatchPaletteIdx]?.colors ?? activePalette;
+  const hatchColorIdx = hatchColor?.colorIdx ?? 8;
+  const hatchHex = hatchPalette[hatchColorIdx] ?? hatchPalette[8];
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [gridDivisions, setGridDivisions] = useState(DEFAULT_GRID_DIVISIONS);
   const [hexMode, setHexMode] = useState<HexMode>(DEFAULT_HEX_MODE);
@@ -267,6 +278,7 @@ export default function TrixelGrid() {
   );
 
   const activeLayerKind: LayerKind = layerKind(layers[activeLayerIdx] ?? {});
+  const isHatchLayer = activeLayerKind === "hatch";
   const activeLayerKindRef = useRef(activeLayerKind);
   activeLayerKindRef.current = activeLayerKind;
   const toolRef = useRef(tool);
@@ -1071,7 +1083,9 @@ export default function TrixelGrid() {
       // On a hatch layer the number keys retint the hatch brush instead of
       // jumping to a tool that layer doesn't allow.
       if (activeLayerKindRef.current === "hatch") {
-        setHatchBrush({ color: encodeColor(activePaletteIdx, c) });
+        // Against the *hatch* palette, so the number keys pick out of the row
+        // the swatch strip is actually showing.
+        setHatchBrush({ color: encodeColor(hatchPaletteIdx, c) });
         return;
       }
       setColorIdx(c);
@@ -1289,6 +1303,28 @@ export default function TrixelGrid() {
             onCapture={() => setCaptureMode(true)}
             gridRotation={gridRotation}
           />
+        ) : isHatchLayer ? (
+          /* Same swatch row, pointed at the hatch brush. The brush takes its
+             colour from here, so there is only ever one colour control. */
+          <ColorPalette
+            color={hatchHex}
+            palette={hatchPalette}
+            palettes={computedPalettes}
+            onColorChange={(c) => {
+              const idx = hatchPalette.indexOf(c);
+              if (idx >= 0) setHatchBrush({ color: encodeColor(hatchPaletteIdx, idx) });
+            }}
+            onPaletteChange={(colors, idx) => {
+              setActivePaletteIdx(idx);
+              setHatchBrush({ color: encodeColor(idx, hatchColorIdx) });
+            }}
+            onPointerEnter={() => setHoveredTri(null)}
+            hueOffset={hueOffset}
+            onHueOffsetChange={setHueOffset}
+            saturationOffset={satOffset}
+            onSaturationOffsetChange={setSatOffset}
+            raised
+          />
         ) : (
           <ColorPalette
             color={colorHex}
@@ -1320,11 +1356,12 @@ export default function TrixelGrid() {
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
-        {tool === "hatch" && (
-          <HatchPanel
+        {/* Keyed on the layer's kind, not the tool: erase and pan are legal on
+            a hatch layer, and the bar shouldn't flicker away when reached for. */}
+        {isHatchLayer && (
+          <HatchBar
             brush={hatchBrush}
             onBrushChange={setHatchBrush}
-            palettes={computedPalettes}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}

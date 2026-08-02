@@ -21,7 +21,6 @@ import {
   ImageDown,
   Box,
   Shirt,
-  AlignJustify,
   Scissors,
   Aperture,
   Paintbrush,
@@ -56,7 +55,6 @@ import type { Symmetry, BrushSize, HexMode } from "@/components/Footer";
 import { ProjectName } from "@/components/ProjectName";
 
 const editTools = [
-  { tool: "hatch" as Tool, icon: AlignJustify, label: "Hatch", shortcut: "G" },
   { tool: "paint" as Tool, icon: Pencil, label: "Paint", shortcut: "P" },
   { tool: "erase" as Tool, icon: Eraser, label: "Erase", shortcut: "E" },
   { tool: "fill" as Tool, icon: PaintBucket, label: "Fill", shortcut: "F" },
@@ -68,6 +66,18 @@ const editTools = [
   { tool: "eyedropper" as Tool, icon: Pipette, label: "Eyedropper", shortcut: "I" },
   { tool: "pan" as Tool, icon: Move, label: "Move", shortcut: "H" },
 ] as const;
+
+/**
+ * Hatch takes over the Paint slot rather than getting a button of its own.
+ * It is the same action — lay down marks with the current brush — and which of
+ * the two you get is decided by the active layer's kind, so there is never a
+ * moment when both are meaningful. Two pencils side by side, one of them always
+ * dead, is worse than one that changes what it means.
+ */
+const brushTool = (kind: LayerKind) =>
+  kind === "hatch"
+    ? ({ tool: "hatch" as Tool, icon: Pencil, label: "Hatch", shortcut: "G" } as const)
+    : editTools[0];
 
 const isEditTool = (t: string): boolean =>
   t === "hatch" ||
@@ -150,7 +160,11 @@ export function Toolbar({
   projectName: string;
   onProjectNameChange: (name: string) => void;
 }) {
-  const activeEdit = editTools.find((e) => e.tool === tool);
+  // The Paint entry stands in for whichever brush this layer kind allows.
+  const shownTools = editTools.map((e) =>
+    e.tool === "paint" ? brushTool(activeLayerKind) : e,
+  );
+  const activeEdit = shownTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -253,7 +267,7 @@ export function Toolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={6}>
-              {editTools
+              {shownTools
                 .filter(({ tool: t }) => isToolAllowed(t, activeLayerKind))
                 .map(({ tool: t, icon: Icon, label, shortcut }) => (
                   <DropdownMenuItem
@@ -278,7 +292,7 @@ export function Toolbar({
         >
           {/* Disabled rather than hidden: a tool vanishing when you switch
               layers is more confusing than one that is visibly unavailable. */}
-          {editTools.map(({ tool: t, icon: Icon, label, shortcut }) => {
+          {shownTools.map(({ tool: t, icon: Icon, label, shortcut }) => {
             const allowed = isToolAllowed(t, activeLayerKind);
             return (
               <Button
