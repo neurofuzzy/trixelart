@@ -69,7 +69,7 @@ function SliderField({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 min-w-0 w-[200px] shrink">
+    <label className="flex items-center gap-2 w-[200px] shrink-0">
       <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0">
         {label}
       </span>
@@ -80,7 +80,7 @@ function SliderField({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 min-w-0 h-2 accent-cyan-500"
+        className="flex-1 h-2 accent-cyan-500"
       />
       <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
         {display}
@@ -107,13 +107,17 @@ export function HatchBar({
 
   return (
     <div
-      className="absolute z-40 bottom-0 left-0 right-0 flex items-center justify-center gap-6 p-2 border-t bg-card/90 backdrop-blur-md cursor-default"
+      className="absolute z-40 bottom-0 left-0 right-0 p-2 border-t bg-card/90 backdrop-blur-md cursor-default overflow-x-auto"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onPointerEnter={onPointerEnter}
       data-tour="hatch"
     >
+      {/* `w-max mx-auto` rather than `justify-center` on the scroller: a
+          centred flex row that overflows spills off *both* edges, and the left
+          half can then never be scrolled back into view. */}
+      <div className="flex items-center gap-3 sm:gap-6 w-max mx-auto">
       <div className="flex items-center gap-0.5 shrink-0">
         {HATCH_DIRS.map((dir) => {
           const on = (brush.dirMask & DIR_BIT[dir]) !== 0;
@@ -154,6 +158,7 @@ export function HatchBar({
         display={brush.weight.toFixed(2)}
         onChange={(weight) => onBrushChange({ weight })}
       />
+      </div>
     </div>
   );
 }
