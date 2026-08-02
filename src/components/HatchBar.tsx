@@ -70,10 +70,17 @@ function SliderField({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 w-[200px] shrink-0">
+    // Narrower on small displays so both fields plus the direction toggles fit
+    // without the bar having to scroll.
+    <label className="flex items-center gap-2 w-[140px] sm:w-[200px] shrink-0">
       <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0">
         {label}
       </span>
+      {/* `min-w-0` is load-bearing. A range input has an intrinsic width of
+          ~129px, and a flex item defaults to `min-width: auto`, so without this
+          the input refuses to shrink, overflows the field's declared width and
+          runs its value straight into the next field's label — the bar rendered
+          "2WEIGHT" with no gap at all. */}
       <input
         type="range"
         min={min}
@@ -81,7 +88,7 @@ function SliderField({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 h-2 accent-cyan-500"
+        className="flex-1 min-w-0 h-2 accent-cyan-500"
       />
       <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
         {display}
@@ -124,7 +131,7 @@ export function HatchBar({
       {/* `w-max mx-auto` rather than `justify-center` on the scroller: a
           centred flex row that overflows spills off *both* edges, and the left
           half can then never be scrolled back into view. */}
-      <div className="flex items-center gap-3 sm:gap-6 w-max mx-auto">
+      <div className="flex items-center gap-4 sm:gap-6 w-max mx-auto">
       <div className="flex items-center gap-0.5 shrink-0">
         {HATCH_DIRS.map((dir) => {
           const on = (brush.dirMask & DIR_BIT[dir]) !== 0;
