@@ -27,6 +27,7 @@ import {
 } from "@/lib/tools";
 import type { Layer } from "@/hooks/use-history";
 import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
+import type { CropRect } from "@/lib/crop";
 import { normPoint, normTouchPair } from "@/lib/touch-utils";
 
 interface UseInteractionArgs {
@@ -66,6 +67,8 @@ interface UseInteractionArgs {
   brushSize?: "single" | "hex";
   layers: Layer[];
   activeLayerIdx: number;
+  crop: CropRect;
+  setCrop: React.Dispatch<React.SetStateAction<CropRect>>;
 }
 
 export function useInteraction(args: UseInteractionArgs) {
@@ -104,6 +107,8 @@ export function useInteraction(args: UseInteractionArgs) {
     brushSize = "single",
     layers,
     activeLayerIdx,
+    crop,
+    setCrop,
   } = args;
 
   const [hoveredTri, setHoveredTri] = useState<TriKey | null>(null);
@@ -175,6 +180,9 @@ export function useInteraction(args: UseInteractionArgs) {
   // land on before clicking.
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
+    // The crop tool paints nothing, so a ghost trixel would only be noise
+    // under the crop rectangle.
+    if (tool === "crop") return [];
     if (tool === "select" || tool === "stamp" || tool === "eyedropper" || tool === "fill")
       return [hoveredTri];
     // The pattern brush covers a whole hex, so the ghost shows that footprint
@@ -331,6 +339,8 @@ export function useInteraction(args: UseInteractionArgs) {
     captureMode: captureMode ?? false,
     setCaptureMode: setCaptureMode ?? (() => {}),
     setSelectedHexes,
+    crop,
+    setCrop,
   };
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;

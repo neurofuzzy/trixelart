@@ -9,10 +9,12 @@ import { selectTool } from "./select-tool";
 import { stampTool } from "./stamp-tool";
 import { cloneTool } from "./clone-tool";
 import { eyedropperTool } from "./eyedropper-tool";
+import { cropTool } from "./crop-tool";
 
 export type { Tool, ToolHandler, ToolContext, DragState } from "./types";
 export { viewPanTool } from "./view-pan-tool";
 export { patternBrushN, PATTERN_MIN_N } from "./pattern-tool";
+export { CROP_HANDLE_PX } from "./crop-tool";
 
 const dodgeTool = makeDodgeBurnTool(1);
 const burnTool = makeDodgeBurnTool(-1);
@@ -29,4 +31,5 @@ export const toolMap: Record<Tool, ToolHandler> = {
   stamp: stampTool,
   clone: cloneTool,
   eyedropper: eyedropperTool,
+  crop: cropTool,
 };
