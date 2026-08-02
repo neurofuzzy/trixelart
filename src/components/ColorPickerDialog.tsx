@@ -65,11 +65,43 @@ export function ColorPickerDialog({
     onClose();
   };
 
+  // Layout mirrors PalettePicker — same overlay, panel, header and two-column
+  // grid of named swatch strips — so the two colour modals read as one thing.
+  // The difference is per-swatch selection: there each row is a single button
+  // that picks a whole palette, here each of the nine swatches is its own.
+  const strip = (
+    colors: string[],
+    keyOf: (i: number) => string,
+    titleOf: (i: number) => string,
+  ) => (
+    <div className="flex gap-0.5 flex-1">
+      {colors.map((c, i) => {
+        const encoded = keyOf(i);
+        return (
+          <button
+            key={encoded}
+            onClick={() => pick(encoded)}
+            title={titleOf(i)}
+            className={cn(
+              "flex-1 h-5 rounded first:rounded-l last:rounded-r border transition-all",
+              // Compared by encoding, not resolved hex: separate palettes can
+              // land on the same colour and would both read as selected.
+              value === encoded
+                ? "border-foreground scale-110"
+                : "border-white/10 hover:border-foreground/50",
+            )}
+            style={{ backgroundColor: c }}
+          />
+        );
+      })}
+    </div>
+  );
+
   return createPortal(
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/20" onClick={onClose} />
       <div
-        className="fixed z-50 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl space-y-3 w-[30rem] max-w-[calc(100vw-2rem)]"
+        className="fixed z-50 p-4 bg-card/95 backdrop-blur-md border rounded-xl shadow-2xl space-y-3 w-[32rem] max-w-[calc(100vw-2rem)]"
         style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
         onPointerDown={(e) => e.stopPropagation()}
         onPointerMove={(e) => e.stopPropagation()}
@@ -82,57 +114,34 @@ export function ColorPickerDialog({
           </Button>
         </div>
 
-        <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-2">
           {palettes.map((pal, pi) => (
-            <div key={pal.name} className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground w-14 shrink-0 truncate">
+            <div
+              key={pal.name}
+              className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent transition-colors"
+            >
+              {strip(
+                pal.colors,
+                (i) => encodeColor(pi, i),
+                (i) => `${pal.name} ${pal.colors[i]}`,
+              )}
+              <span className="text-xs text-muted-foreground w-14 text-right shrink-0">
                 {pal.name}
               </span>
-              <div className="flex gap-0.5 flex-1">
-                {pal.colors.map((c, ci) => {
-                  const encoded = encodeColor(pi, ci);
-                  return (
-                    <button
-                      key={ci}
-                      onClick={() => pick(encoded)}
-                      title={`${pal.name} ${c}`}
-                      className={cn(
-                        "flex-1 h-6 rounded-sm border transition-all",
-                        // Compared by encoding, not resolved hex: separate
-                        // palettes can land on the same colour and would both
-                        // read as selected.
-                        value === encoded
-                          ? "border-white scale-110"
-                          : "border-white/10 hover:border-white/40",
-                      )}
-                      style={{ backgroundColor: c }}
-                    />
-                  );
-                })}
-              </div>
             </div>
           ))}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-border pt-3">
-          <span className="text-[10px] text-muted-foreground w-14 shrink-0">
-            Neutral
-          </span>
-          <div className="flex gap-0.5 flex-1">
-            {NEUTRAL_COLORS.map((hex) => (
-              <button
-                key={hex}
-                onClick={() => pick(hex)}
-                title={hex}
-                className={cn(
-                  "flex-1 h-6 rounded-sm border transition-all",
-                  value === hex
-                    ? "border-white scale-110"
-                    : "border-white/10 hover:border-white/40",
-                )}
-                style={{ backgroundColor: hex }}
-              />
-            ))}
+        <div className="border-t border-border pt-3">
+          <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent transition-colors">
+            {strip(
+              NEUTRAL_COLORS,
+              (i) => NEUTRAL_COLORS[i],
+              (i) => NEUTRAL_COLORS[i],
+            )}
+            <span className="text-xs text-muted-foreground w-14 text-right shrink-0">
+              Neutral
+            </span>
           </div>
         </div>
       </div>
