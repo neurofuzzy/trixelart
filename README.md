@@ -30,7 +30,7 @@ to the browser. It runs entirely offline â€” there's no backend and no account â
 home screen as a full-screen PWA.
 
 <p align="center">
-  <img src="public/screenshot.png" alt="screenshot">
+  <img src="public/screenshot2.png" alt="screenshot">
 </p>
 
 ## Features
