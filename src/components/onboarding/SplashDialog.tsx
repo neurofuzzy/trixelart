@@ -3,6 +3,8 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
+import { ExampleGallery } from "@/components/ExampleGallery";
+import type { Example } from "@/lib/examples";
 
 /** The Trixel logo — inlined as JSX (kept in sync with `src/assets/logo.svg`)
  * so it renders without a bundler URL import or next/image config, which keeps
@@ -44,20 +46,29 @@ function TrixelMark() {
 }
 
 /**
- * First-run welcome screen: the Trixel mark, a short blurb, a "Don't show again"
- * checkbox, and a primary button that launches the interface tour. Visibility is
- * driven by `open` (seeded from a localStorage flag by useOnboarding), so it
- * appears on a fresh visit and never again once dismissed.
+ * First-run welcome screen: the Trixel mark, a short blurb, a row of example
+ * projects, a "Don't show again" checkbox, and a primary button that launches
+ * the interface tour. Visibility is driven by `open` (seeded from a localStorage
+ * flag by useOnboarding), so it appears on a fresh visit and never again once
+ * dismissed.
+ *
+ * The examples are shown as thumbnails rather than behind a button: on a first
+ * visit the canvas is empty, and "here is what this makes, click one" says more
+ * about the tool than any blurb can.
  */
 export function SplashDialog({
   open,
   onClose,
   onStartTour,
+  onPickExample,
+  loadingExample,
 }: {
   open: boolean;
   /** Called with whether the user checked "Don't show again". */
   onClose: (dontShowAgain: boolean) => void;
   onStartTour: () => void;
+  onPickExample: (example: Example) => void;
+  loadingExample: string | null;
 }) {
   const [dontShow, setDontShow] = useState(false);
 
@@ -81,6 +92,17 @@ export function SplashDialog({
               A drawing tool for triangular-grid pixel art. New here? Take a
               quick tour of the interface.
             </p>
+
+            <div className="mt-6 w-full">
+              <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                Or open an example
+              </p>
+              <ExampleGallery
+                compact
+                onPick={onPickExample}
+                loadingFile={loadingExample}
+              />
+            </div>
 
             <div className="mt-7 flex items-center gap-3">
               <button

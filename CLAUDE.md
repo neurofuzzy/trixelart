@@ -208,6 +208,50 @@ Measured on dense random art: full-width anomalous rows 6 → 0, and the **tile 
 
 Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` inputs, 16px icons, `p-4`/`gap-3` shell. `PatternPanel`'s 14 palette chips must stay `flex-1` rather than fixed-width — fourteen of them share the drawer's inner width on one line and cannot grow past ~23px.
 
+## Plotter export
+
+Its own dialog, off the hamburger menu ("Export for plotter..."), in `src/lib/plotter-export.ts` (pure) + `PlotterDialog.tsx`. A pen plotter draws **strokes**, carries **one pen**, and charges for every pen-down millimetre — and a retraced line is a visible blot of doubled ink, not just wasted time. So this is convert-to-hatches aimed at paper: brightness becomes density, hex wedges give direction, output is a stroke-only SVG at true physical size.
+
+**Deliberately not cropped, and deliberately not in `ExportPanel`.** The fabric exports exist to cut a seamless *repeat tile* out of the artwork. A plot is a drawing on a sheet: it takes the **whole** artwork and lays it out on a page. Sharing the crop drawer would have meant every plot silently inheriting a tiling rectangle that has nothing to do with it — so the settings live under their own `plotter` key in `trixel-settings`, not inside `ExportSettings`.
+
+**Page, margin and fit** are `plotterLayout` (pure), which is the only place the artwork's world units meet inches. Named sheets are stored **portrait** and `landscape` swaps them, so the two orientations cannot disagree. Two modes, differing in which variable is free: on a sheet the **page** is given and the drawing is auto-scaled to fit inside the margins and centred there (so a plot always fits the paper in the machine); under `fit` the **drawing** is given (`artWidthIn`) and the page grows to hold it plus margins, which is the older artwork-shaped page. `scale` is inches per world unit and is `0` when the margin has eaten the page — `invalid`, and the export button goes with it.
+
+The margin is floored at **half a nib**: the stroke is centred on its path, so a cap on an edge stroke would otherwise be sliced in half by the page edge. That is the same half-nib bleed the SVG used to carry implicitly, now expressed as the smallest legal margin.
+
+**The SVG's user unit is the inch and its `viewBox` is the sheet.** Strokes stay in world coordinates and ride on one `translate/scale` per layer, so re-sizing the page changes one number per layer rather than every path, and `stroke-width` is divided by that scale to come out at the true nib. The transform and the page dimensions are emitted through `fmtHi` (12 significant digits), **not** the shared `fmt`: three decimals are a rounding error on a world coordinate and a **7% size error** on a scale factor of ~0.019. Path coordinates still use `fmt`, where a thousandth of a world unit is nanometres on the page.
+
+Marks are built by walking the **painted keys**, not by scanning a region — with no crop there is no box to enumerate, and walking what exists is both exact and cheaper than sweeping mostly-empty area. `PlotterPlot.width/height` is the artwork's own extent in world units, taken **after** the display rotation, because under a quarter turn width and height swap and measuring first would size it wrongly; the page comes from `plotterLayout` on top of that.
+
+**Brightness is OKLab lightness** (`oklabLightness`, exported from `tri-pattern.ts`), *not* `colorIdx` as hatchify uses. Reproducing colour in a single ink needs a brightness comparable **across** palettes; index 8 of Glacier is 68% lightness and index 8 of Ocean is 88%, and they would otherwise plot identically.
+
+**The tone range is normalised to the artwork**, not absolute: `plotterMarks` takes the min and max lightness actually painted and maps that span onto the ladder, so the darkest colour present always plots at the top density and the lightest at the bottom. Absolute lightness wastes most of the ramp — the palettes span ~12%–88% and four of them top out at 68%, so a piece drawn from one of those would never reach either end. Measured: four adjacent swatches (L 0.44–0.70) spread across the full ladder rather than over two rungs. A single-tone piece has no range to normalise against and falls back to absolute lightness rather than dividing by zero.
+
+Black pen on white paper: ink follows darkness. White on black is the exact reverse, and the two modes are exact mirrors. `blankLightest` adds a `0` rung at the no-ink end — outlines only — which is the **lightest** tone under a black pen and the **darkest** under a white one; the checkbox's label follows the pen for that reason. Lightness is memoised per encoded colour, since an artwork uses a handful of swatches over thousands of cells.
+
+**Hatch layers are ignored**, unlike every other export, which is why `plotterMarks` reads only the fills. A plot puts its lines on the lattice's division lines while an authored hatch layer is centred between them; the two schemes on one sheet read as a mistake rather than as emphasis. Hand-drawn line work stays a screen and vector feature.
+
+**Solids are outlined too.** Every lattice edge whose two sides read as different colours is drawn, plus the outside of the artwork. **An edge between two cells of the same colour is never drawn** — that is what makes it an outline of the shapes rather than a wireframe of every trixel (measured: a 162-trixel flat field outlines to its perimeter, ~1800 units, not the ~24000 every-edge would give). Each undirected edge is accumulated once in a map, so an interior edge cannot be emitted twice even though two triangles claim it — overdraw is impossible before the interval union even runs. Colours are compared **resolved, not encoded**, deliberately breaking the usual rule: elsewhere encoded comparison is right because painted data must follow palette shifts, but here the only question is whether the eye sees a boundary, and two swatches from different palettes resolving to the same hex are one region.
+
+**The plotter's hatch is grid-aligned, not centred** — the one place its line work differs in *geometry* from the screen's (`hatchLinesInBox`'s `align` parameter; `"center"` everywhere else). On paper the shape boundaries are already drawn as outlines, so a centred hatch sits half a division from them and the tone crowds at every boundary. On the division lines the ladder is uniform straight across an edge.
+
+**The lattice's own lines are kept, not skipped**, even though the outlines sit there too. Skipping them looks right only where an outline stands in for the missing line, and an edge between two cells of the *same* colour has no outline — so skipping opens a double gap every `density` lines through the middle of every flat region (measured: gaps alternating `0.25H, 0.25H, 0.5H` instead of a constant `0.25H`).
+
+So a hatch span **can** coincide with an outline, and `joinRuns` takes an optional `mask`: the outlines are joined first, then the hatch is joined and has them subtracted. Subtraction, not exclusion at generation time — the hatch line must survive wherever there is no outline, which is most of a flat region, and only the joined outline set knows where that is. Verified on a flat field (one gap value in the histogram, 0 overlapping stroke pairs across both layers) and on a two-colour boundary (the shared row comes out outline-only, full width, no gap).
+
+**Joining and overdraw removal are the same operation, and it is not segment chaining.** The obvious reading of the data — a pile of little segments — suggests chasing matching endpoints. Don't. Every segment already lies on a *known line of a known family*, so the join is a **one-dimensional interval union per line**: bucket by `(dir, u)`, project onto the line's parameter (x for family 0, y for 1 and 2 — the parameterisation `hatchLinesInBox` generates with), and union. A union is disjoint by construction, so overdraw does not need detecting and removing; it cannot survive. It also cannot mis-chain at a crossing, which endpoint chasing can.
+
+**Lines are grouped by sweeping sorted `u`, not by hashing a rounded key.** Coincident lines arriving from different densities are *not* bitwise equal — at densities 1, 3 and 7 the shared line computes to the identical double, but at density 5 it differs by one ulp. An exact key silently fails to join exactly those, and a rounded key can still split a pair straddling a bucket boundary. A sweep has neither failure mode.
+
+**There is no `densitySkip` here** — the ladder is every integer from `minDensity` to `maxDensity` (`plotterDensities`, the plotter's own replacement for `reachableDensities`). Skipping existed so the reachable densities would share lines under the centred scheme; with lines at `n·base/d`, *every* density already contains the lattice lines themselves, so those run unbroken across the whole artwork whatever the settings, and one density's lines are a subset of another's exactly when `d1 | d2`. A skip could only have thrown away tone levels. (The all-odd reasoning in `reachableDensities` is still correct for hatchify, which stays centred at `(n + ½)·step`.)
+
+Outlining and travel ordering are **unconditional** — the two checkboxes were removed. Travel ordering cannot change what is drawn, only how long the pen spends in the air (greedy nearest-neighbour with stroke reversal, `O(n²)`, skipped above 8000 strokes; measured 272568 → 7988 world units of pen-up on a full-artwork plot), so there was nothing to opt out of. And with the hatch on the division lines, the outlines are what bound each tone: without them the ladder reads as an open field of parallel lines rather than as shapes.
+
+**Output is three Inkscape layers** — Paper, Hatch, Outlines — as `inkscape:groupmode="layer"` groups with the `xmlns:inkscape` declaration, which is what makes Inkscape read them as layers rather than anonymous groups. Each can be hidden, re-penned, reordered or plotted on its own, which is how a two-pen or two-pass plot is actually produced; the paper layer switches off before plotting. Hatch precedes Outlines so outlines draw on top. Travel is optimised **within** each layer, since the plotter draws one layer at a time and interleaving would only add travel.
+
+The paper is a filled `<rect>` covering the page, with no stroke: plotters follow strokes and ignore it, but it makes a white-on-black plot legible on screen. `renderPlotterPreview` draws the paper at the *page's* aspect, not the canvas box's, or the sheet is misrepresented, and dashes in the margin box — on a fixed sheet the margin is what decides how big the drawing comes out and is otherwise invisible.
+
+**Dialog.** The controls are grouped into four `Section`s — Pen, Page, Tone, Line work — because they are four unrelated decisions and eighteen rows at one rhythm read as an undifferentiated list. `densitySkip`'s trade-off caption was removed as noise; the ladder it described is still what `reachableDensities` computes.
+
 ## Symmetry function panel
 
 - Uses `new Function()` to eval user formulas against `a,b,c` coordinates
@@ -222,15 +266,53 @@ Both drawers share a control scale: `text-xs` labels, `text-sm` values, ~`py-2` 
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
-`ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the exported project JSON — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
+`ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the saved project file (see "Project file") — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
 
-The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is authored content. Pattern *layers* (the live stack you are editing) are a setting; pattern *presets* (saved slots) travel with the project, like stamp selections.
+The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is authored content. A few `trixel-settings` entries describe the *document* and so are copied into the saved project file as well — see "Project file". Pattern *layers* (the live stack you are editing) are a setting; pattern *presets* (saved slots) travel with the project, like stamp selections.
 
 - Legacy migration: boolean `hexMode` → string `HexMode`, boolean `symmetry60` → string `Symmetry`
 - **The first edit on a fresh document cannot be undone.** `useHistory` starts at `historyIdx = -1` with an empty stack, so one commit lands at `0` and `handleUndo` bails on `historyIdx <= 0` — there is no snapshot of the empty state to return to. Pre-existing for every tool; do not mistake it for a missing `pushHistory`.
+
+## Project file
+
+A saved project is **`{slug}.trixel.svg`** — a real SVG that draws the artwork, with the project's JSON embedded in it. `src/lib/project-file.ts` owns the format; `svg-export.ts` and the importer's migration path do the actual work.
+
+**The point is the thumbnail.** A `.json` project is an opaque blob in a file browser; an SVG is rendered by Finder and Nautilus (**not** by Windows Explorer, which has no native SVG thumbnailer), so the user sees their piece in the folder listing. Verified end-to-end by running the real macOS thumbnailer (`qlmanage -t`) over a saved file.
+
+**A container swap, not a data change.** The payload is the same object the `.json` format held — a `ProjectSnapshot` plus `name`, `svgExport`, `version` — so the whole legacy migration block in `handleFileChange` (`normalizeHexMode`, the flat-`painted` wrap, the `symmetry60` branch) serves both containers unchanged, and old `.json` files load forever. It gained three fields that `trixel-settings` also holds but which describe the **document** rather than the workspace, so they have to travel with it: `hueOffset`/`saturationOffset` shift every *resolved* colour, and `gridOrientation` turns the whole lattice a quarter turn. Without them a project reopens looking unlike the thumbnail inside its own file.
+
+**Loading applies the grid settings; undo does not.** Divisions, hex mode, flower radius and symmetry are in `ProjectSnapshot`, so they were always *written* to the file — but nothing applied them on load, and a modern file opened onto whatever grid happened to be on screen (only the legacy `data.settings` branch ever set them). The importer now applies them from the snapshot. This is deliberately **not** symmetric with `registerRestore`, which still leaves them alone so that changing a setting between strokes is not rolled back by `Ctrl+Z`: opening a document and stepping through its history are different acts. `gridOrientation` is not in `ProjectSnapshot` — adding a field there means touching every literal that builds one, and undo would ignore it anyway — so it rides with the payload's other document-level view state.
+
+`readProjectFile` returns the payload **as text**, not parsed. The importer reads some thirty properties off an untyped `data`; handing it a typed object would mean a cast at every one of them, and a legacy file then takes byte-for-byte the path it always did.
+
+**Two independent version numbers.** `version` on the `<trixel:project>` element is the *envelope* — where the payload lives and how it is encoded; a reader that sees a higher one refuses, because it structurally cannot decode it. `version` *inside* the JSON is the *content*. Moving to compressed base64 would bump the first and leave the second alone. The namespace URI is deliberately **unversioned**: putting a version in it makes every older reader fail to find the element at all.
+
+**`generateSVG` gained `background` and `metadata` options** rather than the project module string-splicing into its output. Both absent ⇒ byte-identical output, so the artwork export is untouched. The reason to prefer options is `EMPTY_SVG`: it is **self-closing**, and a project with nothing painted but selections saved is entirely reachable, so a naive splice would produce either a project file containing no project or corrupt markup. All three exits now route through one `wrap()`, which makes that case structural instead of a regex special-case.
+
+**The `]]>` guard is at the JSON level**, not a split CDATA section: `json.replace(/\]\]>/g, "]]\\u003e")`. A user can type `]]>` into a project or layer name. `\u003e` is a valid JSON escape that parses back to the identical character, so nothing has to be unescaped on read — and the file stays a **single** CDATA section, which is what keeps the regex fallback exact. Safe because `]]>` can only occur inside a string literal: nothing structural may follow a `]` except `,`, `]`, `}` or whitespace.
+
+**Reading is DOM-first, regex second.** `DOMParser` looks the element up **by namespace URI, not prefix** (a foreign tool may rename `trixel:` to anything) and its `textContent` reads CDATA, escaped text and multiple adjacent sections identically. Only when the document is malformed enough that `DOMParser` refuses does a regex go after the payload directly — a broken `<path>` is no reason to lose a project. Construct the `DOMParser` **inside** the function: the app statically exports, so client components are prerendered in Node at build time and a module-scope `new DOMParser()` breaks the build. The parsed document is inert and only `textContent` is read out; keep it that way if a preview of the loaded file is ever added.
+
+The drawing is always `{ stroke: true, merge: true }`, not the user's `svgExport`: merging is the biggest size lever and same-colour strokes close the antialiasing seams between abutting fills, and a project file's bytes should not change because someone toggled a checkbox in an unrelated export dialog. `buildProjectSVG` draws `payload.layers` rather than taking the artwork as a second argument, so a file whose thumbnail disagrees with its data is unrepresentable; hidden layers are skipped by `buildRenderPlan`, so the picture shows what the canvas shows while the payload keeps everything.
+
+Re-saving a project SVG from another editor is **lossy and unsupported** — Inkscape rewrites `<metadata>` with its own RDF and may not preserve foreign children. The reader searches the whole document rather than only under `<metadata>`, which mitigates a relocation but not a deletion.
+
+The two menu items are "Save Project" (`.trixel.svg`, reloadable) and "Export Image (SVG)..." (`.svg`, not reloadable) — both write SVG now, so the labels have to say which is which.
+
+### Example projects
+
+`public/examples/*.trixel.svg` are ordinary project files saved by the app — not a separate format and not generated at build time, so a new one is added by drawing it, saving it into that folder and adding a line to `EXAMPLES` in `src/lib/examples.ts`. They live under `public/` because Next only serves that directory; they are fetched at runtime, never bundled.
+
+**The thumbnails are the project files themselves.** A `.trixel.svg` draws its own artwork, so `<img src>` pointed at the very file that is about to be loaded *is* the preview — no generated thumbnails to keep in sync, and what the user clicks is exactly what they see.
+
+`exampleUrl` prefixes `NEXT_PUBLIC_BASE_PATH`, set in `next.config.ts` from the same constant as `basePath`. This is load-bearing on GitHub Pages: `basePath`/`assetPrefix` rewrite framework assets and `<Image>` URLs but **not** a runtime `fetch()` or a plain `<img src>`, so an absolute `/examples/...` would 404 under `/trixelart/`.
+
+`ExampleGallery` is presentational and used twice: as a labelled row on the splash (`compact`) and as a grid in the "Load Example..." dialog. On a first visit the canvas is empty, and "here is what this makes, click one" says more than the blurb can — hence thumbnails on the splash rather than another button. Loading pushes to history like any import, so it needs no confirmation: `Ctrl+Z` brings the previous work back.
+
+The importer is split for this: `loadProjectText(text, label)` holds the container sniff, the version branch and every legacy migration, and `handleFileChange` is now just a `FileReader` wrapper around it. Both entry points arrive with the same thing — the text of a project file — so neither path can drift from the other.
 
 ## Key modules
 
@@ -244,11 +326,14 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, 40 MB limit |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
-| `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox`, `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
+| `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox` (+ `HatchAlign`), `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
 | `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
 | `src/lib/hatchify.ts` | Convert-to-hatches maths: `hatchify`, `WEDGE_DIR`, `reduceLevels`, `HatchifySettings`. Pure, no DOM |
 | `src/lib/hatchify-render.ts` | `renderHatchifyPreview` — fits a trixel set to a canvas and runs the GridCanvas draw loop |
+| `src/lib/plotter-export.ts` | Single-pen plotter export: `buildPlotterPlot`, `plotterDensities`, `plotterLayout` (page/margin/fit), `plotterSVG`, the interval union + outline subtraction, travel ordering. Pure except `renderPlotterPreview` |
 | `src/lib/pattern-render.ts` | Canvas rendering for pattern previews, thumbnails and palette slots |
+| `src/lib/project-file.ts` | The `.trixel.svg` project format: `buildProjectSVG`, `readProjectFile`, `projectFileName`, the CDATA guard. Pure except `readProjectFile` (`DOMParser`) |
+| `src/lib/examples.ts` | The bundled example projects: `EXAMPLES`, `exampleUrl` (basePath-aware), `fetchExample` |
 | `src/lib/utils.ts` | `cn()` — clsx + tailwind-merge |
 | `src/hooks/use-canvas-size.ts` | Container measurement via `ResizeObserver` |
 | `src/hooks/use-history.ts` | Paint state, undo/redo stack (capped at 50), localStorage persistence, clear |
@@ -272,9 +357,11 @@ The **split matters**: `trixel-settings` is view state, `ProjectSnapshot` is aut
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
 - `LayerKind = "fill" | "hatch"`, `Layer` — `src/hooks/use-history.ts`
-- `HatchBrush`, `HatchDir` — `src/lib/hatch.ts`
+- `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`
+- `PlotterSettings`, `PenMode`, `PageSizeId`, `PlotterLayout`, `PlotterPlot`, `PlotterStroke` — `src/lib/plotter-export.ts`
 - `CropRect`, `CropHandle` — `src/lib/crop.ts`
+- `ProjectPayload`, `ReadResult` — `src/lib/project-file.ts`
 - `ExportSettings` — `src/components/ExportPanel.tsx`
 - `PatternLayer`, `PatternPreset`, `PatternBlendMode`, `QuantizeTarget` — `src/lib/tri-pattern.ts`
 

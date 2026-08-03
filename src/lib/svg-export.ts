@@ -28,16 +28,25 @@ export interface MergedPathData {
 export interface SVGExportOptions {
   stroke?: boolean;
   merge?: boolean;
+  /** Opaque page colour, drawn as the first element. Omitted → transparent, as
+   *  the artwork export has always been. Used by the project file, whose SVG
+   *  doubles as a desktop thumbnail: a transparent one is invisible against a
+   *  dark file browser. */
+  background?: string;
+  /** Markup inserted directly after the opening tag — a `<metadata>` block for
+   *  the project file. Omitted → nothing, so the artwork export is unchanged. */
+  metadata?: string;
 }
 
-const PRECISION = 3;
+export const PRECISION = 3;
 const PADDING = 20;
 
-function fmt(n: number): string {
+/** Shared with the plotter export so every vector file rounds identically. */
+export function fmt(n: number): string {
   return n.toFixed(PRECISION);
 }
 
-function roundNum(n: number): number {
+export function roundNum(n: number): number {
   const factor = Math.pow(10, PRECISION);
   return Math.round(n * factor) / factor;
 }
@@ -225,8 +234,39 @@ function hatchMarkup(
   return out.join("\n");
 }
 
-const EMPTY_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"/>';
+/** The empty document's size. Arbitrary — there is no artwork to measure — but
+ *  it still has to be *some* box for the background to fill. */
+const EMPTY_SIZE = 100;
+
+/**
+ * The one place the document is assembled, so `background` and `metadata` reach
+ * the empty document as well as a drawn one.
+ *
+ * That is the whole reason this exists: a project with nothing painted but with
+ * selections or pattern presets saved is entirely reachable, and if the empty
+ * path skipped the options it would write a project file containing no project.
+ * The self-closing form is kept for the plain empty artwork export, byte for
+ * byte as before.
+ */
+function wrap(
+  w: number,
+  h: number,
+  body: string,
+  options?: SVGExportOptions,
+): string {
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"`;
+  const parts = [
+    options?.metadata ?? "",
+    // Percentages resolve against the viewport the viewBox establishes, so this
+    // covers the page exactly without restating its dimensions.
+    options?.background
+      ? `  <rect x="0" y="0" width="100%" height="100%" fill="${options.background}"/>`
+      : "",
+    body,
+  ].filter(Boolean);
+  if (parts.length === 0) return `${open}/>`;
+  return `${open}>\n${parts.join("\n")}\n</svg>`;
+}
 
 export function generateSVG(
   layers: Layer[],
@@ -255,7 +295,9 @@ export function generateSVG(
     if (step.kind === "fill") grow(computeBounds(step.tris));
     else grow(hatchStrokesBounds(step.strokes));
   }
-  if (!Number.isFinite(minX)) return EMPTY_SVG;
+  if (!Number.isFinite(minX)) {
+    return wrap(EMPTY_SIZE, EMPTY_SIZE, "", options);
+  }
 
   const w = maxX - minX + PADDING * 2;
   const h = maxY - minY + PADDING * 2;
@@ -288,11 +330,9 @@ export function generateSVG(
     .filter(Boolean)
     .join("\n");
 
-  if (!body) return EMPTY_SVG;
+  if (!body) return wrap(EMPTY_SIZE, EMPTY_SIZE, "", options);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
-${body}
-</svg>`;
+  return wrap(w, h, body, options);
 }
 
 /* ------------------------------------------------------------------ */

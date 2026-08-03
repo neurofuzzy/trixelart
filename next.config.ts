@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   ...(isGithubPages
     ? { output: 'export', basePath: repoBasePath, assetPrefix: `${repoBasePath}/` }
     : {}),
+  // `basePath`/`assetPrefix` rewrite framework assets and <Image> URLs, but not
+  // a runtime `fetch()` of a file in `public/` — which is how the example
+  // projects are loaded. So hand the prefix to the client explicitly.
+  env: {
+    NEXT_PUBLIC_BASE_PATH: isGithubPages ? repoBasePath : '',
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

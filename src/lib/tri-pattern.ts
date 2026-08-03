@@ -223,6 +223,18 @@ function oklab(rgb: Rgb): Rgb {
   ];
 }
 
+/**
+ * OKLab lightness of a resolved `#rrggbb`, 0 (black) to 1 (white).
+ *
+ * Exposed for the plotter export, which reproduces colour as line density in a
+ * single ink and therefore needs a brightness that is comparable *across* the
+ * 14 palettes. `colorIdx` is not: index 8 of Glacier is 68% lightness and index
+ * 8 of Ocean is 88%, and they would plot identically.
+ */
+export function oklabLightness(hex: string): number {
+  return Math.max(0, Math.min(1, oklab(hexToRgb(hex))[0]));
+}
+
 export interface QuantizeTarget {
   encoded: string;
   lab: Rgb;

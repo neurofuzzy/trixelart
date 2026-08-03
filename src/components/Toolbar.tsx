@@ -19,8 +19,10 @@ import {
   Menu,
   FilePlus,
   ImageDown,
+  Images,
   Box,
   Shirt,
+  PenLine,
   Scissors,
   Aperture,
   Paintbrush,
@@ -114,7 +116,9 @@ export function Toolbar({
   onExportSVG,
   onExport3D,
   onExportCut,
+  onExportPlotter,
   onImportClick,
+  onLoadExample,
   onClear,
   onCenterView,
   isFullscreen,
@@ -141,7 +145,9 @@ export function Toolbar({
   onExportSVG: () => void;
   onExport3D: () => void;
   onExportCut: () => void;
+  onExportPlotter: () => void;
   onImportClick: () => void;
+  onLoadExample: () => void;
   onClear: () => void;
   onCenterView: () => void;
   isFullscreen: boolean;
@@ -206,6 +212,15 @@ export function Toolbar({
             <DropdownMenuItem
               onClick={() => {
                 setHamburgerOpen(false);
+                onLoadExample();
+              }}
+            >
+              <Images className="w-4 h-4" />
+              <span>Load Example...</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
                 onExport();
               }}
             >
@@ -218,8 +233,10 @@ export function Toolbar({
                 onExportSVG();
               }}
             >
+              {/* Both this and Save Project write `.svg` now; only the saved
+                  one can be loaded back, so the labels have to say which. */}
               <ImageDown className="w-4 h-4" />
-              <span>Export Project</span>
+              <span>Export Image (SVG)...</span>
             </DropdownMenuItem>
             {/* Not a dialog — fabric export is a whole editing mode (crop
                 handles on the canvas), so the menu just selects the tool. */}
@@ -230,7 +247,7 @@ export function Toolbar({
               }}
             >
               <Shirt className="w-4 h-4" />
-              <span>Export for Fabric</span>
+              <span>Export for Fabric...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -239,7 +256,7 @@ export function Toolbar({
               }}
             >
               <Box className="w-4 h-4" />
-              <span>Export for 3D Print</span>
+              <span>Export for 3D Print...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -248,7 +265,18 @@ export function Toolbar({
               }}
             >
               <Scissors className="w-4 h-4" />
-              <span>Export for Cutting</span>
+              <span>Export for Cutting...</span>
+            </DropdownMenuItem>
+            {/* A dialog, not a canvas mode: a plot takes the whole artwork, so
+                unlike fabric there is no region to drag out on the canvas. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExportPlotter();
+              }}
+            >
+              <PenLine className="w-4 h-4" />
+              <span>Export for Plotter...</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
