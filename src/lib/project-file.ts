@@ -47,15 +47,22 @@ const FALLBACK_STEM = "trixel-grid";
  * What a project file holds: a `ProjectSnapshot` plus the few things that are
  * view state but belong with the artwork.
  *
- * `hueOffset`/`saturationOffset` are here because they shift every resolved
- * colour: without them a project reopens in different colours from the ones its
- * own thumbnail shows. The names match the `trixel-settings` blob's.
+ * These extras are all things `trixel-settings` also holds, but which describe
+ * the *document* rather than the workspace, so they have to travel with it:
+ * `hueOffset`/`saturationOffset` shift every resolved colour, and
+ * `gridOrientation` turns the whole lattice a quarter turn. Without them a
+ * project reopens looking unlike the thumbnail inside its own file. The names
+ * match the `trixel-settings` blob's.
+ *
+ * The rest of the grid settings — divisions, hex mode, flower radius, symmetry —
+ * are already in `ProjectSnapshot` and arrive through the spread.
  */
 export interface ProjectPayload extends ProjectSnapshot {
   name: string;
   svgExport: SVGExportOptions;
   hueOffset: number;
   saturationOffset: number;
+  gridOrientation: string;
   version: number;
 }
 

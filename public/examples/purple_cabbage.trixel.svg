@@ -1836,7 +1836,7 @@
     }
   ],
   "activeLayerIdx": 0,
-  "gridDivisions": 3,
+  "gridDivisions": 4,
   "hexMode": "honeycomb",
   "flowerRadius": 0,
   "symmetry": "off",
@@ -5707,6 +5707,7 @@
   },
   "hueOffset": 0,
   "saturationOffset": 0,
+  "gridOrientation": "flat-top",
   "version": 1
 }
 ]]></trixel:project>

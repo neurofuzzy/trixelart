@@ -2533,6 +2533,7 @@
   },
   "hueOffset": 0,
   "saturationOffset": 0,
+  "gridOrientation": "flat-top",
   "version": 1
 }
 ]]></trixel:project>

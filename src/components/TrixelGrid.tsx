@@ -893,13 +893,24 @@ export default function TrixelGrid() {
       // reopens in different colours from the ones its own thumbnail shows.
       hueOffset,
       saturationOffset: satOffset,
+      // Likewise the lattice's quarter turn: the same trixels pointy-top are a
+      // different picture. The other grid settings ride along inside the
+      // snapshot already.
+      gridOrientation,
       version: 1,
     });
     downloadBlob(
       new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
       projectFileName(projectName),
     );
-  }, [buildSnapshot, projectName, svgExport, hueOffset, satOffset]);
+  }, [
+    buildSnapshot,
+    projectName,
+    svgExport,
+    hueOffset,
+    satOffset,
+    gridOrientation,
+  ]);
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
@@ -996,6 +1007,32 @@ export default function TrixelGrid() {
           setActiveLayerIdx(Math.max(0, Math.min(snapActive, snapLayers.length - 1)));
           pushHistory(snap);
 
+          // The grid settings describe the document, not the workspace: the
+          // same trixels on a different lattice are a different picture. They
+          // have always been *written* into the file (they are part of
+          // `ProjectSnapshot`), but nothing applied them on load — only the
+          // legacy `data.settings` branch below did, so a modern file opened
+          // onto whatever grid happened to be on screen.
+          //
+          // Note this is not the undo path: `registerRestore` still leaves
+          // these alone on purpose, so changing a setting between strokes is
+          // not rolled back by Ctrl+Z. Loading a document is a different act
+          // from stepping through its history.
+          setGridDivisions(snap.gridDivisions);
+          setHexMode(snap.hexMode as HexMode);
+          setFlowerRadius(snap.flowerRadius);
+          setSymmetry(snap.symmetry as Symmetry);
+          // Not in `ProjectSnapshot` — a quarter turn of the whole lattice is
+          // authored content, but adding a field there means touching every
+          // literal that builds one, and undo would still ignore it. It rides
+          // with the payload's other document-level view state instead.
+          if (
+            data.gridOrientation === "flat-top" ||
+            data.gridOrientation === "pointy-top"
+          ) {
+            setGridOrientation(data.gridOrientation);
+          }
+
           if (data.settings) {
             const s = data.settings;
             if (typeof s.gridDivisions === "number")
@@ -1063,6 +1100,7 @@ export default function TrixelGrid() {
     setSvgExport,
     setHueOffset,
     setSatOffset,
+    setGridOrientation,
     setImportError,
   ],
   );
