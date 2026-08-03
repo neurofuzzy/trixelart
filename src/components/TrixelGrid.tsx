@@ -45,7 +45,25 @@ import {
 import { PatternPanel } from "@/components/PatternPanel";
 import { PatternPalette } from "@/components/PatternPalette";
 import { stringToTri, triToString, type TriKey } from "@/lib/grid-math";
-import { normalizeProjectFilename, DEFAULT_PROJECT_NAME } from "@/lib/utils";
+import { DEFAULT_PROJECT_NAME } from "@/lib/utils";
+import { downloadBlob } from "@/lib/png-export";
+import {
+  buildProjectSVG,
+  projectFileName,
+  readProjectFile,
+} from "@/lib/project-file";
+import { fetchExample, type Example } from "@/lib/examples";
+import { ExampleGallery } from "@/components/ExampleGallery";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { SelectionSnapshot } from "@/lib/hex-flower";
 import {
   rotateHexCW,
@@ -164,6 +182,19 @@ export default function TrixelGrid() {
       setExportSettings((s) => ({ ...s, ...patch })),
     [],
   );
+
+  // Why a dialog and not a console line: the file picker now accepts every
+  // `.svg`, so "picked the wrong one" is a routine mistake rather than a
+  // programming error, and it has to say so.
+  const [importError, setImportError] = useState<string | null>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
+  // Declared up here rather than beside the other dialogs because the example
+  // loader below needs `closeSplash`: picking an example from the splash is a
+  // way of dismissing it.
+  const onboarding = useOnboarding();
+  const { closeSplash } = onboarding;
+  /** The example being fetched, so the gallery can show which one is loading. */
+  const [loadingExample, setLoadingExample] = useState<string | null>(null);
 
   // Plotter settings live on their own rather than inside `exportSettings`:
   // the plot is not cropped and shares nothing with the fabric drawer.
@@ -854,22 +885,21 @@ export default function TrixelGrid() {
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const handleExport = useCallback(() => {
-    const project = buildSnapshot();
-    const dataStr = JSON.stringify(
-      { ...project, name: projectName, svgExport, version: 1 },
-      null,
-      2,
+    const svg = buildProjectSVG({
+      ...buildSnapshot(),
+      name: projectName,
+      svgExport,
+      // View state, but it shifts every resolved colour — without it a project
+      // reopens in different colours from the ones its own thumbnail shows.
+      hueOffset,
+      saturationOffset: satOffset,
+      version: 1,
+    });
+    downloadBlob(
+      new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
+      projectFileName(projectName),
     );
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${normalizeProjectFilename(projectName) || "trixel-grid"}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [buildSnapshot, projectName, svgExport]);
+  }, [buildSnapshot, projectName, svgExport, hueOffset, satOffset]);
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
@@ -887,135 +917,191 @@ export default function TrixelGrid() {
     fileInputRef.current?.click();
   };
 
+  /**
+   * Reads a project file's text and applies it.
+   *
+   * Shared by the file picker and the example gallery: both arrive with the
+   * text of a `.trixel.svg` (or a legacy `.json`), and everything downstream —
+   * the container sniff, the version branch, the legacy migrations — is the
+   * same either way. Returns whether it worked so a caller can keep its own
+   * dialog open on failure.
+   */
+  const loadProjectText = useCallback(
+    (text: string, label: string): boolean => {
+      try {
+        // Both containers land here: a project SVG's embedded payload, or a
+        // legacy `.json` file's text unchanged. Everything below is the same
+        // migration path either way.
+        const result = readProjectFile(text);
+        if (!result.ok) {
+          setImportError(result.error);
+          return false;
+        }
+        const data = JSON.parse(result.json);
+        if (typeof data !== "object" || data === null) return false;
+
+        if (typeof data.name === "string" && data.name.trim())
+          setProjectName(data.name);
+
+        if (data.svgExport && typeof data.svgExport === "object")
+          setSvgExport({
+            stroke: !!data.svgExport.stroke,
+            merge: !!data.svgExport.merge,
+          });
+
+        // Only when present, so a legacy file leaves the current offsets alone.
+        if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
+        if (typeof data.saturationOffset === "number")
+          setSatOffset(data.saturationOffset);
+
+        if (data.version === 1 || data.painted) {
+          let snapLayers: Layer[];
+          let snapActive: number;
+          if (Array.isArray(data.layers)) {
+            snapLayers = data.layers as Layer[];
+            snapActive =
+              typeof data.activeLayerIdx === "number"
+                ? data.activeLayerIdx
+                : 0;
+          } else {
+            snapLayers = [
+              {
+                id: "0",
+                name: "Layer 1",
+                painted: (data.painted || {}) as Record<string, string>,
+                visible: true,
+              },
+            ];
+            snapActive = 0;
+          }
+          const snap: ProjectSnapshot = {
+            layers: snapLayers,
+            activeLayerIdx: snapActive,
+            gridDivisions: data.gridDivisions ?? 1,
+            hexMode: normalizeHexMode(data.hexMode),
+            flowerRadius: data.flowerRadius ?? 0,
+            symmetry: data.symmetry ?? "off",
+            selections: Array.isArray(data.selections) ? data.selections : [],
+            patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
+            lastPaintTri:
+              typeof data.lastPaintTri === "string"
+                ? data.lastPaintTri
+                : null,
+          };
+          // Apply the whole layer array, not just the active layer's pixels —
+          // otherwise an imported multi-layer project writes into whatever
+          // layer is currently selected and the real stack (kinds included)
+          // only appears after an undo/redo round trip.
+          setLayers(snapLayers);
+          setActiveLayerIdx(Math.max(0, Math.min(snapActive, snapLayers.length - 1)));
+          pushHistory(snap);
+
+          if (data.settings) {
+            const s = data.settings;
+            if (typeof s.gridDivisions === "number")
+              setGridDivisions(s.gridDivisions);
+            if (s.hexMode !== undefined)
+              setHexMode(normalizeHexMode(s.hexMode));
+            if (typeof s.flowerRadius === "number")
+              setFlowerRadius(s.flowerRadius);
+            if (typeof s.symmetry60 === "boolean") {
+              setSymmetry(s.symmetry60 ? "sym60" : "off");
+            } else if (typeof s.symmetry === "string") {
+              setSymmetry(s.symmetry as Symmetry);
+            }
+          }
+
+          if (Array.isArray(data.selections)) {
+            setSelections(data.selections);
+            const ok =
+              data.selections[0] &&
+              Array.isArray(data.selections[0].trixels) &&
+              typeof data.selections[0].N === "number";
+            if (ok) setActiveSelection(data.selections[0]);
+          }
+        } else {
+          const snap: ProjectSnapshot = {
+            layers: [
+              {
+                id: "0",
+                name: "Layer 1",
+                painted: (data as Record<string, string>) || {},
+                visible: true,
+              },
+            ],
+            activeLayerIdx: 0,
+            gridDivisions: 1,
+            hexMode: "world",
+            flowerRadius: 0,
+            symmetry: "off",
+            selections: [],
+            patternPresets: [],
+            lastPaintTri: null,
+          };
+          setLayers(snap.layers);
+          setActiveLayerIdx(0);
+          pushHistory(snap);
+        }
+        return true;
+      } catch (err) {
+        console.error("Failed to import", err);
+        setImportError(`Could not read ${label}.`);
+        return false;
+      }
+    },
+  [
+    setLayers,
+    setActiveLayerIdx,
+    pushHistory,
+    setGridDivisions,
+    setHexMode,
+    setFlowerRadius,
+    setSymmetry,
+    setSelections,
+    setActiveSelection,
+    setProjectName,
+    setSvgExport,
+    setHueOffset,
+    setSatOffset,
+    setImportError,
+  ],
+  );
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-
       const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const content = event.target?.result as string;
-          const data = JSON.parse(content);
-          if (typeof data !== "object" || data === null) return;
-
-          if (typeof data.name === "string" && data.name.trim())
-            setProjectName(data.name);
-
-          if (data.svgExport && typeof data.svgExport === "object")
-            setSvgExport({
-              stroke: !!data.svgExport.stroke,
-              merge: !!data.svgExport.merge,
-            });
-
-          if (data.version === 1 || data.painted) {
-            let snapLayers: Layer[];
-            let snapActive: number;
-            if (Array.isArray(data.layers)) {
-              snapLayers = data.layers as Layer[];
-              snapActive =
-                typeof data.activeLayerIdx === "number"
-                  ? data.activeLayerIdx
-                  : 0;
-            } else {
-              snapLayers = [
-                {
-                  id: "0",
-                  name: "Layer 1",
-                  painted: (data.painted || {}) as Record<string, string>,
-                  visible: true,
-                },
-              ];
-              snapActive = 0;
-            }
-            const snap: ProjectSnapshot = {
-              layers: snapLayers,
-              activeLayerIdx: snapActive,
-              gridDivisions: data.gridDivisions ?? 1,
-              hexMode: normalizeHexMode(data.hexMode),
-              flowerRadius: data.flowerRadius ?? 0,
-              symmetry: data.symmetry ?? "off",
-              selections: Array.isArray(data.selections) ? data.selections : [],
-              patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
-              lastPaintTri:
-                typeof data.lastPaintTri === "string"
-                  ? data.lastPaintTri
-                  : null,
-            };
-            // Apply the whole layer array, not just the active layer's pixels —
-            // otherwise an imported multi-layer project writes into whatever
-            // layer is currently selected and the real stack (kinds included)
-            // only appears after an undo/redo round trip.
-            setLayers(snapLayers);
-            setActiveLayerIdx(Math.max(0, Math.min(snapActive, snapLayers.length - 1)));
-            pushHistory(snap);
-
-            if (data.settings) {
-              const s = data.settings;
-              if (typeof s.gridDivisions === "number")
-                setGridDivisions(s.gridDivisions);
-              if (s.hexMode !== undefined)
-                setHexMode(normalizeHexMode(s.hexMode));
-              if (typeof s.flowerRadius === "number")
-                setFlowerRadius(s.flowerRadius);
-              if (typeof s.symmetry60 === "boolean") {
-                setSymmetry(s.symmetry60 ? "sym60" : "off");
-              } else if (typeof s.symmetry === "string") {
-                setSymmetry(s.symmetry as Symmetry);
-              }
-            }
-
-            if (Array.isArray(data.selections)) {
-              setSelections(data.selections);
-              const ok =
-                data.selections[0] &&
-                Array.isArray(data.selections[0].trixels) &&
-                typeof data.selections[0].N === "number";
-              if (ok) setActiveSelection(data.selections[0]);
-            }
-          } else {
-            const snap: ProjectSnapshot = {
-              layers: [
-                {
-                  id: "0",
-                  name: "Layer 1",
-                  painted: (data as Record<string, string>) || {},
-                  visible: true,
-                },
-              ],
-              activeLayerIdx: 0,
-              gridDivisions: 1,
-              hexMode: "world",
-              flowerRadius: 0,
-              symmetry: "off",
-              selections: [],
-              patternPresets: [],
-              lastPaintTri: null,
-            };
-            setLayers(snap.layers);
-            setActiveLayerIdx(0);
-            pushHistory(snap);
-          }
-        } catch (err) {
-          console.error("Failed to import", err);
-        }
-      };
+      reader.onload = (event) =>
+        loadProjectText(event.target?.result as string, "that project file");
       reader.readAsText(file);
+      // Cleared so picking the same file twice in a row still fires a change.
       e.target.value = "";
     },
-    [
-      setLayers,
-      setActiveLayerIdx,
-      pushHistory,
-      setGridDivisions,
-      setHexMode,
-      setFlowerRadius,
-      setSymmetry,
-      setSelections,
-      setActiveSelection,
-      setProjectName,
-      setSvgExport,
-    ],
+    [loadProjectText],
+  );
+
+  /**
+   * Fetches a bundled example and loads it. Undoable like any other import, so
+   * it needs no "are you sure" — `Ctrl+Z` brings the previous work back.
+   */
+  const handlePickExample = useCallback(
+    async (example: Example) => {
+      setLoadingExample(example.file);
+      try {
+        const text = await fetchExample(example.file);
+        if (loadProjectText(text, `the ${example.name} example`)) {
+          setExamplesOpen(false);
+          closeSplash(false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch example", err);
+        setImportError(`Could not load the ${example.name} example.`);
+      } finally {
+        setLoadingExample(null);
+      }
+    },
+    [loadProjectText, closeSplash],
   );
 
   const onColorChange = useCallback(
@@ -1223,8 +1309,6 @@ export default function TrixelGrid() {
     buildSnapshot,
   ]);
 
-  const onboarding = useOnboarding();
-
   useKeyboardShortcuts(
     onUndo,
     onRedo,
@@ -1341,7 +1425,10 @@ export default function TrixelGrid() {
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept=".json"
+        // `.svg` already covers `.trixel.svg` — browsers match the final
+        // extension — but naming the compound form makes the intent legible,
+        // and the MIME types cover pickers that filter by type.
+        accept=".trixel.svg,.svg,.json,image/svg+xml,application/json"
         className="hidden"
       />
 
@@ -1355,6 +1442,7 @@ export default function TrixelGrid() {
         onExportCut={handleExportCut}
         onExportPlotter={() => setPlotterOpen(true)}
         onImportClick={handleImportClick}
+        onLoadExample={() => setExamplesOpen(true)}
         onClear={handleClear}
         onCenterView={onCenterView}
         isFullscreen={isFullscreen}
@@ -1592,6 +1680,45 @@ export default function TrixelGrid() {
         projectName={projectName}
       />
 
+      <AlertDialog
+        open={examplesOpen}
+        onOpenChange={(open) => !open && setExamplesOpen(false)}
+      >
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Load an example</AlertDialogTitle>
+            <AlertDialogDescription>
+              Opens a finished piece you can pick apart or paint over. Your
+              current work is replaced, but undo brings it back.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ExampleGallery
+            onPick={handlePickExample}
+            loadingFile={loadingExample}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={importError !== null}
+        onOpenChange={(open) => !open && setImportError(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Couldn&apos;t load that file</AlertDialogTitle>
+            <AlertDialogDescription>{importError}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setImportError(null)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <PlotterDialog
         open={plotterOpen}
         onOpenChange={setPlotterOpen}
@@ -1619,6 +1746,8 @@ export default function TrixelGrid() {
         open={onboarding.splashOpen}
         onClose={onboarding.closeSplash}
         onStartTour={onboarding.startTour}
+        onPickExample={handlePickExample}
+        loadingExample={loadingExample}
       />
       <HelpDialog
         open={onboarding.helpOpen}

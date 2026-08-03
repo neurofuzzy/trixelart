@@ -19,6 +19,7 @@ import {
   Menu,
   FilePlus,
   ImageDown,
+  Images,
   Box,
   Shirt,
   PenLine,
@@ -117,6 +118,7 @@ export function Toolbar({
   onExportCut,
   onExportPlotter,
   onImportClick,
+  onLoadExample,
   onClear,
   onCenterView,
   isFullscreen,
@@ -145,6 +147,7 @@ export function Toolbar({
   onExportCut: () => void;
   onExportPlotter: () => void;
   onImportClick: () => void;
+  onLoadExample: () => void;
   onClear: () => void;
   onCenterView: () => void;
   isFullscreen: boolean;
@@ -209,6 +212,15 @@ export function Toolbar({
             <DropdownMenuItem
               onClick={() => {
                 setHamburgerOpen(false);
+                onLoadExample();
+              }}
+            >
+              <Images className="w-4 h-4" />
+              <span>Load Example...</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
                 onExport();
               }}
             >
@@ -221,8 +233,10 @@ export function Toolbar({
                 onExportSVG();
               }}
             >
+              {/* Both this and Save Project write `.svg` now; only the saved
+                  one can be loaded back, so the labels have to say which. */}
               <ImageDown className="w-4 h-4" />
-              <span>Export Project...</span>
+              <span>Export Image (SVG)...</span>
             </DropdownMenuItem>
             {/* Not a dialog — fabric export is a whole editing mode (crop
                 handles on the canvas), so the menu just selects the tool. */}

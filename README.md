@@ -43,7 +43,8 @@ home screen as a full-screen PWA.
 - **Selections & stamps** — capture the contents of a hex as a reusable stencil, then stamp or transform it (rotate, flip, palette-shift).
 - **Palettes** — multiple color palettes with live hue/saturation offsets.
 - **Undo/redo** with autosave to `localStorage`.
-- **Import/export** — save projects as JSON, or export finished art as **SVG**.
+- **Example projects** — open a finished piece from the splash screen or the menu and paint over it.
+- **Import/export** — projects save as `.trixel.svg`: a real SVG that draws your artwork, so it previews in Finder, with the project data embedded inside it. Older `.json` projects still load. Finished art exports as **SVG**, and there are dedicated exports for fabric, 3D printing, cutting and pen plotters.
 - **Touch & stylus ready** — pinch-to-zoom, two-finger pan, and installable to your home screen.
 
 ## Getting started
