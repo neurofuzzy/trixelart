@@ -22,6 +22,7 @@ import {
   Images,
   Box,
   Shirt,
+  Scroll,
   PenLine,
   Scissors,
   Aperture,
@@ -117,6 +118,7 @@ export function Toolbar({
   onExport3D,
   onExportCut,
   onExportPlotter,
+  onExportApparel,
   onImportClick,
   onLoadExample,
   onClear,
@@ -146,6 +148,7 @@ export function Toolbar({
   onExport3D: () => void;
   onExportCut: () => void;
   onExportPlotter: () => void;
+  onExportApparel: () => void;
   onImportClick: () => void;
   onLoadExample: () => void;
   onClear: () => void;
@@ -246,7 +249,7 @@ export function Toolbar({
                 onToolChange("crop");
               }}
             >
-              <Shirt className="w-4 h-4" />
+              <Scroll className="w-4 h-4" />
               <span>Export for Fabric...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -277,6 +280,17 @@ export function Toolbar({
             >
               <PenLine className="w-4 h-4" />
               <span>Export for Plotter...</span>
+            </DropdownMenuItem>
+            {/* Also a dialog, and also whole-artwork: a shirt print is not a
+                repeat tile, so it takes no crop either. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setHamburgerOpen(false);
+                onExportApparel();
+              }}
+            >
+              <Shirt className="w-4 h-4" />
+              <span>Export for Apparel...</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
