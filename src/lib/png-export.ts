@@ -67,10 +67,27 @@ export function renderCropToCanvas(
   ctx.translate(-display.x, -display.y);
   ctx.rotate(gridRotation);
 
-  // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
   // Sized off the smaller scale so the overdraw is at least one device pixel on
   // both axes.
-  const overdraw = 1 / Math.min(sx, sy);
+  drawArtworkPlan(ctx, layers, 1 / Math.min(sx, sy));
+
+  ctx.restore();
+}
+
+/**
+ * Draws the layers into an already-transformed context: world coordinates in,
+ * artwork out. No background, no grid, no overlays.
+ *
+ * Shared by the fabric crop export and the apparel export, which differ in how
+ * they size and place the bitmap but agree exactly on how a trixel is painted.
+ * `overdraw` is the stroke width, in world units, that closes the seams.
+ */
+export function drawArtworkPlan(
+  ctx: CanvasRenderingContext2D,
+  layers: Layer[],
+  overdraw: number,
+): void {
+  // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
   for (const step of buildRenderPlan(layers)) {
     if (step.kind === "hatch") {
       // No zoom clamp: exports use the true world weight.
@@ -89,10 +106,11 @@ export function renderCropToCanvas(
     // region with no seam between them. Across a colour boundary two abutting
     // fills are each composited separately, so a boundary pixel ends up part
     // background however their coverages divide — hence the overdraw stroke in
-    // the group's own colour, at ~1 device pixel, to close the gap.
+    // the group's own colour, at ~1 device pixel, to close the gap. Under alpha
+    // that matters more, not less: the leak is the garment, not a backdrop.
     //
-    // **The flat edges are excluded from that stroke.** `cropPixelSize` has put
-    // every horizontal lattice line on an integer pixel boundary, so those fills
+    // **The flat edges are excluded from that stroke.** The caller has put every
+    // horizontal lattice line on an integer pixel boundary, so those fills
     // already meet exactly and have no gap to close; a stroke centred there
     // instead straddles the boundary by half a pixel each way and reintroduces
     // the very blend it was meant to prevent — as a discoloured line running the
@@ -129,8 +147,6 @@ export function renderCropToCanvas(
       ctx.stroke();
     }
   }
-
-  ctx.restore();
 }
 
 /**

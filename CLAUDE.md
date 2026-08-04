@@ -252,6 +252,34 @@ The paper is a filled `<rect>` covering the page, with no stroke: plotters follo
 
 **Dialog.** The controls are grouped into four `Section`s — Pen, Page, Tone, Line work — because they are four unrelated decisions and eighteen rows at one rhythm read as an undifferentiated list. `densitySkip`'s trade-off caption was removed as noise; the ladder it described is still what `reachableDensities` computes.
 
+## Apparel export
+
+Its own dialog, off the hamburger ("Export for Apparel..."), in `src/lib/apparel-export.ts` + `ApparelDialog.tsx`. A **PNG with alpha**: the shirt is the background, so everything unpainted leaves the file transparent. Every other raster path in the app is opaque on purpose — the fabric sites document no alpha support — so this is not "the crop export with the background fill deleted", and it does not share `ExportSettings`.
+
+**Deliberately not cropped**, exactly as the plotter is not: the fabric exports cut a seamless *repeat tile*, and a garment print is the whole artwork on a shirt. Sharing the crop drawer would mean every shirt silently inheriting a tiling rectangle that has nothing to do with it — hence its own `apparel` key in `trixel-settings`.
+
+**The stencil cut.** A large unbroken area of transfer ink is stiff and cracks along fold lines after a few washes; breaking it into pieces separated by thin bare-fabric gaps lets the garment flex instead. The lines to cut along are the ones the plotter's outline pass already computes, punched out of the alpha with `destination-out`. Three decisions, all load-bearing:
+
+- **Colour boundaries only, never the lattice.** A flat field of one colour comes out as one piece. Gridding it would turn a drawing into a mosaic, and the trixel lattice is far finer than anything a garment needs.
+- **The silhouette is not cut** (`outlineSegments`' `silhouette: false`). The outside of the artwork is already the edge of the alpha, so cutting there buys no flex and only erodes the design by half a gap width. This is the **only** behavioural difference from the plotter's outline set.
+- **Round caps and joins, not butt.** A joined run ends where runs of the other two families cross it; a butt cap stops half a gap short of the crossing and leaves a hairline of ink bridging every junction, which welds the pieces back together and undoes the cut. Verified: three regions meeting at a point export as 3 alpha-connected components, not 1.
+
+The cut segments stay in **world** coordinates and ride the transform already on the context — no second mapping, and correct under a quarter turn for free.
+
+**`region-outline.ts` is the shared primitive**, lifted out of `plotter-export.ts` unchanged: `outlineSegments` (every lattice edge whose two sides read as different *resolved* colours), `joinRuns` (the 1-D interval union per line, with its mask subtraction), `segToPoints`, `edgeDir`, `along`, `RawSeg`. The plotter draws those boundaries; apparel punches them. Neither imports the other.
+
+**The row snap is kept, and it matters more here.** `apparelPixelSize` mirrors `cropPixelSize`, snapping the row-axis dimension to a whole multiple of the artwork's row count instead of the crop's `2n`. That count is always an exact integer — `getTriVertices` only ever produces `y = r*H` or `(r+1)*H`, so the world bbox is a whole multiple of `H` tall. Unsnapped, every horizontal lattice edge straddles a pixel row, and with no background to blend into the result is a *semi-transparent* line letting the garment through the full width of the print, at every row. `EDGE_PAD` (2px, on all four sides, so the seam-closing overdraw at the outer boundary is not sliced off) **must stay an integer**: an integer translation preserves that alignment, a fractional one throws it away.
+
+**The garment colour is preview-only** and never written to the file. It exists because a transparent-on-checkerboard preview says nothing about whether the piece works on the colour it will be worn on. The preview composites the artwork on its own bitmap first and then draws it over the garment — drawing straight onto the garment would let `destination-out` punch holes in the shirt rather than gaps in the print.
+
+Two preview zooms. **Fit** shows the whole design; **Actual size** reproduces the export's own scale, centred, because at 0.8 mm on a 10″ print a fitted preview renders the gap well under a pixel — i.e. it shows nothing about the one setting the dialog exists to judge.
+
+`cutPieceReport` runs `connectedComponents` per resolved colour and reports how many pieces the cut leaves and how small the smallest is; under ~4 mm² it warns, since a piece that small lifts off in the wash. Grouped by **resolved** colour to match `outlineSegments` — two swatches that resolve to the same hex have no boundary between them, so they are one piece.
+
+**No 40 MB ceiling.** `MAX_UPLOAD_BYTES` is Spoonflower's rule and has nothing to do with a garment transfer; the dialog reports the dimensions and lets the encode fail loudly instead.
+
+The dialog draws every visible layer (hatch included, via `drawArtworkPlan`) but takes the cut's regions from `mergedFillPainted` alone — hatch is line work over the colour and bounds nothing of its own.
+
 ## Symmetry function panel
 
 - Uses `new Function()` to eval user formulas against `a,b,c` coordinates
@@ -266,7 +294,7 @@ The paper is a filled `<rect>` covering the page, with no stroke: plotters follo
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter`, `apparel` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 `ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the saved project file (see "Project file") — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.
@@ -324,7 +352,9 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 | `src/lib/constants.ts` | `PALETTE_DEFS` (14 palettes × 9 lightnesses), `encodeColor`/`decodeColor`/`resolveColor`, palette shifting |
 | `src/lib/tools/` | One module per tool + `types.ts` (`Tool`, `DragState`, `ToolContext`, `ToolHandler`) and `index.ts` (`toolMap`) |
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
-| `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, 40 MB limit |
+| `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, `drawArtworkPlan` (the shared world-space draw loop), 40 MB limit |
+| `src/lib/region-outline.ts` | Region boundaries shared by the plotter and apparel exports: `outlineSegments` (+ `silhouette` option), `joinRuns` (1-D interval union + mask subtraction), `segToPoints`, `edgeDir`, `RawSeg`. Pure, no DOM |
+| `src/lib/apparel-export.ts` | PNG-with-alpha garment export: `artworkBounds`, `apparelPixelSize` (row snap + `EDGE_PAD`), `apparelCutSegments`, `cutPieceReport`, `renderApparelToCanvas`, `renderApparelPreview`. Pure except the `render*` functions |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
 | `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox` (+ `HatchAlign`), `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
 | `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
@@ -360,6 +390,8 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 - `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`
 - `PlotterSettings`, `PenMode`, `PageSizeId`, `PlotterLayout`, `PlotterPlot`, `PlotterStroke` — `src/lib/plotter-export.ts`
+- `RawSeg`, `OutlineOptions` — `src/lib/region-outline.ts`
+- `ApparelSettings`, `ArtworkBounds`, `ApparelSize`, `ApparelView`, `CutPieceReport` — `src/lib/apparel-export.ts`
 - `CropRect`, `CropHandle` — `src/lib/crop.ts`
 - `ProjectPayload`, `ReadResult` — `src/lib/project-file.ts`
 - `ExportSettings` — `src/components/ExportPanel.tsx`

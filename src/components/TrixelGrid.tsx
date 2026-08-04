@@ -91,7 +91,13 @@ import {
   normalizePlotterSettings,
   type PlotterSettings,
 } from "@/lib/plotter-export";
+import {
+  DEFAULT_APPAREL,
+  normalizeApparelSettings,
+  type ApparelSettings,
+} from "@/lib/apparel-export";
 import { PlotterDialog } from "@/components/PlotterDialog";
+import { ApparelDialog } from "@/components/ApparelDialog";
 import { HatchBar } from "@/components/HatchBar";
 import {
   DEFAULT_HATCH_BRUSH,
@@ -204,6 +210,17 @@ export default function TrixelGrid() {
   const setPlotterSettings = useCallback(
     (patch: Partial<PlotterSettings>) =>
       setPlotterSettingsState((s) => ({ ...s, ...patch })),
+    [],
+  );
+
+  // Apparel settings, for the same reason: a shirt print is the whole artwork
+  // on a garment, so it inherits nothing from the crop drawer either.
+  const [apparelOpen, setApparelOpen] = useState(false);
+  const [apparelSettings, setApparelSettingsState] =
+    useState<ApparelSettings>(DEFAULT_APPAREL);
+  const setApparelSettings = useCallback(
+    (patch: Partial<ApparelSettings>) =>
+      setApparelSettingsState((s) => ({ ...s, ...patch })),
     [],
   );
 
@@ -622,6 +639,9 @@ export default function TrixelGrid() {
         if (data.plotter && typeof data.plotter === "object") {
           setPlotterSettingsState(normalizePlotterSettings(data.plotter));
         }
+        if (data.apparel && typeof data.apparel === "object") {
+          setApparelSettingsState(normalizeApparelSettings(data.apparel));
+        }
         if (data.crop && typeof data.crop === "object") {
           const { i, j, m, n } = data.crop;
           if ([i, j, m, n].every((v) => typeof v === "number")) {
@@ -676,6 +696,7 @@ export default function TrixelGrid() {
         hatchBrush,
         hatchify: hatchifySettings,
         plotter: plotterSettings,
+        apparel: apparelSettings,
       }),
     );
   }, [
@@ -696,6 +717,7 @@ export default function TrixelGrid() {
     hatchBrush,
     hatchifySettings,
     plotterSettings,
+    apparelSettings,
   ]);
 
   useEffect(() => {
@@ -1479,6 +1501,7 @@ export default function TrixelGrid() {
         onExport3D={handleExport3D}
         onExportCut={handleExportCut}
         onExportPlotter={() => setPlotterOpen(true)}
+        onExportApparel={() => setApparelOpen(true)}
         onImportClick={handleImportClick}
         onLoadExample={() => setExamplesOpen(true)}
         onClear={handleClear}
@@ -1756,6 +1779,21 @@ export default function TrixelGrid() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Draws every visible layer, hatch included — but the stencil cut takes
+          its regions from the fills alone, since hatch is line work over the
+          colour and bounds nothing of its own. */}
+      <ApparelDialog
+        open={apparelOpen}
+        onOpenChange={setApparelOpen}
+        layers={visibleLayers}
+        fills={mergedFillPainted}
+        gridRotation={gridRotation}
+        projectName={projectName}
+        palettes={computedPalettes}
+        settings={apparelSettings}
+        onSettingsChange={setApparelSettings}
+      />
 
       <PlotterDialog
         open={plotterOpen}
