@@ -390,7 +390,45 @@ function cornerAt(ring: { x: number; y: number }[], i: number) {
   if (alpha < COLLINEAR_EPS) return null; // degenerate spike
 
   // Tangent distance for radius r is r * cot(alpha/2).
-  return { cot: 1 / Math.tan(alpha / 2), inLen: li, outLen: lo };
+  return { cot: 1 / Math.tan(alpha / 2) };
+}
+
+/** Whether the ring passes straight through `b` — the edges a→b and b→c are
+ *  collinear. Exact on lattice coordinates, but compared with an epsilon so a
+ *  degenerate float case still reads as a turn. */
+function collinear(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+): boolean {
+  const d1x = b.x - a.x, d1y = b.y - a.y;
+  const d2x = c.x - b.x, d2y = c.y - b.y;
+  const cross = Math.abs(d1x * d2y - d1y * d2x);
+  const len = Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y);
+  return len > 0 && cross <= COLLINEAR_EPS * len;
+}
+
+/** Distance along the ring from vertex `i`, in direction `dir` (±1), to the
+ *  first vertex where the boundary changes direction. An arc's tangent point
+ *  must land within this straight stretch: past a turn the tangent line is no
+ *  longer part of the boundary, so the arc would leave the region. */
+function straightRun(
+  ring: { x: number; y: number }[],
+  i: number,
+  dir: 1 | -1,
+): number {
+  const n = ring.length;
+  let len = 0;
+  let j = i;
+  for (let step = 0; step < n; step++) {
+    const a = ring[j];
+    const b = ring[(j + dir + n) % n];
+    const c = ring[(j + 2 * dir + n) % n];
+    len += Math.hypot(b.x - a.x, b.y - a.y);
+    if (!collinear(a, b, c)) break;
+    j = (j + dir + n) % n;
+  }
+  return len;
 }
 
 /**
@@ -400,7 +438,9 @@ function cornerAt(ring: { x: number; y: number }[], i: number) {
  * layer — see `ROUND_RADIUS_AT_FULL`. It is cut back only where the geometry
  * cannot hold it: the arc consumes `r·cot(α/2)` along both adjacent edges, so
  * the two corners sharing a straight run must not between them consume more than
- * its length. Each vertex takes the min over its two adjacent runs.
+ * its length, and a corner's tangent point must not reach past a turn in the
+ * boundary (where the tangent line would stop being part of it). Each vertex
+ * takes the min over its two adjacent runs and both turn clearances.
  *
  * **The clamp reads only the shared boundary** — run lengths and angles, never
  * anything region-local like area or cell count. Both sides of an edge therefore
@@ -477,6 +517,19 @@ export function roundPolygon(
     maxR[j] = maxR[j] === 0 ? share : Math.min(maxR[j], share);
   }
 
+  // The pair clamp bounds each arc against its *rounding* neighbour, but not
+  // against the sharp vertices that share the straight run: a tangent distance
+  // may still exceed the stretch up to the next turn, and past a turn the
+  // tangent line is no longer part of the boundary — the arc would leave the
+  // region. Cap the radius at the distance to the nearer turn on each side.
+  for (let i = 0; i < n; i++) {
+    const g = geom[i];
+    if (!g) continue;
+    const clear = Math.min(straightRun(ring, i, -1), straightRun(ring, i, 1));
+    const byClear = clear / g.cot;
+    maxR[i] = maxR[i] === 0 ? byClear : Math.min(maxR[i], byClear);
+  }
+
   for (let i = 0; i < n; i++) {
     if (!geom[i]) continue;
     // **One radius for the whole layer**, cut back only where the local geometry
@@ -545,9 +598,14 @@ function towards(
 /**
  * Tangent points for every corner, in one pass.
  *
- * Shared by both backends so they cannot disagree about where an arc begins —
+ * Shared by all the backends so they cannot disagree about where an arc begins —
  * and computed once per ring rather than per vertex, which the obvious recursive
- * phrasing makes quadratic.
+ * phrasing makes quadratic. The tangent sits at the *full* distance `r·cot(α/2)`
+ * from the corner; `roundPolygon` has already cut the radius back so that fits
+ * the boundary, so no clamp is needed here. Clamping to the adjacent edge was
+ * the bug: where the run is straight the tangent legitimately passes the
+ * immediate vertex, and clamping it pulled the point off the circle the
+ * renderer still infers, opening a kink (and, on canvas, a doubled-back hairpin).
  */
 function ringTangents(ring: RoundedRing): (Tangents | null)[] {
   const n = ring.length;
@@ -561,8 +619,8 @@ function ringTangents(ring: RoundedRing): (Tangents | null)[] {
     const cross =
       (cur.x - prev.x) * (nxt.y - cur.y) - (cur.y - prev.y) * (nxt.x - cur.x);
     return {
-      enter: towards(cur.x, cur.y, prev.x, prev.y, Math.min(d, g.inLen)),
-      exit: towards(cur.x, cur.y, nxt.x, nxt.y, Math.min(d, g.outLen)),
+      enter: towards(cur.x, cur.y, prev.x, prev.y, d),
+      exit: towards(cur.x, cur.y, nxt.x, nxt.y, d),
       sweep: cross > 0 ? 1 : 0,
     };
   });
@@ -577,13 +635,56 @@ function ringStart(ring: RoundedRing, tans: (Tangents | null)[]): [number, numbe
   return t ? t.enter : [ring[0].x, ring[0].y];
 }
 
+/** A corner's arc as explicit circle parameters, recovered from its two tangent
+ *  points and the radius. The centre sits on the angle bisector at the distance
+ *  where the radius to each tangent point is perpendicular to its edge — the
+ *  corner, tangent and centre form a right triangle — so the arc passes through
+ *  exactly the points `ringTangents` computed.
+ *
+ *  Deriving the centre rather than trusting a rasteriser to re-infer it from the
+ *  corner is the point: the three backends share one source of truth for where
+ *  the arc begins and ends. The sweep is the short way round: the arc never
+ *  exceeds half a turn, since the corner angle is strictly between 0 and π. */
+function cornerArc(
+  cur: RoundedCorner,
+  enter: [number, number],
+  exit: [number, number],
+): { cx: number; cy: number; a0: number; sweep: number; ccw: boolean } {
+  const ex = enter[0] - cur.x, ey = enter[1] - cur.y;
+  const xx = exit[0] - cur.x, xy = exit[1] - cur.y;
+  const el = Math.hypot(ex, ey) || 1;
+  const xl = Math.hypot(xx, xy) || 1;
+  let bx = ex / el + xx / xl;
+  let by = ey / el + xy / xl;
+  const bl = Math.hypot(bx, by) || 1;
+  bx /= bl;
+  by /= bl;
+  // |corner→centre|² = tangentDistance² + r² (the tangent is perpendicular to
+  // the radius, so the three points form a right triangle).
+  const dist = Math.hypot(el, cur.radius);
+  const cx = cur.x + bx * dist;
+  const cy = cur.y + by * dist;
+
+  const a0 = Math.atan2(enter[1] - cy, enter[0] - cx);
+  const a1 = Math.atan2(exit[1] - cy, exit[0] - cx);
+  let sweep = a1 - a0;
+  while (sweep > Math.PI) sweep -= 2 * Math.PI;
+  while (sweep < -Math.PI) sweep += 2 * Math.PI;
+  return { cx, cy, a0, sweep, ccw: sweep < 0 };
+}
+
 /**
  * Traces a rounded ring onto a canvas path.
  *
- * The path is moved onto each corner's entry tangent point before `arcTo`, so
- * the circle `arcTo` infers is the one `ringTangents` computed and the two
- * backends cannot drift apart. `arcTo` is safe here because collinear and
- * degenerate corners were already filtered out by `cornerAt`.
+ * The path is moved onto each corner's entry tangent point, then the arc is
+ * drawn with `arc` through the two tangent points `ringTangents` computed — the
+ * same geometry the SVG backend emits as `A` commands, so the two cannot drift
+ * apart. This is deliberately *not* `arcTo`: `arcTo` re-derives the tangent
+ * distance from the corner, and where the run clamp has pulled the entry tangent
+ * inward it draws a connecting line that doubles back along the edge — a hairpin
+ * sliver of the very curve the corner was meant to be. Because `arc` starts at
+ * the entry tangent (which is exactly the current point), it adds no connector
+ * and the curve turns precisely where the ring says it does.
  */
 export function traceRoundedRing(ctx: CanvasPath, ring: RoundedRing): void {
   const n = ring.length;
@@ -600,8 +701,14 @@ export function traceRoundedRing(ctx: CanvasPath, ring: RoundedRing): void {
       continue;
     }
     if (i !== 0) ctx.lineTo(t.enter[0], t.enter[1]);
-    const nxt = ring[(i + 1) % n];
-    ctx.arcTo(cur.x, cur.y, nxt.x, nxt.y, cur.radius);
+    const { cx, cy, a0, sweep, ccw } = cornerArc(cur, t.enter, t.exit);
+    if (Math.abs(sweep) < 1e-12) {
+      // Degenerate sub-pixel arc: a chord is indistinguishable and safer than
+      // asking the rasteriser to draw a zero-length `arc`.
+      ctx.lineTo(t.exit[0], t.exit[1]);
+      continue;
+    }
+    ctx.arc(cx, cy, cur.radius, a0, a0 + sweep, ccw);
   }
   ctx.closePath();
 }
@@ -631,29 +738,7 @@ export function flattenRoundedRing(
       out.push([cur.x, cur.y]);
       continue;
     }
-    // Centre is along the bisector; recover it from the two tangent points.
-    const ex = t.enter[0] - cur.x, ey = t.enter[1] - cur.y;
-    const xx = t.exit[0] - cur.x, xy = t.exit[1] - cur.y;
-    const el = Math.hypot(ex, ey) || 1;
-    const xl = Math.hypot(xx, xy) || 1;
-    let bx = ex / el + xx / xl;
-    let by = ey / el + xy / xl;
-    const bl = Math.hypot(bx, by) || 1;
-    bx /= bl;
-    by /= bl;
-    // |corner→centre|² = tangentDistance² + r² (the tangent is perpendicular
-    // to the radius, so the three points form a right triangle).
-    const dist = Math.hypot(el, cur.radius);
-    const cx = cur.x + bx * dist;
-    const cy = cur.y + by * dist;
-
-    const a0 = Math.atan2(t.enter[1] - cy, t.enter[0] - cx);
-    const a1 = Math.atan2(t.exit[1] - cy, t.exit[0] - cx);
-    // Take the short way round: the arc never exceeds half a turn, since the
-    // corner angle is strictly between 0 and pi.
-    let sweep = a1 - a0;
-    while (sweep > Math.PI) sweep -= 2 * Math.PI;
-    while (sweep < -Math.PI) sweep += 2 * Math.PI;
+    const { cx, cy, a0, sweep } = cornerArc(cur, t.enter, t.exit);
 
     const steps = Math.max(
       1,

@@ -257,13 +257,17 @@ differ by an ulp so a coordinate key needs rounding, rounding reintroduces a
 largest bundled example). Edges pack as `(base vertex, direction)` — combining
 two vertex ids overflows the exact-integer range.
 
-**Rendering** — one shape, two backends, both driven off `ringTangents` so they
-cannot disagree about where an arc begins. Canvas moves onto each corner's entry
-tangent point before `arcTo`, so the circle `arcTo` infers is the one already
-computed. SVG emits explicit `A` commands with the sweep flag taken from the turn
-direction. The cropped SVG flattens arcs to chords first, because an arc cannot
-survive Sutherland–Hodgman and that exporter clips for real rather than hiding
-overflow behind a `<clipPath>`.
+**Rendering** — one shape, three backends, all driven off `ringTangents` so they
+cannot disagree about where an arc begins. The arc's centre and sweep are
+recovered from the two tangent points (`cornerArc`); canvas draws it with `arc`
+from the entry tangent, SVG emits explicit `A` commands with the sweep flag taken
+from the turn direction, and the cropped SVG flattens arcs to chords first,
+because an arc cannot survive Sutherland–Hodgman and that exporter clips for real
+rather than hiding overflow behind a `<clipPath>`. Canvas deliberately avoids
+`arcTo`: it re-derives the tangent distance from the corner, and where the run
+clamp has pulled the tangent points inward it adds a connecting line that doubles
+back along the edge — a hairpin sliver of the very curve the corner was meant to
+be.
 
 **`buildRenderPlan` carries the effects and stops coalescing across differing
 ones.** Coalescing flattens consecutive fill layers into one map, and rounding

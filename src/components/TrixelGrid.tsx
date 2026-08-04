@@ -74,6 +74,7 @@ import {
   remapHex,
   shiftHexPalettes,
   enumerateHexTrixels,
+  spreadHexArtwork,
 } from "@/lib/hex-flower";
 import { isToolAllowed, type Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
@@ -81,6 +82,7 @@ import { Export3DDialog } from "@/components/Export3DDialog";
 import { CutExportDialog } from "@/components/CutExportDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
+import { GridSettingsPanel } from "@/components/GridSettingsPanel";
 import {
   ExportPanel,
   DEFAULT_EXPORT_SETTINGS,
@@ -343,6 +345,7 @@ export default function TrixelGrid() {
   } | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [gridSettingsOpen, setGridSettingsOpen] = useState(false);
   const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
 
@@ -408,6 +411,9 @@ export default function TrixelGrid() {
   // in use-interaction needs no guard of its own.
   const changeTool = useCallback((t: Tool) => {
     if (isToolAllowed(t, activeLayerKindRef.current)) setTool(t);
+    // Pattern and crop draw their own full-height right-hand drawers; the grid
+    // settings drawer must give way rather than sit on top of them.
+    if (t === "pattern" || t === "crop") setGridSettingsOpen(false);
   }, []);
 
   // Move to a usable tool when the active layer's kind changes. Keyed on the
@@ -502,7 +508,7 @@ export default function TrixelGrid() {
   }, [commitVersion]);
 
   useEffect(() => {
-    registerRestore((snap: ProjectSnapshot) => {
+    registerRestore((snap: ProjectSnapshot, from: ProjectSnapshot) => {
       // Undo/redo only reverts the *edit* data. View settings (hexMode,
       // gridDivisions, flowerRadius, symmetry) are persisted separately
       // (SETTINGS_KEY) and shouldn't be touched by undo — otherwise
@@ -519,6 +525,19 @@ export default function TrixelGrid() {
         setSelections(snap.selections as SelectionSnapshot[]);
         const head = snap.selections[0] as SelectionSnapshot | undefined;
         if (head?.trixels && head.N) setActiveSelection(head);
+      }
+      // Spread-hex-artwork is a document transform: it remaps the painted
+      // coordinates *and* changes the lattice spacing as one edit. Stepping
+      // into or out of one of its snapshots must carry the spacing along, or
+      // the artwork renders on the wrong lattice. Plain view settings are
+      // deliberately left alone (see CLAUDE.md), so only spread transitions
+      // restore it — `from.spreadHex` covers undoing back to the pre-spread
+      // snapshot, `snap.spreadHex` covers redoing forward into the spread.
+      if (
+        (snap.spreadHex || from.spreadHex) &&
+        typeof snap.gridDivisions === "number"
+      ) {
+        setGridDivisions(snap.gridDivisions);
       }
       if (lastPaintTriBridgeRef.current) {
         lastPaintTriBridgeRef.current.current =
@@ -1239,6 +1258,32 @@ export default function TrixelGrid() {
     });
   }, [resetToSingleLayer, pushHistory]);
 
+  /**
+   * Re-centres every painted hexagon onto the same-index hexagon of a new
+   * lattice spacing (the "spread hex artwork" edit). Rebuilds the whole layer
+   * array and pushes one snapshot, so the remap and the spacing change undo
+   * together — `spreadHex` marks it for the restore handler above.
+   */
+  const onSpreadHexArtwork = useCallback(
+    (newN: number) => {
+      const oldN = gridDivisionsRef.current;
+      if (oldN <= 0 || newN <= 0 || newN === oldN) return;
+      const nextLayers = layersRef.current.map((l) => ({
+        ...l,
+        painted: spreadHexArtwork(l.painted, oldN, newN),
+      }));
+      setGridDivisions(newN);
+      setLayers(nextLayers);
+      pushHistory({
+        ...buildSnapshot(),
+        layers: nextLayers,
+        gridDivisions: newN,
+        spreadHex: true,
+      });
+    },
+    [setGridDivisions, setLayers, pushHistory, buildSnapshot],
+  );
+
   const onShiftUp = useCallback(() => {
     setPainted((prev) => {
       let next = prev;
@@ -1713,13 +1758,24 @@ export default function TrixelGrid() {
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
+        {gridSettingsOpen && (
+          <GridSettingsPanel
+            gridDivisions={gridDivisions}
+            onGridDivisionsChange={setGridDivisions}
+            hexMode={hexMode}
+            onHexModeChange={setHexMode}
+            gridOrientation={gridOrientation}
+            onGridOrientationChange={setGridOrientation}
+            onSpreadHexArtwork={onSpreadHexArtwork}
+            onClose={() => setGridSettingsOpen(false)}
+            onPointerEnter={() => setHoveredTri(null)}
+          />
+        )}
       </div>
 
       <Footer
         gridDivisions={gridDivisions}
-        onGridDivisionsChange={setGridDivisions}
         hexMode={hexMode}
-        onHexModeChange={setHexMode}
         handleUndo={onUndo}
         handleRedo={onRedo}
         historyIdx={historyIdx}
@@ -1727,11 +1783,11 @@ export default function TrixelGrid() {
         tool={tool}
         captureMode={captureMode}
         cloneSourceSet={cloneSource !== null}
-        gridOrientation={gridOrientation}
-        onGridOrientationChange={setGridOrientation}
         tooltip={tooltip}
         layersOpen={layersOpen}
         onToggleLayers={() => setLayersOpen((o) => !o)}
+        gridSettingsOpen={gridSettingsOpen}
+        onToggleGridSettings={() => setGridSettingsOpen((o) => !o)}
       />
 
       <ExportDialog

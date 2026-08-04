@@ -68,6 +68,11 @@ export interface ProjectSnapshot {
   /** Saved pattern-brush stacks; see `tri-pattern.ts`. */
   patternPresets: unknown[];
   lastPaintTri: string | null;
+  /** Set only on snapshots whose hex spacing changed as part of the edit
+   *  (the spread-hex-artwork operation). Undo/redo must restore the spacing
+   *  from these — unlike ordinary view settings, which are deliberately left
+   *  alone so changing one between strokes is not rolled back by Ctrl+Z. */
+  spreadHex?: boolean;
 }
 
 const STORAGE_KEY = "trixel-save";
@@ -118,11 +123,16 @@ export function useHistory() {
   const layersRef = useRef(layers);
   layersRef.current = layers;
 
-  const restoreRef = useRef<(s: ProjectSnapshot) => void>(() => {});
+  const restoreRef = useRef<(s: ProjectSnapshot, from: ProjectSnapshot) => void>(
+    () => {},
+  );
 
-  const registerRestore = useCallback((fn: (s: ProjectSnapshot) => void) => {
-    restoreRef.current = fn;
-  }, []);
+  const registerRestore = useCallback(
+    (fn: (s: ProjectSnapshot, from: ProjectSnapshot) => void) => {
+      restoreRef.current = fn;
+    },
+    [],
+  );
 
   useEffect(() => {
     try {
@@ -198,19 +208,21 @@ export function useHistory() {
 
   const handleUndo = useCallback(() => {
     if (historyIdx <= 0) return;
+    const from = history[historyIdx];
     const target = history[historyIdx - 1];
     setLayers(target.layers);
     setActiveLayerIdx(target.activeLayerIdx);
-    restoreRef.current(target);
+    restoreRef.current(target, from);
     setHistoryIdx((i) => i - 1);
   }, [history, historyIdx]);
 
   const handleRedo = useCallback(() => {
     if (historyIdx >= history.length - 1) return;
+    const from = history[historyIdx];
     const target = history[historyIdx + 1];
     setLayers(target.layers);
     setActiveLayerIdx(target.activeLayerIdx);
-    restoreRef.current(target);
+    restoreRef.current(target, from);
     setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
 
