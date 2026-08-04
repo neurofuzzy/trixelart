@@ -12,8 +12,14 @@ import {
   buildRenderPlan,
   hatchStrokes,
   hatchStrokesBounds,
+  stepRoundRadius,
   type HatchStroke,
 } from "@/lib/hatch-render";
+import {
+  flattenRoundedRing,
+  roundedRegions,
+  roundedRingToPath,
+} from "@/lib/round-corners";
 
 export interface TriangleData {
   points: [number, number][];
@@ -277,9 +283,18 @@ export function generateSVG(
   // Resolve every step's geometry up front: the document has to be sized over
   // hatch strokes as well as fill triangles, or a hatch-only document exports
   // as the empty placeholder.
+  // Triangles are resolved even for a rounded step: rounding only ever cuts a
+  // convex corner inward or bulges a concave one into the neighbouring region,
+  // so the artwork's bounding box is unchanged and can still be measured off the
+  // raw lattice.
   const resolved = plan.map((step) =>
     step.kind === "fill"
-      ? { kind: "fill" as const, tris: generateTriangles(step.painted) }
+      ? {
+          kind: "fill" as const,
+          tris: generateTriangles(step.painted),
+          painted: step.painted,
+          radius: stepRoundRadius(step),
+        }
       : { kind: "hatch" as const, strokes: hatchStrokes(step.painted) },
   );
 
@@ -308,6 +323,24 @@ export function generateSVG(
     .map((step) => {
       if (step.kind === "hatch") return hatchMarkup(step.strokes, ox, oy);
       if (step.tris.length === 0) return "";
+      // A rounded step is inherently merged — the effect is defined on whole
+      // regions — so it ignores the `merge` option rather than offering a
+      // per-triangle variant that could not express an arc.
+      if (step.radius > 0) {
+        return roundedRegions(step.painted, step.radius)
+          .map(({ fill, rings }) => {
+            const d = rings
+              .map((r) => roundedRingToPath(r, fmt, ox, oy))
+              .filter(Boolean)
+              .join(" ");
+            if (!d) return "";
+            return `  <path d="${d}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`;
+          })
+          .filter(Boolean)
+          .join("\n");
+      }
       if (options?.merge) {
         return mergeTrianglesByColor(step.tris, ox, oy)
           .map(
@@ -500,6 +533,40 @@ export function generateCroppedSVG(
           };
         });
         return hatchMarkup(strokes, 0, 0);
+      }
+
+      // A rounded step is clipped as flattened rings rather than as triangles.
+      // Arcs cannot survive Sutherland–Hodgman, but chords can, so the crop
+      // keeps its guarantee that nothing off-crop reaches the file — the same
+      // reason this exporter clips for real instead of using a `<clipPath>`.
+      const radius = stepRoundRadius(step);
+      if (radius > 0) {
+        const out: string[] = [];
+        for (const { fill, rings } of roundedRegions(step.painted, radius)) {
+          const ds: string[] = [];
+          for (const ring of rings) {
+            const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
+            if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
+            const pts = dedupeRing(
+              poly.map((p) => {
+                const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
+                return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
+              }),
+              0,
+            );
+            if (pts.length < 3) continue;
+            ds.push(
+              `M${pts.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" L")} Z`,
+            );
+          }
+          if (!ds.length) continue;
+          out.push(
+            `  <path d="${ds.join(" ")}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`,
+          );
+        }
+        return out.join("\n");
       }
 
       // Clip in world space (where the crop rect is axis-aligned), then rotate

@@ -1,6 +1,6 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
-import { layerKind, type Layer } from "@/hooks/use-history";
+import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
 import {
   clipSegmentToRect,
   clipSegmentToTriangle,
@@ -15,8 +15,29 @@ import {
 /** One drawing pass for an exporter: either a batch of fill layers flattened
  *  together, or a single hatch layer. */
 export type RenderStep =
-  | { kind: "fill"; painted: Record<string, string> }
+  | { kind: "fill"; painted: Record<string, string>; effects: LayerEffect[] }
   | { kind: "hatch"; painted: Record<string, string> };
+
+/** The rounding radius a fill step should be drawn with, or 0 for none. Effects
+ *  are a list so a second one can be added later; today exactly one changes
+ *  geometry, and a step with none must render identically to before effects
+ *  existed. */
+export function stepRoundRadius(step: RenderStep): number {
+  if (step.kind !== "fill") return 0;
+  for (const e of step.effects) {
+    if (e.type === "roundCorners" && e.enabled) return e.radius;
+  }
+  return 0;
+}
+
+/** Two effect stacks are interchangeable when they would draw identically. */
+function sameEffects(a: LayerEffect[], b: LayerEffect[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((e, i) => {
+    const o = b[i];
+    return e.type === o.type && e.enabled === o.enabled && e.radius === o.radius;
+  });
+}
 
 /**
  * Visible layers, bottom to top, with *consecutive* fill layers coalesced.
@@ -26,6 +47,13 @@ export type RenderStep =
  * welded shapes across layer boundaries. Emitting a group per layer instead
  * would silently regress that merge. A run is only broken where a hatch layer
  * genuinely sits between fills — which is correct, because z-order demands it.
+ *
+ * **A run is also broken between fill layers whose effects differ.** Coalescing
+ * flattens two layers into one map, and a corner-rounding effect reads that map
+ * to find region boundaries — so merging a rounded layer with an unrounded one
+ * would round the neighbour's cells too, and merging two different radii would
+ * silently pick one. Layers carrying equal effects still coalesce, which is the
+ * common case (all of them carrying none).
  */
 export function buildRenderPlan(layers: Layer[]): RenderStep[] {
   const steps: RenderStep[] = [];
@@ -35,11 +63,12 @@ export function buildRenderPlan(layers: Layer[]): RenderStep[] {
       steps.push({ kind: "hatch", painted: layer.painted });
       continue;
     }
+    const effects = activeEffects(layer);
     const last = steps[steps.length - 1];
-    if (last && last.kind === "fill") {
+    if (last && last.kind === "fill" && sameEffects(last.effects, effects)) {
       Object.assign(last.painted, layer.painted);
     } else {
-      steps.push({ kind: "fill", painted: { ...layer.painted } });
+      steps.push({ kind: "fill", painted: { ...layer.painted }, effects });
     }
   }
   return steps;

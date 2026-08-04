@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
 import {
   useHistory,
+  activeEffects,
   layerKind,
   type ProjectSnapshot,
   type Layer,
@@ -151,6 +152,7 @@ export default function TrixelGrid() {
     deleteLayer,
     duplicateLayer,
     toggleLayerVisibility,
+    setLayerEffects,
     moveLayer,
     setActiveLayerIdx,
     resetToSingleLayer,
@@ -354,6 +356,21 @@ export default function TrixelGrid() {
       Object.assign(out, layer.painted);
     }
     return out;
+  }, [layers]);
+
+  // Corner rounding for the exports that take `mergedFillPainted`. That merge
+  // deliberately throws away layer identity, so a per-layer radius cannot
+  // survive it — the largest enabled one wins. Predictable, and it matches the
+  // intent: if the artwork reads as rounded, the cut should be too.
+  const mergedFillRoundFraction = useMemo(() => {
+    let max = 0;
+    for (const layer of layers) {
+      if (!layer.visible || layerKind(layer) === "hatch") continue;
+      for (const e of activeEffects(layer)) {
+        if (e.type === "roundCorners") max = Math.max(max, e.radius);
+      }
+    }
+    return max;
   }, [layers]);
 
   // What a hatch layer's marks actually sit on: the visible fill layers
@@ -1690,6 +1707,7 @@ export default function TrixelGrid() {
             onDeleteLayer={deleteLayer}
             onDuplicateLayer={duplicateLayer}
             onToggleVisibility={toggleLayerVisibility}
+            onSetLayerEffects={setLayerEffects}
             onMoveLayer={moveLayer}
             onCommit={onCommit}
             onPointerEnter={() => setHoveredTri(null)}
@@ -1738,6 +1756,7 @@ export default function TrixelGrid() {
         open={exportCutOpen}
         onOpenChange={setExportCutOpen}
         painted={mergedFillPainted}
+        roundFraction={mergedFillRoundFraction}
         projectName={projectName}
       />
 
