@@ -73,7 +73,7 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Dodge / Burn | `D` / `B` | Step the palette index lighter/darker |
 | Clone | `C` | Clone-stamp from a captured source |
 | Eyedropper | `I` | Pick a painted color |
-| Pan | `H` | Drag to translate painted trixels (grid offset); right-click pans view |
+| Move | `H` | Drag to translate painted trixels; **ALT-drag moves every layer**. Click without dragging re-origins the lattice on that trixel. Right-click pans the view |
 | Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
 | Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
 | Crop | `X` | Drag handles to set the export region. **No toolbar button** — reached from the hamburger's "Export for Fabric...", and closing its drawer leaves the mode |
@@ -81,6 +81,8 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)
 - Stroke painting: `getTrianglesOnLine` samples along pointer moves for continuous strokes
+- **The move tool does not compensate the view after a drag.** It used to: the artwork's world position changed and the view shifted the same amount the other way, so on release the piece snapped back to exactly where it started on screen and the drag appeared to do nothing. The *click* branch still compensates, and there it is right — that gesture re-indexes the lattice origin and is meant to leave the picture where it is
+- `setAllPainted` (`useHistory`, on `ToolContext`) writes every layer's map at once; `setPainted` can only address the active layer. Only the move tool's ALT path needs it, and it stays off the common path deliberately — writing the whole stack on every pointer move gives every layer a new identity and rebuilds all their effect geometry
 - `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`. **`changeTool` is the only caller of `setTool`** — it also reconciles the panel slot, so a new tool-switching path must go through it
 - **The four right-hand drawers share one slot** and only one is ever open: `panel: PanelId | null` in `TrixelGrid`, `PanelShell` for the frame. Pattern and Crop & Export are owned by their tool; Layers and Grid Settings are toggled from the footer. See [docs/ui.md](docs/ui.md)
 

@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-05 07:03:03
+# Last updated: 2026-08-05 07:09:20
 # Files: 89
-# Lines of code: ~20909
+# Lines of code: ~20984
 ```
 - **/app**
   - **/lib**
@@ -153,7 +153,7 @@
     - [paint-tool.ts](../src/lib/tools/paint-tool.ts)
       - Variable: `paintTool`
     - [pan-tool.ts](../src/lib/tools/pan-tool.ts)
-      - Variable: `panTool`
+      - Variable: `panTool` - The move tool: drags the artwork across the lat...
     - [pattern-tool.ts](../src/lib/tools/pattern-tool.ts)
       - Variable: `PATTERN_MIN_N` - The hex grid can be off (N = 0) or very coarse,...
       - Function: `patternBrushN`

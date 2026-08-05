@@ -264,6 +264,23 @@ export function useHistory() {
     [],
   );
 
+  /**
+   * Replaces the painted map of *every* layer at once, by index.
+   *
+   * `setPainted` can only ever address `layers[activeLayerIdx]`, which is right
+   * for painting — but the move tool's ALT-drag translates the whole stack, and
+   * expressing that as N calls would produce N renders and N intermediate states
+   * where the layers have slid apart from each other.
+   *
+   * Maps must be precomputed by the caller: the updater has to stay pure,
+   * because StrictMode replays it.
+   */
+  const setAllPainted = useCallback((maps: Record<string, string>[]) => {
+    setLayers((prev) =>
+      prev.map((l, i) => (maps[i] ? { ...l, painted: maps[i] } : l)),
+    );
+  }, []);
+
   const paintedRef = useRef(painted);
   paintedRef.current = painted;
 
@@ -419,6 +436,7 @@ export function useHistory() {
     activeLayerIdx,
     painted,
     setPainted,
+    setAllPainted,
     paintedRef,
     history,
     historyIdx,

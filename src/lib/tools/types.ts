@@ -84,6 +84,13 @@ export type DragState =
       moveDq: number;
       moveDr: number;
       originPainted: Record<string, string>;
+      /** Every layer's painted map as it was at pointer-down, indexed like
+       *  `layers`. ALT-drag translates all of these; releasing ALT mid-drag puts
+       *  the inactive ones back from here. */
+      originLayers: Record<string, string>[];
+      /** Whether the last write moved the whole stack, so releasing ALT knows
+       *  there is something to undo. */
+      movedAll: boolean;
     }
   | {
       kind: "viewPan";
@@ -118,6 +125,9 @@ export interface ToolContext {
   screenToWorld: (sx: number, sy: number) => Pt;
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  /** Replaces every layer's painted map at once, by index. Only the move tool's
+   *  ALT-drag needs this; everything else writes the active layer. */
+  setAllPainted: (maps: Record<string, string>[]) => void;
   paintedRef: React.MutableRefObject<Record<string, string>>;
   onCommit: () => void;
   tool: Tool;

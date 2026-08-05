@@ -45,6 +45,7 @@ interface UseInteractionArgs {
   quantizeTargets: QuantizeTarget[];
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setAllPainted: (maps: Record<string, string>[]) => void;
   onCommit: () => void;
   containerRef: { current: HTMLDivElement | null };
   flowerRadius: number;
@@ -87,6 +88,7 @@ export function useInteraction(args: UseInteractionArgs) {
     quantizeTargets,
     painted,
     setPainted,
+    setAllPainted,
     onCommit,
     containerRef,
     flowerRadius,
@@ -310,6 +312,7 @@ export function useInteraction(args: UseInteractionArgs) {
     screenToWorld,
     painted,
     setPainted,
+    setAllPainted,
     paintedRef,
     onCommit,
     tool,

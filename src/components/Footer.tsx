@@ -89,7 +89,7 @@ export function Footer({
           </span>
         ) : tool === "pan" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
-            drag to move
+            drag to move — ALT-drag to move all layers
           </span>
         ) : tool === "select" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">

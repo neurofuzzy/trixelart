@@ -8,7 +8,7 @@
 |---|---|
 | `P` | Paint tool |
 | `E` | Erase tool |
-| `H` | Pan tool |
+| `H` | Move tool (ALT-drag moves all layers) |
 | `S` | Select tool |
 | `T` | Stamp tool |
 | `F` | Fill tool |
