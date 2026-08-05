@@ -185,6 +185,15 @@ export function LayerPanel({
   /** Index of the effect whose colour is being picked, or `null`. */
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
 
+  /**
+   * Every layer edit goes through here.
+   *
+   * `Layer` is part of `ProjectSnapshot`, so an uncommitted change to one is
+   * worse than merely not being undoable: the *next* commit captures it, and
+   * undoing that later edit then rolls this one back too, as an invisible side
+   * effect. Visibility and reorder used to do exactly that — hide a layer, paint
+   * a stroke, undo the stroke, and the layer came back.
+   */
   const commit = (fn: () => void) => {
     fn();
     onCommit();
@@ -277,7 +286,7 @@ export function LayerPanel({
                   "inline-flex items-center justify-center h-7 w-7 shrink-0 rounded text-muted-foreground hover:text-accent-foreground transition-colors",
                   !layer.visible && "opacity-40",
                 )}
-                onClick={() => onToggleVisibility(i)}
+                onClick={() => commit(() => onToggleVisibility(i))}
                 title={layer.visible ? "Hide layer" : "Show layer"}
               >
                 {layer.visible ? (
@@ -322,7 +331,7 @@ export function LayerPanel({
                 <div className="flex flex-col -space-y-0.5">
                   <button
                     className="inline-flex items-center justify-center h-3.5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
-                    onClick={() => onMoveLayer(i, 1)}
+                    onClick={() => commit(() => onMoveLayer(i, 1))}
                     disabled={isLast}
                     title="Move layer up"
                   >
@@ -330,7 +339,7 @@ export function LayerPanel({
                   </button>
                   <button
                     className="inline-flex items-center justify-center h-3.5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
-                    onClick={() => onMoveLayer(i, -1)}
+                    onClick={() => commit(() => onMoveLayer(i, -1))}
                     disabled={isFirst}
                     title="Move layer down"
                   >

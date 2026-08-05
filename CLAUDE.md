@@ -50,8 +50,10 @@ No tests configured.
 
 ## Rules that apply everywhere
 
-- **GOLDEN RULE**: Every editing action that modifies `painted` state MUST push a `ProjectSnapshot` to history via `pushHistory()` so it is undoable. This includes paint strokes, erase strokes, move-tool translations, stamp placement, palette remapping (`onShiftUp`/`onShiftDown`), selection deletion, pattern-brush strokes, pattern-preset capture/delete, and any future editing features. Missing a `pushHistory` call means the user cannot undo that action.
-  - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell.
+- **GOLDEN RULE**: Every editing action that changes anything inside `ProjectSnapshot` MUST push one via `pushHistory()`. That is `painted` — paint, erase, move-tool translations, stamp placement, palette remapping (`onShiftUp`/`onShiftDown`), selection deletion, pattern-brush strokes, pattern-preset capture/delete — **and the layer stack itself**: add, delete, duplicate, reorder, visibility, effects.
+  - **Skipping the push is worse than "not undoable".** The next commit snapshots the changed value anyway, so undoing that *later* edit silently rolls this one back too. Layer visibility and reorder had exactly this bug: hide a layer, paint a stroke, undo the stroke, and the layer came back.
+  - The escape hatch for state that should not be undoable is to **not apply it on restore**, not to skip the push. `registerRestore` deliberately leaves the grid settings alone, and undo/redo deliberately leave `activeLayerIdx` alone (clamped to the restored layer count), so that moving around between strokes is never rolled back.
+  - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell. In `LayerPanel` every mutation goes through its local `commit()` for the same reason.
 - **Colors are stored encoded**, not as hex: `"paletteIdx,colorIdx"` via `encodeColor`, resolved through `resolveColor` (`src/lib/constants.ts`). `PALETTE_DEFS` holds 14 HSL-derived palettes × 9 lightnesses, shifted globally by `hueOffset`/`satOffset`. Painted data therefore follows palette changes automatically — compare encoded values, not resolved hex, when testing swatch identity (separate palettes can resolve to the same color). The documented exceptions all share one reason: where the only question is *whether the eye sees a boundary*, comparison is on the resolved hex (`region-outline.ts`, `round-corners.ts`).
 - **`setPainted` updaters must be pure** — React StrictMode replays them. Precompute the keys/colors outside the updater (see `edit-tool.ts` and `pattern-tool.ts`).
 - **Adding a field to `ProjectSnapshot`** means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist. See [docs/persistence.md](docs/persistence.md) for the view-state / authored-content split that decides whether a new setting belongs there at all.
@@ -74,7 +76,7 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Pan | `H` | Drag to translate painted trixels (grid offset); right-click pans view |
 | Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
 | Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
-| Crop | `X` | Drag handles to set the export region |
+| Crop | `X` | Drag handles to set the export region. **No toolbar button** — reached from the hamburger's "Export for Fabric...", and closing its drawer leaves the mode |
 
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)

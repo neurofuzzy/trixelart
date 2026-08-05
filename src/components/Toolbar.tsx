@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Pencil,
   Eraser,
@@ -11,7 +11,6 @@ import {
   Maximize,
   Minimize,
   SquareDashed,
-  Crop,
   Stamp,
   Sun,
   Moon,
@@ -178,6 +177,21 @@ export function Toolbar({
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [flowerOpen, setFlowerOpen] = useState(false);
+  const flowerWrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Dismiss the fan-out popover on any pointer-down outside it — another tool, a
+  // menu, or the canvas. **Capture phase on `document`**, not a bubble listener:
+  // the canvas container and every drawer call `stopPropagation` on pointer
+  // events to keep drags off the artwork, so a bubbling listener never hears the
+  // click that most needs to close this.
+  useEffect(() => {
+    if (!flowerOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!flowerWrapRef.current?.contains(e.target as Node)) setFlowerOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [flowerOpen]);
 
   const hexDisabled = gridDivisions === 0 || hexMode === "world";
 
@@ -242,7 +256,12 @@ export function Toolbar({
               <span>Export Image (SVG)...</span>
             </DropdownMenuItem>
             {/* Not a dialog — fabric export is a whole editing mode (crop
-                handles on the canvas), so the menu just selects the tool. */}
+                handles on the canvas), so the menu selects the tool, which is
+                what opens the drawer. **This is the only way in**: crop has no
+                toolbar button, because a tool whose entire UI is one drawer left
+                the canvas stuck in crop mode whenever that drawer gave the panel
+                slot up to another one. Closing the drawer now leaves the mode,
+                which only reads correctly if entering it went through here. */}
             <DropdownMenuItem
               onClick={() => {
                 setHamburgerOpen(false);
@@ -392,17 +411,6 @@ export function Toolbar({
           <SquareDashed className="w-4 h-4" />
         </Button>
 
-        <Button
-          variant={tool === "crop" ? "default" : "ghost"}
-          size="icon"
-          onClick={() => onToolChange("crop")}
-          title="Crop & export (X)"
-          onMouseEnter={() => onSetTooltip("Crop & export")}
-          onMouseLeave={() => onSetTooltip("")}
-        >
-          <Crop className="w-4 h-4" />
-        </Button>
-
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -420,7 +428,7 @@ export function Toolbar({
         >
           <Aperture className="w-4 h-4" />
         </button>
-        <div className="relative">
+        <div className="relative" ref={flowerWrapRef}>
           <button
             className={cn(
               "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-5",
@@ -435,7 +443,7 @@ export function Toolbar({
           >
             <Snowflake className="w-4 h-4" />
           </button>
-          {flowerOpen && (
+          {flowerOpen && !hexDisabled && (
             <div className="absolute top-full left-0 mt-2 px-3 pt-3 pb-2 bg-card border rounded-lg shadow-xl z-50 flex flex-col items-center gap-2">
               <input
                 type="range"

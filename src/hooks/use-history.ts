@@ -280,12 +280,28 @@ export function useHistory() {
     [historyIdx],
   );
 
+  /**
+   * Which layer is selected is *where you are*, not what you made, so undo and
+   * redo leave it alone — exactly as they leave the grid settings alone, and for
+   * the same reason: selecting a layer between two strokes should not be rolled
+   * back by undoing one of them. `activeLayerIdx` stays in `ProjectSnapshot`
+   * because a saved project should reopen on the layer it was left on; it is
+   * only *applying* it that is wrong here.
+   *
+   * The clamp is the whole reason this is a function rather than a deletion:
+   * undoing an "add layer" shortens the stack, and an index left pointing past
+   * the end selects nothing.
+   */
+  const keepActiveLayer = (target: ProjectSnapshot) => {
+    setActiveLayerIdx((i) => Math.max(0, Math.min(i, target.layers.length - 1)));
+  };
+
   const handleUndo = useCallback(() => {
     if (historyIdx <= 0) return;
     const from = history[historyIdx];
     const target = history[historyIdx - 1];
     setLayers(target.layers);
-    setActiveLayerIdx(target.activeLayerIdx);
+    keepActiveLayer(target);
     restoreRef.current(target, from);
     setHistoryIdx((i) => i - 1);
   }, [history, historyIdx]);
@@ -295,7 +311,7 @@ export function useHistory() {
     const from = history[historyIdx];
     const target = history[historyIdx + 1];
     setLayers(target.layers);
-    setActiveLayerIdx(target.activeLayerIdx);
+    keepActiveLayer(target);
     restoreRef.current(target, from);
     setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
