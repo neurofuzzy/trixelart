@@ -5,6 +5,7 @@ import {
   buildRenderPlan,
   drawHatchLayer,
   glowReceivers,
+  stepColorAdjust,
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
@@ -122,6 +123,7 @@ export function drawArtworkPlan(
     // a genuinely different colour still meets it.
     const radius = stepRoundRadius(step);
     const outline = stepOutlineWeight(step);
+    const adjust = stepColorAdjust(step);
 
     // Before the layer's own fills: the layer casts the shadow, it does not
     // receive it.
@@ -132,7 +134,11 @@ export function drawArtworkPlan(
     }
 
     if (radius > 0 || outline > 0) {
-      for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
+      for (const { fill, rings } of stepRegionGeometry(
+        step.painted,
+        radius,
+        adjust,
+      )) {
         if (outline > 0) {
           // Outline effect: a stroke of the boundary at the selected weight
           // instead of a solid fill; the interior stays empty. Round joins land
@@ -160,7 +166,7 @@ export function drawArtworkPlan(
     }
 
     const byColor = new Map<string, [number, number][][]>();
-    for (const tri of generateTriangles(step.painted)) {
+    for (const tri of generateTriangles(step.painted, adjust)) {
       const list = byColor.get(tri.fill);
       if (list) list.push(tri.points);
       else byColor.set(tri.fill, [tri.points]);

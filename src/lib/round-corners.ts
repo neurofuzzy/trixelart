@@ -612,16 +612,30 @@ export const OUTLINE_WEIGHT_AT_FULL = SIDE;
  * path handles both: the outline effect strokes them, corner rounding fills
  * them. Returning one shape for both keeps the preview and the two raster/vector
  * exporters from drifting apart over what a region boundary is.
+ *
+ * `adjust` is the colour-adjust effect's filter (`stepColorAdjust`), applied
+ * *after* the walk: regions are still found by the colours the artwork was
+ * painted in, so the filter can only recolour a boundary, never move one. Two
+ * regions the filter collapses onto one colour therefore stay two rings — which
+ * is invisible for a fill, and for an outline just means the shared edge is
+ * stroked twice in that one colour.
  */
 export function stepRegionGeometry(
   painted: Record<string, string>,
   radius: number,
+  adjust?: (hex: string) => string,
 ): { fill: string; rings: RoundedRing[] }[] {
-  if (radius > 0) return roundedRegions(painted, radius);
-  return regionRings(painted).map(({ fill, rings }) => ({
-    fill,
-    rings: rings.map((r) => r.map((p) => ({ x: p.x, y: p.y, radius: 0 }))),
-  }));
+  const regions =
+    radius > 0
+      ? roundedRegions(painted, radius)
+      : regionRings(painted).map(({ fill, rings }) => ({
+          fill,
+          rings: rings.map((r) =>
+            r.map((p) => ({ x: p.x, y: p.y, radius: 0 })),
+          ),
+        }));
+  if (!adjust) return regions;
+  return regions.map(({ fill, rings }) => ({ fill: adjust(fill), rings }));
 }
 
 /** Where a corner's arc leaves the incoming edge and rejoins the outgoing one,

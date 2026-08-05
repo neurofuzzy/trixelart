@@ -1,5 +1,6 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
+import { colorAdjuster } from "@/lib/color-adjust";
 import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
 import { OUTLINE_WEIGHT_AT_FULL, type RoundedRing } from "@/lib/round-corners";
 import {
@@ -64,6 +65,29 @@ export function stepGlow(step: RenderStep): GlowSpec | null {
     }
   }
   return null;
+}
+
+/**
+ * The colour filter a fill step's colours pass through, or `undefined` for none.
+ *
+ * The odd one out among the four step readers: the other three describe
+ * geometry, and every backend already had somewhere to put a radius, a weight or
+ * a shadow. This one is threaded into the *two* places a step's colours are
+ * produced — `generateTriangles` and `stepRegionGeometry` — rather than applied
+ * at each of the dozen places a fill is emitted, so no backend can forget it and
+ * none of the emit code had to change.
+ *
+ * Returning `undefined` rather than an identity function is what keeps an
+ * unadjusted step on exactly the code path it walked before this effect existed.
+ */
+export function stepColorAdjust(
+  step: RenderStep,
+): ((hex: string) => string) | undefined {
+  if (step.kind !== "fill") return undefined;
+  for (const e of step.effects) {
+    if (e.type === "adjustColor" && e.enabled) return colorAdjuster(e);
+  }
+  return undefined;
 }
 
 /**

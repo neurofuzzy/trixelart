@@ -13,6 +13,7 @@ import {
   glowReceivers,
   hatchStrokes,
   hatchStrokesBounds,
+  stepColorAdjust,
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
@@ -81,7 +82,14 @@ function ensureCW(points: [number, number][]): [number, number][] {
   return points;
 }
 
-export function generateTriangles(painted: Record<string, string>): TriangleData[] {
+/** `adjust` is the colour-adjust effect's filter (`stepColorAdjust`), applied to
+ *  each resolved fill. Doing it here rather than at the emit sites means the
+ *  merge, per-triangle and cropped paths all get it, and `mergeTrianglesByColor`
+ *  keys on the colour the file will actually carry. */
+export function generateTriangles(
+  painted: Record<string, string>,
+  adjust?: (hex: string) => string,
+): TriangleData[] {
   const entries = Object.entries(painted);
   const triangles: TriangleData[] = [];
 
@@ -92,7 +100,8 @@ export function generateTriangles(painted: Record<string, string>): TriangleData
     const r = parseInt(parts[1]);
     const type = parts[2] as "up" | "down";
     const verts = getTriVertices(q, r, type);
-    const fill = resolveColor(encoded);
+    const resolved = resolveColor(encoded);
+    const fill = adjust ? adjust(resolved) : resolved;
     triangles.push({
       points: ensureCW([
         [roundNum(verts[0].x), roundNum(verts[0].y)],
@@ -293,17 +302,22 @@ export function generateSVG(
   // convex corner inward or bulges a concave one into the neighbouring region,
   // so the artwork's bounding box is unchanged and can still be measured off the
   // raw lattice.
-  const resolved = plan.map((step) =>
-    step.kind === "fill"
-      ? {
-          kind: "fill" as const,
-          tris: generateTriangles(step.painted),
-          painted: step.painted,
-          radius: stepRoundRadius(step),
-          outline: stepOutlineWeight(step),
-        }
-      : { kind: "hatch" as const, strokes: hatchStrokes(step.painted) },
-  );
+  const resolved = plan.map((step) => {
+    if (step.kind !== "fill") {
+      return { kind: "hatch" as const, strokes: hatchStrokes(step.painted) };
+    }
+    // Built once per step and reused by both the triangle and the region path,
+    // so the memo inside it stays warm across the whole layer.
+    const adjust = stepColorAdjust(step);
+    return {
+      kind: "fill" as const,
+      tris: generateTriangles(step.painted, adjust),
+      painted: step.painted,
+      radius: stepRoundRadius(step),
+      outline: stepOutlineWeight(step),
+      adjust,
+    };
+  });
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const grow = (b: { minX: number; minY: number; maxX: number; maxY: number } | null) => {
@@ -374,7 +388,7 @@ export function generateSVG(
       // defined on whole regions — so they ignore the `merge` option rather
       // than offering a per-triangle variant that could not express an arc.
       if (step.radius > 0 || step.outline > 0) {
-        const fills = stepRegionGeometry(step.painted, step.radius)
+        const fills = stepRegionGeometry(step.painted, step.radius, step.adjust)
           .map(({ fill, rings }) => {
             const d = rings
               .map((r) => roundedRingToPath(r, fmt, ox, oy))
@@ -612,6 +626,7 @@ export function generateCroppedSVG(
       // `<clipPath>`.
       const radius = stepRoundRadius(step);
       const outline = stepOutlineWeight(step);
+      const adjust = stepColorAdjust(step);
 
       // Rotated into display space and shifted to the crop origin like every
       // other shape here, but never cut — see the note on `cropClip` above.
@@ -639,7 +654,11 @@ export function generateCroppedSVG(
 
       if (radius > 0 || outline > 0) {
         const out: string[] = [];
-        for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
+        for (const { fill, rings } of stepRegionGeometry(
+          step.painted,
+          radius,
+          adjust,
+        )) {
           const ds: string[] = [];
           for (const ring of rings) {
             const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
@@ -676,7 +695,7 @@ export function generateCroppedSVG(
       // the survivors into display space and shift the crop origin to (0,0).
       // The only rotations used are 0 and 90 degrees, so this stays exact.
       const clipped: TriangleData[] = [];
-      for (const tri of generateTriangles(step.painted)) {
+      for (const tri of generateTriangles(step.painted, adjust)) {
         const poly = clipPolygonToRect(tri.points, world);
         if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
         // Rounding can merge two distinct vertices, so dedupe again afterwards

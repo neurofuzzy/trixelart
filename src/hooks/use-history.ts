@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
+import { isIdentityAdjustment } from "@/lib/color-adjust";
 
 /** What a layer's `painted` values mean. Absent is `"fill"`, so every document
  *  saved before hatch layers existed keeps working with no migration. */
@@ -65,10 +66,34 @@ export interface GlowEffect {
   enabled: boolean;
 }
 
+/**
+ * A hue / saturation / brightness filter over the layer's colours.
+ *
+ * The one effect that is not geometry: it changes what colour a cell renders as,
+ * never where it is. Applied to the *resolved* hex on its way to a renderer, so
+ * `painted` keeps its encoded values and the layer still follows the global
+ * palette shift underneath the filter. All three are −100…100 and 0 is
+ * "leave alone"; see `lib/color-adjust.ts`.
+ */
+export interface AdjustColorEffect {
+  type: "adjustColor";
+  /** −100 → black, +100 → white. */
+  brightness: number;
+  /** −100…100 → a half turn of the wheel each way. */
+  hue: number;
+  /** −100 → grey, +100 → fully saturated. */
+  saturation: number;
+  enabled: boolean;
+}
+
 /** A non-destructive per-layer geometry filter. `painted` is never touched —
  *  effects are applied when geometry is built for rendering, so switching one
  *  off restores the artwork exactly. */
-export type LayerEffect = RoundCornersEffect | OutlineEffect | GlowEffect;
+export type LayerEffect =
+  | RoundCornersEffect
+  | OutlineEffect
+  | GlowEffect
+  | AdjustColorEffect;
 
 /** Reads a layer's effects, defaulting an absent field to none. Use this rather
  *  than touching `.effects` directly, exactly as with `layerKind`. */
@@ -88,6 +113,8 @@ export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
         return e.weight > 0;
       case "glow":
         return e.radius > 0 && e.opacity > 0;
+      case "adjustColor":
+        return !isIdentityAdjustment(e);
     }
   });
 

@@ -180,7 +180,8 @@ The selection is cleared wholesale before the new marks are merged, so re-runnin
 
 ## Layer effects
 
-Non-destructive per-layer geometry filters. `Layer.effects` is optional and
+Non-destructive per-layer filters — three of geometry and one of colour.
+`Layer.effects` is optional and
 **absent means none** — read it through `layerEffects(l)` / `activeEffects(l)`
 (`use-history.ts`), never `l.effects` directly, exactly as with `layerKind`, and
 every pre-existing save, project JSON and history snapshot keeps working with no
@@ -192,9 +193,11 @@ zero-radius effect produces identical SVG output).
 `trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
 is the reason they live on the layer rather than in `trixel-settings`: they are
 authored content, and putting them there costs nothing to persist. They are a
-list so further effects can be added without re-plumbing; today there are three
-(round corners, outline and glow) and all three may sit on the same layer. Hatch
-layers are excluded — line work has no filled region to reshape.
+list so further effects can be added without re-plumbing; today there are four
+(round corners, outline, glow and adjust colour) and all four may sit on the same
+layer. Hatch layers are excluded — line work has no filled region to reshape, and
+the colour filter follows them out rather than being the one effect with a
+different eligibility rule.
 
 `activeEffects` **switches on the effect type** rather than testing one field.
 It used to be a two-way ternary; a third effect with two scalars broke that, and
@@ -397,6 +400,59 @@ The region is the caster's box grown by `GLOW_EXTENT_SIGMAS`.
 stencil cut gaps, welding the pieces back together and undoing the flex the cut
 exists to provide. Same reasoning that keeps hatch out of the cut. The plotter,
 cutting and 3D exports never saw rounding or outline either and do not see this.
+
+### Adjust colour
+
+Brightness, hue and saturation sliders over a layer's colours, each −100…100 and
+each 0 by default. `src/lib/color-adjust.ts` is the maths (pure); the UI is a
+fourth Effects row in `LayerPanel`.
+
+**The one effect that is not geometry**, which is what makes its plumbing
+different: the other three had somewhere to put a radius, a weight or a shadow in
+every backend, while this one has to reach every place a fill colour is *emitted*
+— a dozen sites across the canvas, the PNG path and the two SVG exporters. So it
+is threaded into the **two places a step's colours are produced** instead:
+`generateTriangles` and `stepRegionGeometry` take an optional `adjust`, and no
+emit code changed at all. Only `GridCanvas`'s inline colour-grouping loop, which
+resolves its own fills rather than going through either, applies it by hand.
+`stepColorAdjust` reads it off the step like the other three `step*` readers, and
+returns **`undefined`** rather than an identity function — that is what keeps an
+unadjusted layer on byte-for-byte the path it walked before this existed
+(verified: a zero-valued *or* disabled effect exports an identical SVG).
+
+**Applied to the resolved hex, not to the encoded value.** The adjusted colour is
+continuous and almost never lands on a palette swatch; quantizing back to one (as
+the pattern brush does) would make the sliders step rather than glide and would
+throw away the very shades the effect exists to reach. `painted` keeps its
+encoded values, so the layer still follows the global hue/saturation shift
+*underneath* the filter.
+
+**The maths is HSL**, the space `PALETTE_DEFS` is defined in, so a hue rotation
+moves a swatch exactly as changing its palette's hue would — and the round trip
+through `hexToHsl` is exact on every palette colour (measured: 0/255 max channel
+delta). Each slider is the same lerp in both directions, `towards(v, t)`: to 100
+for positive, to 0 for negative. That is why ±100 lands on pure white, pure black
+and flat grey *exactly*, and why the ends of the travel still do something —
+adding an offset and clamping instead leaves the last third of the slider inert.
+Hue at ±100 is a half turn (`ADJUST_HUE_AT_FULL`), so the two ends meet and every
+hue is reachable; applying +100 twice is the identity.
+
+**Regions are found before the filter, never after.** `stepRegionGeometry` runs
+the ring walk on the painted colours and adjusts the resulting `fill`, so the
+filter can only recolour a boundary, never move one. Two regions it collapses
+onto one colour stay two rings — invisible for a fill, and for an outline just
+means the shared edge is stroked twice in that one colour.
+
+Coalescing breaks around it for free: `buildRenderPlan` splits a run wherever
+`activeEffects` is non-empty, which is exactly what stops one layer's filter from
+recolouring the layer flattened next to it (verified — the neighbour keeps its
+original hex).
+
+The glow's own colour is **not** filtered, on either the casting layer or any
+other: it is authored directly in a colour picker rather than being layer
+content. Honoured in the canvas preview and the PNG/SVG (full + cropped) exports,
+i.e. exactly where the other three are, and likewise not in the fabrication
+paths.
 
 ### Rounding in the cutting export
 
@@ -632,11 +688,12 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, `drawArtworkPlan` (the shared world-space draw loop), 40 MB limit |
 | `src/lib/round-corners.ts` | Corner-rounding + outline effects: `regionRings`, `boundaryVertexDegrees`, `roundRing` (degree-2 test) / `roundPolygon` (geometry + run clamp, no eligibility policy), `roundedRegions` / `stepRegionGeometry` (rounded or plain, one shape), `ROUND_RADIUS_AT_FULL`, `OUTLINE_WEIGHT_AT_FULL`, `traceRoundedRing` (canvas) / `roundedRingToPath` (SVG) / `flattenRoundedRing` (clipping). Pure, no DOM |
 | `src/lib/glow.ts` | Glow effect: `silhouetteGeometry` (union outline via the uniform-colour trick), `glowReceivers`' geometry, `drawGlow` (canvas), `glowSVG` (`<filter>` + receiver `<clipPath>`), `glowCanvasFilter`/`ctxWorldScale` (the σ and device-pixel conversion), `rotateRoundedRings`, `GLOW_RADIUS_AT_FULL`. Pure except `drawGlow` |
+| `src/lib/color-adjust.ts` | Adjust-colour effect: `adjustHex`, `colorAdjuster` (memoised, `undefined` for a no-op), `isIdentityAdjustment`, `ADJUST_HUE_AT_FULL`. Pure, no DOM |
 | `src/lib/region-outline.ts` | Region boundaries shared by the plotter and apparel exports: `outlineSegments` (+ `silhouette` option), `joinRuns` (1-D interval union + mask subtraction), `segToPoints`, `edgeDir`, `RawSeg`. Pure, no DOM |
 | `src/lib/apparel-export.ts` | PNG-with-alpha garment export: `artworkBounds`, `apparelPixelSize` (row snap + `EDGE_PAD`), `apparelCutSegments` (boundary cut) / `outlineCutCircles` (stroked-layer vertex break points), `CutCircle`, `cutPieceReport`, `renderApparelToCanvas`, `renderApparelPreview`. Pure except the `render*` functions |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
 | `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox` (+ `HatchAlign`), `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
-| `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
+| `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), the per-step effect readers (`stepRoundRadius`, `stepOutlineWeight`, `stepGlow`, `stepColorAdjust`, `glowReceivers`), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
 | `src/lib/hatchify.ts` | Convert-to-hatches maths: `hatchify`, `WEDGE_DIR`, `reduceLevels`, `HatchifySettings`. Pure, no DOM |
 | `src/lib/hatchify-render.ts` | `renderHatchifyPreview` — fits a trixel set to a canvas and runs the GridCanvas draw loop |
 | `src/lib/plotter-export.ts` | Single-pen plotter export: `buildPlotterPlot`, `plotterDensities`, `plotterLayout` (page/margin/fit), `plotterSVG`, the interval union + outline subtraction, travel ordering. Pure except `renderPlotterPreview` |
@@ -665,8 +722,9 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 - `HexCoord { c, k }` — `src/lib/hex-flower.ts`
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
-- `LayerKind = "fill" | "hatch"`, `Layer`, `LayerEffect`, `RoundCornersEffect`, `OutlineEffect`, `GlowEffect` — `src/hooks/use-history.ts`
+- `LayerKind = "fill" | "hatch"`, `Layer`, `LayerEffect`, `RoundCornersEffect`, `OutlineEffect`, `GlowEffect`, `AdjustColorEffect` — `src/hooks/use-history.ts`
 - `GlowSpec` — `src/lib/glow.ts`
+- `ColorAdjustment` — `src/lib/color-adjust.ts`
 - `Ring`, `RingPoint`, `RoundedRing`, `RoundedCorner`, `RegionRings` — `src/lib/round-corners.ts`
 - `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`

@@ -1,7 +1,7 @@
 // hatch.ts imports only from grid-math, so this does not create a cycle.
 import { mapEncodedColor } from "@/lib/hatch";
 
-function hslToHex(h: number, s: number, l: number): string {
+export function hslToHex(h: number, s: number, l: number): string {
   s = Math.max(0, Math.min(100, s));
   l = Math.max(0, Math.min(100, l));
   s /= 100;

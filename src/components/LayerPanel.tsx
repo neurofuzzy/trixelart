@@ -81,6 +81,16 @@ function GlowGlyph({ className }: { className?: string }) {
   );
 }
 
+/** A half-filled circle: the colour-adjust effect's glyph. */
+function AdjustColorGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className ?? "w-3.5 h-3.5"}>
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" />
+    </svg>
+  );
+}
+
 const DEFAULT_ROUND_RADIUS = 0.5;
 const DEFAULT_OUTLINE_WEIGHT = 0.15;
 const DEFAULT_GLOW_RADIUS = 0.3;
@@ -92,19 +102,39 @@ const EFFECT_LABEL: Record<LayerEffect["type"], string> = {
   roundCorners: "Round corners",
   outline: "Outline",
   glow: "Glow",
+  adjustColor: "Adjust colour",
 };
 
-/** Which numeric fields each effect exposes, in the order they are shown. Keeps
- *  the row markup one loop rather than a branch per effect type. */
-const EFFECT_SLIDERS: Record<
-  LayerEffect["type"],
-  { key: string; label: string }[]
-> = {
+/**
+ * Which numeric fields each effect exposes, in the order they are shown. Keeps
+ * the row markup one loop rather than a branch per effect type.
+ *
+ * The geometry effects are all 0–1 fractions shown as a percentage, so their
+ * range is the default; colour adjust is signed −100…100 in its own units and
+ * carries its own, which is why the shape has a range at all.
+ */
+interface EffectSlider {
+  key: string;
+  label: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Multiplier from stored value to displayed number. */
+  scale?: number;
+  unit?: string;
+}
+
+const EFFECT_SLIDERS: Record<LayerEffect["type"], EffectSlider[]> = {
   roundCorners: [{ key: "radius", label: "Radius" }],
   outline: [{ key: "weight", label: "Weight" }],
   glow: [
     { key: "radius", label: "Radius" },
     { key: "opacity", label: "Opacity" },
+  ],
+  adjustColor: [
+    { key: "brightness", label: "Bright", min: -100, max: 100, step: 1, scale: 1, unit: "" },
+    { key: "hue", label: "Hue", min: -100, max: 100, step: 1, scale: 1, unit: "" },
+    { key: "saturation", label: "Sat", min: -100, max: 100, step: 1, scale: 1, unit: "" },
   ],
 };
 
@@ -117,6 +147,7 @@ function EffectGlyph({
 }) {
   if (type === "roundCorners") return <RoundCornersGlyph className={className} />;
   if (type === "outline") return <OutlineGlyph className={className} />;
+  if (type === "adjustColor") return <AdjustColorGlyph className={className} />;
   return <GlowGlyph className={className} />;
 }
 
@@ -164,6 +195,8 @@ export function LayerPanel({
   const hasRound = effects.some((e) => e.type === "roundCorners");
   const hasOutline = effects.some((e) => e.type === "outline");
   const hasGlow = effects.some((e) => e.type === "glow");
+  const hasAdjust = effects.some((e) => e.type === "adjustColor");
+  const allAdded = hasRound && hasOutline && hasGlow && hasAdjust;
 
   // A glow is clipped to the solid cells beneath it, so on the bottom layer it
   // renders nothing at all. That is correct, but it looks like a broken slider
@@ -325,12 +358,8 @@ export function LayerPanel({
               <DropdownMenuTrigger asChild>
                 <button
                   className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-                  disabled={hasRound && hasOutline && hasGlow}
-                  title={
-                    hasRound && hasOutline && hasGlow
-                      ? "No more effects available"
-                      : "Add effect"
-                  }
+                  disabled={allAdded}
+                  title={allAdded ? "No more effects available" : "Add effect"}
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </button>
@@ -392,6 +421,26 @@ export function LayerPanel({
                   <GlowGlyph className="w-3.5 h-3.5 opacity-60" />
                   Glow
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={hasAdjust}
+                  onClick={() =>
+                    commit(() =>
+                      onSetLayerEffects(activeLayerIdx, [
+                        ...effects,
+                        {
+                          type: "adjustColor",
+                          brightness: 0,
+                          hue: 0,
+                          saturation: 0,
+                          enabled: true,
+                        },
+                      ]),
+                    )
+                  }
+                >
+                  <AdjustColorGlyph className="w-3.5 h-3.5 opacity-60" />
+                  Adjust colour
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -449,33 +498,36 @@ export function LayerPanel({
                   slider, but only commits on release. Committing per event would
                   push a hundred entries for one drag and blow the 50-deep undo
                   stack away in a single gesture. */}
-              {EFFECT_SLIDERS[effect.type].map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0 w-12">
-                    {label}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={(effect as unknown as Record<string, number>)[key]}
-                    disabled={!effect.enabled}
-                    onChange={(e) =>
-                      patchEffect(i, { [key]: Number(e.target.value) })
-                    }
-                    onPointerUp={onCommit}
-                    onKeyUp={onCommit}
-                    className="flex-1 min-w-0 h-2 accent-cyan-500 disabled:opacity-40"
-                  />
-                  <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
-                    {Math.round(
-                      (effect as unknown as Record<string, number>)[key] * 100,
-                    )}
-                    %
-                  </span>
-                </label>
-              ))}
+              {EFFECT_SLIDERS[effect.type].map(
+                ({ key, label, min = 0, max = 1, step = 0.01, scale = 100, unit = "%" }) => (
+                  <label key={key} className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0 w-12">
+                      {label}
+                    </span>
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={(effect as unknown as Record<string, number>)[key]}
+                      disabled={!effect.enabled}
+                      onChange={(e) =>
+                        patchEffect(i, { [key]: Number(e.target.value) })
+                      }
+                      onPointerUp={onCommit}
+                      onKeyUp={onCommit}
+                      className="flex-1 min-w-0 h-2 accent-cyan-500 disabled:opacity-40"
+                    />
+                    <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
+                      {Math.round(
+                        (effect as unknown as Record<string, number>)[key] *
+                          scale,
+                      )}
+                      {unit}
+                    </span>
+                  </label>
+                ),
+              )}
 
               {effect.type === "glow" && (
                 <>

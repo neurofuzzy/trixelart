@@ -12,6 +12,7 @@ import {
   buildRenderPlan,
   drawHatchLayer,
   glowReceivers,
+  stepColorAdjust,
   stepGlow,
   stepRoundRadius,
   stepOutlineWeight,
@@ -111,7 +112,11 @@ export function GridCanvas({
         return {
           radius,
           outline,
-          regions: stepRegionGeometry(step.painted, radius),
+          regions: stepRegionGeometry(
+            step.painted,
+            radius,
+            stepColorAdjust(step),
+          ),
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -244,6 +249,12 @@ export function GridCanvas({
         continue;
       }
 
+      // Built once per step so its memo covers the whole layer; `undefined`
+      // unless a colour-adjust effect is on, which keeps the common case on the
+      // path it has always taken. The rounded/outlined branch above needs no
+      // equivalent — `stepRegionGeometry` has already applied it.
+      const adjust = stepColorAdjust(step);
+
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {
         for (let q = minQ; q <= maxQ; q++) {
@@ -251,7 +262,8 @@ export function GridCanvas({
             const key = `${q},${r},${type}`;
             const fill = step.painted[key];
             if (fill) {
-              const hex = resolveColor(fill);
+              const resolved = resolveColor(fill);
+              const hex = adjust ? adjust(resolved) : resolved;
               const list = colorGroups.get(hex);
               if (list) list.push({ q, r, type });
               else colorGroups.set(hex, [{ q, r, type }]);
