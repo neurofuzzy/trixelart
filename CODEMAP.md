@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-05 06:18:30
-# Files: 88
-# Lines of code: ~20765
+# Last updated: 2026-08-05 06:55:46
+# Files: 89
+# Lines of code: ~20840
 ```
 - **/app**
   - **/lib**
@@ -69,7 +69,7 @@
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
   - [GridSettingsPanel.tsx](../src/components/GridSettingsPanel.tsx)
-    - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer — same she...
+    - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer. One of th...
   - [HatchBar.tsx](../src/components/HatchBar.tsx)
     - Function: `HatchGlyph` - Lines at the family's true angle. Used both for...
     - Function: `HatchBar`
@@ -81,6 +81,10 @@
     - Function: `Model3DPreview` - Orbitable 3D preview of the export model, lit b...
   - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
     - Function: `PalettePicker`
+  - [PanelShell.tsx](../src/components/PanelShell.tsx)
+    - Type: `PanelId` - The four right-hand drawers. Exactly one may be...
+    - Function: `panelForTool` - The drawer a tool owns, or `null` for the tools...
+    - Function: `PanelShell` - The drawer shell: full-height, flush to the rig...
   - [PatternPalette.tsx](../src/components/PatternPalette.tsx)
     - Function: `PatternPalette`
   - [PatternPanel.tsx](../src/components/PatternPanel.tsx)
