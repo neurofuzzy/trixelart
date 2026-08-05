@@ -31,7 +31,18 @@ export interface RoundCornersEffect {
 /** A non-destructive per-layer geometry filter. `painted` is never touched —
  *  effects are applied when geometry is built for rendering, so switching one
  *  off restores the artwork exactly. */
-export type LayerEffect = RoundCornersEffect;
+export interface OutlineEffect {
+  type: "outline";
+  /** 0–1 fraction of one cell stride; the stroke width of the region boundary.
+   *  See `OUTLINE_WEIGHT_AT_FULL`. */
+  weight: number;
+  enabled: boolean;
+}
+
+/** A non-destructive per-layer geometry filter. `painted` is never touched —
+ *  effects are applied when geometry is built for rendering, so switching one
+ *  off restores the artwork exactly. */
+export type LayerEffect = RoundCornersEffect | OutlineEffect;
 
 /** Reads a layer's effects, defaulting an absent field to none. Use this rather
  *  than touching `.effects` directly, exactly as with `layerKind`. */
@@ -42,7 +53,9 @@ export const layerEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
  *  effect list that reduces to nothing here must render byte-identically to no
  *  effect at all, which is what keeps existing exports unchanged. */
 export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
-  layerEffects(l).filter((e) => e.enabled && e.radius > 0);
+  layerEffects(l).filter((e) =>
+    e.enabled && (e.type === "roundCorners" ? e.radius > 0 : e.weight > 0),
+  );
 
 export interface Layer {
   id: string;

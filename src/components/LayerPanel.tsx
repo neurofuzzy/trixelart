@@ -43,7 +43,24 @@ function RoundCornersGlyph({ className }: { className?: string }) {
   );
 }
 
+/** An outlined square: the outline effect's glyph. */
+function OutlineGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className ?? "w-3.5 h-3.5"}>
+      <rect
+        x="3"
+        y="3"
+        width="10"
+        height="10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
 const DEFAULT_ROUND_RADIUS = 0.5;
+const DEFAULT_OUTLINE_WEIGHT = 0.15;
 
 export function LayerPanel({
   layers,
@@ -83,9 +100,15 @@ export function LayerPanel({
   const showEffects = activeLayer && layerKind(activeLayer) === "fill";
   const effects = activeLayer ? layerEffects(activeLayer) : [];
   const hasRound = effects.some((e) => e.type === "roundCorners");
+  const hasOutline = effects.some((e) => e.type === "outline");
 
   const patchEffect = (i: number, patch: Partial<LayerEffect>) => {
-    const next = effects.map((e, j) => (j === i ? { ...e, ...patch } : e));
+    const next = effects.map((e, j) =>
+      // Call sites only spread the field belonging to that effect's own type,
+      // so the cast is safe: `{ radius }` into a roundCorners entry, `{ weight }`
+      // into an outline entry.
+      j === i ? ({ ...e, ...patch } as LayerEffect) : e,
+    );
     onSetLayerEffects(activeLayerIdx, next);
   };
 
@@ -227,8 +250,12 @@ export function LayerPanel({
               <DropdownMenuTrigger asChild>
                 <button
                   className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-                  disabled={hasRound}
-                  title={hasRound ? "No more effects available" : "Add effect"}
+                  disabled={hasRound && hasOutline}
+                  title={
+                    hasRound && hasOutline
+                      ? "No more effects available"
+                      : "Add effect"
+                  }
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </button>
@@ -251,6 +278,24 @@ export function LayerPanel({
                 >
                   <RoundCornersGlyph className="w-3.5 h-3.5 opacity-60" />
                   Round corners
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={hasOutline}
+                  onClick={() =>
+                    commit(() =>
+                      onSetLayerEffects(activeLayerIdx, [
+                        ...effects,
+                        {
+                          type: "outline",
+                          weight: DEFAULT_OUTLINE_WEIGHT,
+                          enabled: true,
+                        },
+                      ]),
+                    )
+                  }
+                >
+                  <OutlineGlyph className="w-3.5 h-3.5 opacity-60" />
+                  Outline
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -283,8 +328,12 @@ export function LayerPanel({
                   )}
                 </button>
                 <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <RoundCornersGlyph className="w-3 h-3 shrink-0 opacity-60" />
-                  Round corners
+                  {effect.type === "roundCorners" ? (
+                    <RoundCornersGlyph className="w-3 h-3 shrink-0 opacity-60" />
+                  ) : (
+                    <OutlineGlyph className="w-3 h-3 shrink-0 opacity-60" />
+                  )}
+                  {effect.type === "roundCorners" ? "Round corners" : "Outline"}
                 </span>
                 <button
                   className="ml-auto inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
@@ -308,22 +357,31 @@ export function LayerPanel({
                   stack away in a single gesture. */}
               <label className="flex items-center gap-2">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0">
-                  Radius
+                  {effect.type === "roundCorners" ? "Radius" : "Weight"}
                 </span>
                 <input
                   type="range"
                   min={0}
                   max={1}
                   step={0.01}
-                  value={effect.radius}
+                  value={effect.type === "roundCorners" ? effect.radius : effect.weight}
                   disabled={!effect.enabled}
-                  onChange={(e) => patchEffect(i, { radius: Number(e.target.value) })}
+                  onChange={(e) =>
+                    patchEffect(i, {
+                      [effect.type === "roundCorners" ? "radius" : "weight"]:
+                        Number(e.target.value),
+                    })
+                  }
                   onPointerUp={onCommit}
                   onKeyUp={onCommit}
                   className="flex-1 min-w-0 h-2 accent-cyan-500 disabled:opacity-40"
                 />
                 <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
-                  {Math.round(effect.radius * 100)}%
+                  {Math.round(
+                    (effect.type === "roundCorners" ? effect.radius : effect.weight) *
+                      100,
+                  )}
+                  %
                 </span>
               </label>
             </div>

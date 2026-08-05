@@ -12,13 +12,14 @@ import {
   buildRenderPlan,
   hatchStrokes,
   hatchStrokesBounds,
+  stepOutlineWeight,
   stepRoundRadius,
   type HatchStroke,
 } from "@/lib/hatch-render";
 import {
   flattenRoundedRing,
-  roundedRegions,
   roundedRingToPath,
+  stepRegionGeometry,
 } from "@/lib/round-corners";
 
 export interface TriangleData {
@@ -294,6 +295,7 @@ export function generateSVG(
           tris: generateTriangles(step.painted),
           painted: step.painted,
           radius: stepRoundRadius(step),
+          outline: stepOutlineWeight(step),
         }
       : { kind: "hatch" as const, strokes: hatchStrokes(step.painted) },
   );
@@ -307,8 +309,23 @@ export function generateSVG(
     if (b.maxY > maxY) maxY = b.maxY;
   };
   for (const step of resolved) {
-    if (step.kind === "fill") grow(computeBounds(step.tris));
-    else grow(hatchStrokesBounds(step.strokes));
+    if (step.kind === "fill") {
+      const b = computeBounds(step.tris);
+      // A stroke is centred on the boundary, so an outlined region reaches
+      // `weight/2` past its fill box on every side.
+      if (step.outline > 0) {
+        grow({
+          minX: b.minX - step.outline / 2,
+          minY: b.minY - step.outline / 2,
+          maxX: b.maxX + step.outline / 2,
+          maxY: b.maxY + step.outline / 2,
+        });
+      } else {
+        grow(b);
+      }
+    } else {
+      grow(hatchStrokesBounds(step.strokes));
+    }
   }
   if (!Number.isFinite(minX)) {
     return wrap(EMPTY_SIZE, EMPTY_SIZE, "", options);
@@ -323,17 +340,20 @@ export function generateSVG(
     .map((step) => {
       if (step.kind === "hatch") return hatchMarkup(step.strokes, ox, oy);
       if (step.tris.length === 0) return "";
-      // A rounded step is inherently merged — the effect is defined on whole
-      // regions — so it ignores the `merge` option rather than offering a
-      // per-triangle variant that could not express an arc.
-      if (step.radius > 0) {
-        return roundedRegions(step.painted, step.radius)
+      // Rounded and outlined steps are inherently merged — the effects are
+      // defined on whole regions — so they ignore the `merge` option rather
+      // than offering a per-triangle variant that could not express an arc.
+      if (step.radius > 0 || step.outline > 0) {
+        return stepRegionGeometry(step.painted, step.radius)
           .map(({ fill, rings }) => {
             const d = rings
               .map((r) => roundedRingToPath(r, fmt, ox, oy))
               .filter(Boolean)
               .join(" ");
             if (!d) return "";
+            if (step.outline > 0) {
+              return `  <path d="${d}" fill="none" stroke="${fill}" stroke-width="${fmt(step.outline)}" stroke-linejoin="round"/>`;
+            }
             return `  <path d="${d}" fill="${fill}"${
               options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
             }/>`;
@@ -535,14 +555,16 @@ export function generateCroppedSVG(
         return hatchMarkup(strokes, 0, 0);
       }
 
-      // A rounded step is clipped as flattened rings rather than as triangles.
-      // Arcs cannot survive Sutherland–Hodgman, but chords can, so the crop
-      // keeps its guarantee that nothing off-crop reaches the file — the same
-      // reason this exporter clips for real instead of using a `<clipPath>`.
+      // A rounded or outlined step is clipped as flattened rings rather than as
+      // triangles. Arcs cannot survive Sutherland–Hodgman, but chords can, so
+      // the crop keeps its guarantee that nothing off-crop reaches the file —
+      // the same reason this exporter clips for real instead of using a
+      // `<clipPath>`.
       const radius = stepRoundRadius(step);
-      if (radius > 0) {
+      const outline = stepOutlineWeight(step);
+      if (radius > 0 || outline > 0) {
         const out: string[] = [];
-        for (const { fill, rings } of roundedRegions(step.painted, radius)) {
+        for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
           const ds: string[] = [];
           for (const ring of rings) {
             const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
@@ -560,11 +582,17 @@ export function generateCroppedSVG(
             );
           }
           if (!ds.length) continue;
-          out.push(
-            `  <path d="${ds.join(" ")}" fill="${fill}"${
-              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-            }/>`,
-          );
+          if (outline > 0) {
+            out.push(
+              `  <path d="${ds.join(" ")}" fill="none" stroke="${fill}" stroke-width="${fmt(outline)}" stroke-linejoin="round"/>`,
+            );
+          } else {
+            out.push(
+              `  <path d="${ds.join(" ")}" fill="${fill}"${
+                options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+              }/>`,
+            );
+          }
         }
         return out.join("\n");
       }

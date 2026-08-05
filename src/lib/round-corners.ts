@@ -142,6 +142,11 @@ function triLatticeVerts(
 export interface RegionRings {
   /** Resolved hex — regions are grouped by what the eye sees, see below. */
   fill: string;
+  /** Encoded colour index of the region's first trixel. Several encodings can
+   *  resolve to one fill, so this is the first seen; the renderers use it to
+   *  draw overlapping outlines in a deterministic colour order. */
+  paletteIdx: number;
+  colorIdx: number;
   rings: Ring[];
 }
 
@@ -259,6 +264,9 @@ export function boundaryVertexDegrees(
 export function regionRings(painted: Record<string, string>): RegionRings[] {
   /** A triangle as its three lattice vertices, already wound CW. */
   const byColor = new Map<string, [number, number][][]>();
+  /** The encoded colour index of each region, taken from the first trixel that
+   *  created it. */
+  const byIdx = new Map<string, { paletteIdx: number; colorIdx: number }>();
 
   for (const key in painted) {
     const encoded = painted[key];
@@ -280,7 +288,11 @@ export function regionRings(painted: Record<string, string>): RegionRings[] {
     const fill = resolveColor(encoded);
     const list = byColor.get(fill);
     if (list) list.push(points);
-    else byColor.set(fill, [points]);
+    else {
+      byColor.set(fill, [points]);
+      const d = decodeColor(encoded);
+      if (d) byIdx.set(fill, { paletteIdx: d.paletteIdx, colorIdx: d.colorIdx });
+    }
   }
 
   const out: RegionRings[] = [];
@@ -356,8 +368,21 @@ export function regionRings(painted: Record<string, string>): RegionRings[] {
       }
     }
 
-    if (rings.length) out.push({ fill, rings });
+    if (rings.length) {
+      const idx =
+        byIdx.get(fill) ?? {
+          paletteIdx: Number.MAX_SAFE_INTEGER,
+          colorIdx: Number.MAX_SAFE_INTEGER,
+        };
+      out.push({ fill, paletteIdx: idx.paletteIdx, colorIdx: idx.colorIdx, rings });
+    }
   }
+
+  // Fill order is irrelevant (opaque, abutting regions), but outlines overlap
+  // where two regions share a boundary — each stroke is centred on it — so the
+  // drawing order decides which colour wins. Colour index first, then palette,
+  // makes that deterministic and light-on-top.
+  out.sort((a, b) => a.colorIdx - b.colorIdx || a.paletteIdx - b.paletteIdx);
 
   return out;
 }
@@ -572,6 +597,33 @@ export function roundedRegions(
   }));
 }
 
+/**
+ * World weight at slider 100%: one cell stride, the same convention as
+ * `ROUND_RADIUS_AT_FULL`. The outline slider is stored as a 0–1 fraction so the
+ * saved value is independent of `SIDE`, but the stroke it denotes is an
+ * absolute width — the same width at every edge of the layer.
+ */
+export const OUTLINE_WEIGHT_AT_FULL = SIDE;
+
+/**
+ * A fill step's region rings, rounded when `radius > 0` and plain otherwise.
+ *
+ * Unrounded rings come back with `radius: 0` corners so a single trace/stroke
+ * path handles both: the outline effect strokes them, corner rounding fills
+ * them. Returning one shape for both keeps the preview and the two raster/vector
+ * exporters from drifting apart over what a region boundary is.
+ */
+export function stepRegionGeometry(
+  painted: Record<string, string>,
+  radius: number,
+): { fill: string; rings: RoundedRing[] }[] {
+  if (radius > 0) return roundedRegions(painted, radius);
+  return regionRings(painted).map(({ fill, rings }) => ({
+    fill,
+    rings: rings.map((r) => r.map((p) => ({ x: p.x, y: p.y, radius: 0 }))),
+  }));
+}
+
 /** Where a corner's arc leaves the incoming edge and rejoins the outgoing one,
  *  plus which way it turns. `null` for a corner that stays sharp. */
 interface Tangents {
@@ -697,7 +749,9 @@ export function traceRoundedRing(ctx: CanvasPath, ring: RoundedRing): void {
     const cur = ring[i];
     const t = tans[i];
     if (!t) {
-      ctx.lineTo(cur.x, cur.y);
+      // `ringStart` has already moved onto ring[0] (the only vertex a null
+      // first tangent leaves there), so the leading edge must not be repeated.
+      if (i !== 0) ctx.lineTo(cur.x, cur.y);
       continue;
     }
     if (i !== 0) ctx.lineTo(t.enter[0], t.enter[1]);
@@ -804,7 +858,9 @@ export function roundedRingToPath(
     const cur = ring[i];
     const t = tans[i];
     if (!t) {
-      parts.push(`L${pt([cur.x, cur.y])}`);
+      // `ringStart` has already moved onto ring[0], so the leading edge must
+      // not be repeated as a zero-length `L`.
+      if (i !== 0) parts.push(`L${pt([cur.x, cur.y])}`);
       continue;
     }
     if (i !== 0) parts.push(`L${pt(t.enter)}`);

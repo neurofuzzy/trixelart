@@ -1,6 +1,7 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
+import { OUTLINE_WEIGHT_AT_FULL } from "@/lib/round-corners";
 import {
   clipSegmentToRect,
   clipSegmentToTriangle,
@@ -30,12 +31,27 @@ export function stepRoundRadius(step: RenderStep): number {
   return 0;
 }
 
+/** The outline stroke width a fill step should be drawn with, in world units,
+ *  or 0 for none. Like `stepRoundRadius`, an effect whose weight is zero is a
+ *  no-op and must render identically to no effect at all. */
+export function stepOutlineWeight(step: RenderStep): number {
+  if (step.kind !== "fill") return 0;
+  for (const e of step.effects) {
+    if (e.type === "outline" && e.enabled) {
+      return e.weight * OUTLINE_WEIGHT_AT_FULL;
+    }
+  }
+  return 0;
+}
+
 /** Two effect stacks are interchangeable when they would draw identically. */
 function sameEffects(a: LayerEffect[], b: LayerEffect[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((e, i) => {
     const o = b[i];
-    return e.type === o.type && e.enabled === o.enabled && e.radius === o.radius;
+    if (e.type !== o.type || e.enabled !== o.enabled) return false;
+    if (e.type === "outline") return o.type === "outline" && e.weight === o.weight;
+    return o.type === "roundCorners" && e.radius === o.radius;
   });
 }
 
