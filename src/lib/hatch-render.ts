@@ -1,7 +1,12 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
-import { OUTLINE_WEIGHT_AT_FULL } from "@/lib/round-corners";
+import { OUTLINE_WEIGHT_AT_FULL, type RoundedRing } from "@/lib/round-corners";
+import {
+  GLOW_RADIUS_AT_FULL,
+  silhouetteGeometry,
+  type GlowSpec,
+} from "@/lib/glow";
 import {
   clipSegmentToRect,
   clipSegmentToTriangle,
@@ -42,6 +47,60 @@ export function stepOutlineWeight(step: RenderStep): number {
     }
   }
   return 0;
+}
+
+/** The glow a fill step casts, or `null` for none. Like the other two step
+ *  readers, an effect that reduces to a no-op must render identically to no
+ *  effect at all — `activeEffects` has already dropped those. */
+export function stepGlow(step: RenderStep): GlowSpec | null {
+  if (step.kind !== "fill") return null;
+  for (const e of step.effects) {
+    if (e.type === "glow" && e.enabled) {
+      return {
+        sigma: e.radius * GLOW_RADIUS_AT_FULL,
+        opacity: e.opacity,
+        color: resolveColor(e.color),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Per step index, the surface its glow lands on: the accumulated silhouettes of
+ * every *fill* step below it, each honouring its own round radius. `null` where
+ * the step casts no glow, or where nothing lies beneath it to catch one.
+ *
+ * A shadow falls on a surface rather than hanging over bare canvas, so this is
+ * what the four backends clip the blur to. Computing it here rather than in each
+ * of them is the same reasoning as `stepRegionGeometry`: they cannot disagree
+ * about what "below" means if there is only one definition.
+ *
+ * Hatch steps contribute nothing — line work bounds no solid area, the same
+ * reason the apparel cut reads fill layers only. A lower layer carrying an
+ * outline effect contributes its whole region rather than just its stroke
+ * ribbon; a shadow landing inside a hollow outline is a far smaller wrong than
+ * the bookkeeping to avoid it.
+ */
+export function glowReceivers(plan: RenderStep[]): (RoundedRing[] | null)[] {
+  const out: (RoundedRing[] | null)[] = plan.map(() => null);
+
+  // Nothing above the topmost glow needs accumulating, and most documents have
+  // no glow at all — in which case this returns immediately without walking a
+  // single region.
+  let lastGlow = -1;
+  for (let i = 0; i < plan.length; i++) if (stepGlow(plan[i])) lastGlow = i;
+  if (lastGlow < 0) return out;
+
+  const below: RoundedRing[] = [];
+  for (let i = 0; i <= lastGlow; i++) {
+    const step = plan[i];
+    if (stepGlow(step) && below.length) out[i] = below.slice();
+    if (step.kind === "fill") {
+      below.push(...silhouetteGeometry(step.painted, stepRoundRadius(step)));
+    }
+  }
+  return out;
 }
 
 /**

@@ -192,9 +192,14 @@ zero-radius effect produces identical SVG output).
 `trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
 is the reason they live on the layer rather than in `trixel-settings`: they are
 authored content, and putting them there costs nothing to persist. They are a
-list so a second effect can be added without re-plumbing; today two change
-geometry (round corners and outline), and both may sit on the same layer. Hatch
+list so further effects can be added without re-plumbing; today there are three
+(round corners, outline and glow) and all three may sit on the same layer. Hatch
 layers are excluded — line work has no filled region to reshape.
+
+`activeEffects` **switches on the effect type** rather than testing one field.
+It used to be a two-way ternary; a third effect with two scalars broke that, and
+the switch is what keeps "an effect that reduces to nothing renders
+byte-identically to no effect" true for each type's own definition of nothing.
 
 ### Round corners
 
@@ -311,6 +316,87 @@ on pan, zoom, hover and the ant-march tick, none of which change geometry. The
 hue and saturation offsets are dependencies of that memo even though they are not
 arguments — `resolveColor` reads them from module state, and without them a
 palette shift leaves stale colours and stale region boundaries baked in.
+
+### Glow
+
+A non-directional drop shadow cast by a layer. `src/lib/glow.ts` is the maths and
+both renderers; the UI is a third Effects row in `LayerPanel`.
+
+**Two rules define it, and everything else follows from them.** It draws *under*
+the layer that owns it — the layer casts, it does not receive — and it lands
+**only on the solid cells of the fill layers below**. A shadow falls on a
+surface; it does not hang in mid-air over bare canvas. So a glow on the
+bottommost fill layer renders **nothing at all**, which is correct and is why the
+panel says so inline rather than leaving it to look like a dead slider.
+
+**This is the first effect that is not pure geometry**, and the first thing in
+the codebase to emit `<defs>`, `<filter>` or `<clipPath>` — all three of which
+the SVG exporters otherwise refuse, in three documented places. The refusal
+still stands everywhere else. It cannot stand here: the visible shadow is
+(blurred raster) ∩ (surface below), and **blur spreads**, so there is no polygon
+to emit and nothing for Sutherland–Hodgman to cut. A `<clipPath>` is the only
+representation, not a shortcut around doing it properly.
+
+Chosen over a stepped stack of offset strokes (which would have been plain paths
+and universally editable) with the trade-off on the table: browsers and
+**Inkscape** render `feGaussianBlur` exactly — Inkscape's own Blur *is*
+`feGaussianBlur` — while **Illustrator** imports it as a non-editable filter
+effect and may rasterise or drop it on re-save, and **Affinity Designer** ignores
+SVG filters on import. Known and accepted; do not treat it as a bug.
+
+**The silhouette costs no new geometry code.** `regionRings` groups by
+`resolveColor` and skips any value `decodeColor` rejects, so rewriting every cell
+to one constant collapses a layer's colours into a single region and the existing
+ring walk returns its outline — and hatch values stay excluded structurally, as
+they are for the other two effects. `silhouetteGeometry` is that, and passing the
+layer's own round radius is why a rounded layer casts a *rounded* shadow with no
+extra work. (It is not quite the union of the per-colour rounded regions: a
+vertex where an interior colour boundary meets the silhouette is degree 4 in the
+colour-split walk and stays sharp, but degree 2 here and rounds. The difference
+is a fraction of the blur.)
+
+**The receiver is computed once, in `glowReceivers`, not per backend** — the same
+reasoning as `stepRegionGeometry`. It accumulates every *fill* step below,
+each honouring its own radius; hatch steps contribute nothing, since line work
+bounds no solid area. A lower layer carrying an outline effect contributes its
+whole region rather than just its stroke ribbon. `glowReceivers` returns
+immediately when nothing in the plan casts, so a glow-free document walks no
+regions at all.
+
+**The document box does not grow.** Unlike outline, which reaches `weight/2` past
+its fill and grows every exporter's bounds, a glow is clipped to content already
+inside the box. Verified: a glow-free export is byte-identical to before, in both
+the full and the cropped SVG.
+
+**Canvas parity has exactly one trap, and it is not the one it looks like.**
+
+- `blur(N)` takes the standard deviation **directly** — the same quantity SVG's
+  `stdDeviation` names, so no conversion. It is `box-shadow`, not `filter: blur`,
+  whose length is 2σ. Assuming the factor of two made the preview twice as soft
+  as the file; measured in Chrome, `blur(10px)` and `blur(20px)` produce σ of
+  exactly 10 and 20.
+- `ctx.filter` lengths are **device pixels and ignore the CTM** (verified: the
+  same `blur(10px)` measures 10px of σ at CTM scale 1 and at scale 2), so the
+  world σ must be scaled by hand. `ctxWorldScale` reads it off the live matrix
+  rather than taking it as an argument, so it cannot drift from the transform the
+  caller actually set.
+- `color-interpolation-filters="sRGB"` is **insurance, not a fix**. SVG 1.1
+  defaults filters to linearRGB while canvas blurs in sRGB, but measured it
+  changes nothing here — the caster is one flat colour, so the blur ramps only
+  alpha, which carries no gamma. Keep it (it pins the result against the
+  renderer's default and stays correct if the chain ever grows an
+  `feFlood`/`feComposite` that mixes colours) but do not cite it as the reason a
+  density matches.
+
+`filterUnits="userSpaceOnUse"` with an explicit region *is* load-bearing: the
+default region is `-10%`/`120%` of the source bbox and visibly crops a wide blur.
+The region is the caster's box grown by `GLOW_EXTENT_SIGMAS`.
+
+**Apparel skips glow** — the one raster path that does, via `drawArtworkPlan`'s
+`{ glow: false }`. A soft shadow spreads translucent ink straight across the
+stencil cut gaps, welding the pieces back together and undoing the flex the cut
+exists to provide. Same reasoning that keeps hatch out of the cut. The plotter,
+cutting and 3D exports never saw rounding or outline either and do not see this.
 
 ### Rounding in the cutting export
 
@@ -545,6 +631,7 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, `drawArtworkPlan` (the shared world-space draw loop), 40 MB limit |
 | `src/lib/round-corners.ts` | Corner-rounding + outline effects: `regionRings`, `boundaryVertexDegrees`, `roundRing` (degree-2 test) / `roundPolygon` (geometry + run clamp, no eligibility policy), `roundedRegions` / `stepRegionGeometry` (rounded or plain, one shape), `ROUND_RADIUS_AT_FULL`, `OUTLINE_WEIGHT_AT_FULL`, `traceRoundedRing` (canvas) / `roundedRingToPath` (SVG) / `flattenRoundedRing` (clipping). Pure, no DOM |
+| `src/lib/glow.ts` | Glow effect: `silhouetteGeometry` (union outline via the uniform-colour trick), `glowReceivers`' geometry, `drawGlow` (canvas), `glowSVG` (`<filter>` + receiver `<clipPath>`), `glowCanvasFilter`/`ctxWorldScale` (the σ and device-pixel conversion), `rotateRoundedRings`, `GLOW_RADIUS_AT_FULL`. Pure except `drawGlow` |
 | `src/lib/region-outline.ts` | Region boundaries shared by the plotter and apparel exports: `outlineSegments` (+ `silhouette` option), `joinRuns` (1-D interval union + mask subtraction), `segToPoints`, `edgeDir`, `RawSeg`. Pure, no DOM |
 | `src/lib/apparel-export.ts` | PNG-with-alpha garment export: `artworkBounds`, `apparelPixelSize` (row snap + `EDGE_PAD`), `apparelCutSegments` (boundary cut) / `outlineCutCircles` (stroked-layer vertex break points), `CutCircle`, `cutPieceReport`, `renderApparelToCanvas`, `renderApparelPreview`. Pure except the `render*` functions |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
@@ -578,7 +665,8 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 - `HexCoord { c, k }` — `src/lib/hex-flower.ts`
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
-- `LayerKind = "fill" | "hatch"`, `Layer`, `LayerEffect`, `RoundCornersEffect`, `OutlineEffect` — `src/hooks/use-history.ts`
+- `LayerKind = "fill" | "hatch"`, `Layer`, `LayerEffect`, `RoundCornersEffect`, `OutlineEffect`, `GlowEffect` — `src/hooks/use-history.ts`
+- `GlowSpec` — `src/lib/glow.ts`
 - `Ring`, `RingPoint`, `RoundedRing`, `RoundedCorner`, `RegionRings` — `src/lib/round-corners.ts`
 - `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`

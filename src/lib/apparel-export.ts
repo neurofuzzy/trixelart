@@ -442,7 +442,11 @@ export function renderApparelToCanvas(
   ctx.translate(-bounds.x, -bounds.y);
   ctx.rotate(gridRotation);
 
-  drawArtworkPlan(ctx, layers, 1 / Math.min(view.sx, view.sy));
+  // Glow is deliberately dropped here, unlike every other raster path. A soft
+  // shadow spreads translucent ink straight across the stencil cut gaps below,
+  // welding the pieces back together and undoing the flex the cut exists to
+  // provide — the same reason the cut ignores hatch.
+  drawArtworkPlan(ctx, layers, 1 / Math.min(view.sx, view.sy), { glow: false });
 
   if (cutWorld > 0 && cutSegments.length > 0) {
     // The runs are in **world** coordinates and ride the transform already on

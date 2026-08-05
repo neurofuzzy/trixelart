@@ -8,8 +8,16 @@ import type { HexMode } from "@/components/Footer";
 import { type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
 import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
-import { buildRenderPlan, drawHatchLayer, stepRoundRadius, stepOutlineWeight } from "@/lib/hatch-render";
+import {
+  buildRenderPlan,
+  drawHatchLayer,
+  glowReceivers,
+  stepGlow,
+  stepRoundRadius,
+  stepOutlineWeight,
+} from "@/lib/hatch-render";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
 export function GridCanvas({
   size,
@@ -110,6 +118,26 @@ export function GridCanvas({
     [plan, hueOffset, saturationOffset],
   );
 
+  // Glow geometry, memoised on the same key and for the same reason. Kept apart
+  // from `effectPlan` because a glow needs two shapes rather than one: the
+  // caster (this step's own silhouette) and the receiver (everything below it).
+  // Entries are `null` for steps that cast nothing, or that have nothing beneath
+  // them to catch it.
+  const glowPlan = useMemo(() => {
+    const receivers = glowReceivers(plan);
+    return plan.map((step, si) => {
+      const spec = stepGlow(step);
+      const receiver = receivers[si];
+      if (!spec || !receiver) return null;
+      return {
+        spec,
+        receiver,
+        caster: silhouetteGeometry(step.painted, stepRoundRadius(step)),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, hueOffset, saturationOffset]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0 || !mounted) return;
@@ -182,6 +210,11 @@ export function GridCanvas({
         }, view.zoom);
         continue;
       }
+
+      // Under this step's own fills, and clipped to the layers below: the layer
+      // casts the shadow, it does not receive it.
+      const glow = glowPlan[si];
+      if (glow) drawGlow(ctx, glow.spec, glow.caster, glow.receiver);
 
       // Corner rounding and outlines draw whole regions, so they cannot be
       // viewport-culled the way loose triangles are — a region reaches past the
@@ -754,7 +787,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, plan, effectPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
+  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
 
   return (
     <canvas
