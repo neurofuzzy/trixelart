@@ -1851,6 +1851,7 @@ export default function TrixelGrid() {
         captureMode={captureMode}
         cloneSourceSet={cloneSource !== null}
         tooltip={tooltip}
+        hasSelection={selectedHexes.length > 0}
         panel={panel}
         onTogglePanel={togglePanel}
       />

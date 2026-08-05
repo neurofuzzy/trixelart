@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-05 07:09:20
+# Last updated: 2026-08-05 07:16:23
 # Files: 89
-# Lines of code: ~20984
+# Lines of code: ~21081
 ```
 - **/app**
   - **/lib**
@@ -161,7 +161,7 @@
     - [pick-value.ts](../src/lib/tools/pick-value.ts)
       - Function: `pickValueAt` - Adopts whatever is under the cursor as the curr...
     - [select-tool.ts](../src/lib/tools/select-tool.ts)
-      - Variable: `selectTool`
+      - Variable: `selectTool` - Hex selection, and dragging what is inside it. ...
     - [selection-utils.ts](../src/lib/tools/selection-utils.ts)
       - Function: `snapshotKey`
       - Function: `upsertSelectionSnapshot`
@@ -170,6 +170,7 @@
     - [types.ts](../src/lib/tools/types.ts)
       - Type: `Tool`
       - Function: `isToolAllowed` - The single source of truth for which tools a la...
+      - Interface: `SelectItem` - One selected hex's contents, captured at pointe...
       - Interface: `View`
       - Interface: `Pt`
       - Type: `DragState`

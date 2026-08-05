@@ -48,6 +48,13 @@ export function isToolAllowed(t: Tool, kind: "fill" | "hatch"): boolean {
   return kind === "fill" ? t !== "hatch" : !HATCH_BLOCKED_TOOLS.includes(t);
 }
 
+/** One selected hex's contents, captured at pointer-down so a drag can cut and
+ *  paste it without re-reading the map it is mutating. */
+export interface SelectItem {
+  sourceHex: { c: number; k: number };
+  snapshot: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
+}
+
 export interface View {
   x: number;
   y: number;
@@ -112,10 +119,21 @@ export type DragState =
       lastDr: number;
       lastShiftKey: boolean;
       originPainted: Record<string, string>;
-      items: Array<{
-        sourceHex: { c: number; k: number };
-        snapshot: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
-      }>;
+      /** Every layer's painted map at pointer-down, indexed like `layers`. */
+      originLayers: Record<string, string>[];
+      /** The active layer's items — the common path writes only these. */
+      items: SelectItem[];
+      /** Per layer, the same items. ALT-drag moves all of them. */
+      layerItems: SelectItem[][];
+      /** The selection as it was at pointer-down. Kept whole rather than
+       *  derived from `items`, which drops hexes that happened to be empty. */
+      hexes: Array<{ c: number; k: number }>;
+      /** The hex ALT was pressed on, if any. A press that never moves is a
+       *  deselect; one that moves is an all-layer drag. */
+      altHex: { c: number; k: number } | null;
+      /** Whether the last write moved every layer, so releasing ALT knows there
+       *  is something to put back. */
+      movedAll: boolean;
       N: number;
     };
 

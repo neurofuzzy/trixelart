@@ -74,13 +74,14 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Clone | `C` | Clone-stamp from a captured source |
 | Eyedropper | `I` | Pick a painted color |
 | Move | `H` | Drag to translate painted trixels; **ALT-drag moves every layer**. Click without dragging re-origins the lattice on that trixel. Right-click pans the view |
-| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
+| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot. Drag the selection to move its contents — **ALT-drag moves every layer**, SHIFT-drag copies, ALT-*click* still removes a hex from the selection |
 | Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
 | Crop | `X` | Drag handles to set the export region. **No toolbar button** — reached from the hamburger's "Export for Fabric...", and closing its drawer leaves the mode |
 
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)
 - Stroke painting: `getTrianglesOnLine` samples along pointer moves for continuous strokes
+- **ALT means "all layers" on both dragging tools** (move, and dragging a hex selection), read live on every pointer move so it can be pressed or released mid-drag. On the select tool it shares a target with the older ALT-click-to-deselect, and the two are split by gesture: a press that never travels a whole lattice step is a click
 - **The move tool does not compensate the view after a drag.** It used to: the artwork's world position changed and the view shifted the same amount the other way, so on release the piece snapped back to exactly where it started on screen and the drag appeared to do nothing. The *click* branch still compensates, and there it is right — that gesture re-indexes the lattice origin and is meant to leave the picture where it is
 - `setAllPainted` (`useHistory`, on `ToolContext`) writes every layer's map at once; `setPainted` can only address the active layer. Only the move tool's ALT path needs it, and it stays off the common path deliberately — writing the whole stack on every pointer move gives every layer a new identity and rebuilds all their effect geometry
 - `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`. **`changeTool` is the only caller of `setTool`** — it also reconciles the panel slot, so a new tool-switching path must go through it

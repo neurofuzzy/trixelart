@@ -9,7 +9,7 @@
 | `P` | Paint tool |
 | `E` | Erase tool |
 | `H` | Move tool (ALT-drag moves all layers) |
-| `S` | Select tool |
+| `S` | Select tool (ALT-drag a selection moves all layers; ALT-click deselects a hex) |
 | `T` | Stamp tool |
 | `F` | Fill tool |
 | `N` | Pattern brush |

@@ -32,6 +32,7 @@ export function Footer({
   tool,
   captureMode,
   cloneSourceSet,
+  hasSelection,
   tooltip,
   panel,
   onTogglePanel,
@@ -45,6 +46,7 @@ export function Footer({
   tool?: Tool;
   captureMode?: boolean;
   cloneSourceSet?: boolean;
+  hasSelection?: boolean;
   tooltip?: string | null;
   /** Which drawer currently holds the panel slot, or `null`. */
   panel: PanelId | null;
@@ -93,7 +95,9 @@ export function Footer({
           </span>
         ) : tool === "select" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
-            click on a hex to select
+            {hasSelection
+              ? "drag to move — ALT-drag for all layers, SHIFT-drag to copy, ALT-click to deselect"
+              : "click on a hex to select"}
           </span>
         ) : tool === "stamp" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
