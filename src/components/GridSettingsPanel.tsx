@@ -1,18 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { X, Expand } from "lucide-react";
+import { Expand } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PanelShell } from "@/components/PanelShell";
 import { SpreadHexDialog } from "@/components/SpreadHexDialog";
 import type { GridOrientation, HexMode } from "@/components/Footer";
 
 const HEX_CYCLE: HexMode[] = ["world", "honeycomb"];
 
-/**
- * Grid settings as a right-hand drawer — same shell as the pattern and
- * crop/export drawers. It overlays the canvas rather than docking, so toggling
- * it never reflows the artwork.
- */
+/** Grid settings as a right-hand drawer. One of the four `PanelShell` panels;
+ *  see `PanelId` for the slot they share. */
 export function GridSettingsPanel({
   gridDivisions,
   onGridDivisionsChange,
@@ -44,27 +42,12 @@ export function GridSettingsPanel({
     );
 
   return (
-    <aside
-      className="absolute z-40 top-0 right-0 bottom-0 w-96 flex flex-col bg-card/95 backdrop-blur-lg border-l border-white/10 shadow-2xl cursor-default"
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
+    <PanelShell
+      title="Grid Settings"
+      tour="grid-settings-panel"
+      onClose={onClose}
       onPointerEnter={onPointerEnter}
-      data-tour="grid-settings-panel"
     >
-      <header className="flex items-center justify-between px-4 h-11 border-b border-white/10 shrink-0">
-        <span className="text-xs uppercase tracking-widest text-white/70">
-          Grid Settings
-        </span>
-        <button
-          onClick={onClose}
-          title="Close grid settings"
-          className="inline-flex items-center justify-center h-6 w-6 rounded text-white/50 hover:bg-white/10 hover:text-white transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </header>
-
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 p-4">
         <div className="flex flex-col gap-2 shrink-0">
           <span className="text-xs uppercase tracking-wide text-white/60">
@@ -146,6 +129,6 @@ export function GridSettingsPanel({
         onApply={onSpreadHexArtwork}
         onClose={() => setSpreadOpen(false)}
       />
-    </aside>
+    </PanelShell>
   );
 }

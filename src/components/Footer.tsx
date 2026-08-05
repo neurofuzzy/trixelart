@@ -4,6 +4,7 @@ import { Settings, Undo2, Redo2, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Tool } from "@/lib/tools";
+import type { PanelId } from "@/components/PanelShell";
 
 export type HexMode = "world" | "honeycomb";
 export type Symmetry = "off" | "sym60" | "sym120";
@@ -32,10 +33,8 @@ export function Footer({
   captureMode,
   cloneSourceSet,
   tooltip,
-  layersOpen,
-  onToggleLayers,
-  gridSettingsOpen,
-  onToggleGridSettings,
+  panel,
+  onTogglePanel,
 }: {
   gridDivisions: number;
   hexMode: HexMode;
@@ -47,10 +46,9 @@ export function Footer({
   captureMode?: boolean;
   cloneSourceSet?: boolean;
   tooltip?: string | null;
-  layersOpen: boolean;
-  onToggleLayers: () => void;
-  gridSettingsOpen: boolean;
-  onToggleGridSettings: () => void;
+  /** Which drawer currently holds the panel slot, or `null`. */
+  panel: PanelId | null;
+  onTogglePanel: (id: PanelId) => void;
 }) {
   return (
     <div className="flex items-center justify-between p-2 border-t bg-card/90 backdrop-blur-md z-30">
@@ -135,9 +133,9 @@ export function Footer({
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            layersOpen && "bg-accent text-accent-foreground",
+            panel === "layers" && "bg-accent text-accent-foreground",
           )}
-          onClick={onToggleLayers}
+          onClick={() => onTogglePanel("layers")}
           title="Layers"
           data-tour="layers"
         >
@@ -146,9 +144,9 @@ export function Footer({
         <button
           className={cn(
             "inline-flex items-center justify-center h-9 w-9 rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            gridSettingsOpen && "bg-accent text-accent-foreground",
+            panel === "grid" && "bg-accent text-accent-foreground",
           )}
-          onClick={onToggleGridSettings}
+          onClick={() => onTogglePanel("grid")}
           title="Grid settings"
           data-tour="grid-settings"
         >

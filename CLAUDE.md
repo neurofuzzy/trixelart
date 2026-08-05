@@ -79,7 +79,8 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)
 - Stroke painting: `getTrianglesOnLine` samples along pointer moves for continuous strokes
-- `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`
+- `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`. **`changeTool` is the only caller of `setTool`** — it also reconciles the panel slot, so a new tool-switching path must go through it
+- **The four right-hand drawers share one slot** and only one is ever open: `panel: PanelId | null` in `TrixelGrid`, `PanelShell` for the frame. Pattern and Crop &amp; Export are owned by their tool; Layers and Grid Settings are toggled from the footer. See [docs/ui.md](docs/ui.md)
 
 Full keyboard map: [docs/ui.md](docs/ui.md).
 

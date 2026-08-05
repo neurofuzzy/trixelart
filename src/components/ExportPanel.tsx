@@ -5,6 +5,7 @@ import { Crop as CropIcon, Download, Minus, Plus, Scan } from "lucide-react";
 import { resolveColor } from "@/lib/constants";
 import { normalizeProjectFilename } from "@/lib/utils";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
+import { PanelShell } from "@/components/PanelShell";
 import {
   cropDisplayBounds,
   fitCropToPainted,
@@ -147,6 +148,7 @@ export function ExportPanel({
   palettes,
   settings,
   onSettingsChange,
+  onClose,
   onPointerEnter,
 }: {
   /** Visible layers in z-order — hatch has to interleave with fills. */
@@ -158,6 +160,7 @@ export function ExportPanel({
   palettes: { name: string; colors: string[] }[];
   settings: ExportSettings;
   onSettingsChange: (patch: Partial<ExportSettings>) => void;
+  onClose: () => void;
   onPointerEnter: () => void;
 }) {
   const previewRef = useRef<HTMLCanvasElement | null>(null);
@@ -271,25 +274,17 @@ export function ExportPanel({
   const setBg = (c: string) => onSettingsChange({ bgColor: c });
 
   return (
-    // Same shell as PatternPanel: a full-height drawer that overlays the canvas
-    // rather than docking, so switching tools never reflows the artwork.
-    <aside
-      className="absolute z-40 top-0 right-0 bottom-0 w-96 flex flex-col bg-card/95 backdrop-blur-lg border-l border-white/10 shadow-2xl cursor-default"
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-      onPointerEnter={onPointerEnter}
-      data-tour="export"
-    >
-      <header className="flex items-center justify-between px-4 h-11 border-b border-white/10 shrink-0">
-        <span className="text-xs uppercase tracking-widest text-white/70">
-          Crop &amp; Export
-        </span>
-        <span className="text-xs font-mono text-white/40 tabular-nums">
+    <PanelShell
+      title="Crop & Export"
+      tour="export"
+      trailing={
+        <span className="text-xs font-mono text-white/40 tabular-nums mr-1">
           {pxW} &times; {pxH} px
         </span>
-      </header>
-
+      }
+      onClose={onClose}
+      onPointerEnter={onPointerEnter}
+    >
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
         {/* The only flex child, so it absorbs leftover height and is the first
             thing to give way on a short display. */}
@@ -448,6 +443,6 @@ export function ExportPanel({
         palettes={palettes}
         title="Background colour"
       />
-    </aside>
+    </PanelShell>
   );
 }
