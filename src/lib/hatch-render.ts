@@ -44,19 +44,9 @@ export function stepOutlineWeight(step: RenderStep): number {
   return 0;
 }
 
-/** Two effect stacks are interchangeable when they would draw identically. */
-function sameEffects(a: LayerEffect[], b: LayerEffect[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((e, i) => {
-    const o = b[i];
-    if (e.type !== o.type || e.enabled !== o.enabled) return false;
-    if (e.type === "outline") return o.type === "outline" && e.weight === o.weight;
-    return o.type === "roundCorners" && e.radius === o.radius;
-  });
-}
-
 /**
- * Visible layers, bottom to top, with *consecutive* fill layers coalesced.
+ * Visible layers, bottom to top, with *consecutive* effect-free fill layers
+ * coalesced.
  *
  * The coalescing is what keeps hatch-free documents exporting exactly as before:
  * `generateSVG` used to receive one pre-flattened map, so `mergeTrianglesByColor`
@@ -64,12 +54,15 @@ function sameEffects(a: LayerEffect[], b: LayerEffect[]): boolean {
  * would silently regress that merge. A run is only broken where a hatch layer
  * genuinely sits between fills — which is correct, because z-order demands it.
  *
- * **A run is also broken between fill layers whose effects differ.** Coalescing
- * flattens two layers into one map, and a corner-rounding effect reads that map
- * to find region boundaries — so merging a rounded layer with an unrounded one
- * would round the neighbour's cells too, and merging two different radii would
- * silently pick one. Layers carrying equal effects still coalesce, which is the
- * common case (all of them carrying none).
+ * **A run is also broken wherever either side carries an active effect.** An
+ * effect reads the step's coalesced map to find region boundaries, so flattening
+ * two layers together lets one layer's cells influence the other's geometry:
+ * two same-colour rounded layers would weld into a single region and round as
+ * one shape, an unrounded layer's cells would be pulled into a neighbour's
+ * rounded region, and two different radii would silently pick one. Layers with
+ * an effect must round against their *own* painted content, so each one is its
+ * own step. Only layers with none coalesce, which is the common case (all of
+ * them carrying none).
  */
 export function buildRenderPlan(layers: Layer[]): RenderStep[] {
   const steps: RenderStep[] = [];
@@ -81,7 +74,12 @@ export function buildRenderPlan(layers: Layer[]): RenderStep[] {
     }
     const effects = activeEffects(layer);
     const last = steps[steps.length - 1];
-    if (last && last.kind === "fill" && sameEffects(last.effects, effects)) {
+    if (
+      last &&
+      last.kind === "fill" &&
+      last.effects.length === 0 &&
+      effects.length === 0
+    ) {
       Object.assign(last.painted, layer.painted);
     } else {
       steps.push({ kind: "fill", painted: { ...layer.painted }, effects });
