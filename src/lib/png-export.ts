@@ -1,8 +1,17 @@
 import { generateTriangles } from "@/lib/svg-export";
 import { cropDisplayBounds, type CropRect } from "@/lib/crop";
 import type { Layer } from "@/hooks/use-history";
-import { buildRenderPlan, drawHatchLayer, stepOutlineWeight, stepRoundRadius } from "@/lib/hatch-render";
+import {
+  buildRenderPlan,
+  drawHatchLayer,
+  glowReceivers,
+  stepColorAdjust,
+  stepGlow,
+  stepOutlineWeight,
+  stepRoundRadius,
+} from "@/lib/hatch-render";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
 /**
  * Raster export of a crop region.
@@ -82,14 +91,24 @@ export function renderCropToCanvas(
  * Shared by the fabric crop export and the apparel export, which differ in how
  * they size and place the bitmap but agree exactly on how a trixel is painted.
  * `overdraw` is the stroke width, in world units, that closes the seams.
+ *
+ * `glow` is opt-out for the apparel export: a soft shadow spreads translucent
+ * ink straight across the stencil cut gaps, welding the pieces back together and
+ * undoing the flex the cut exists to provide.
  */
 export function drawArtworkPlan(
   ctx: CanvasRenderingContext2D,
   layers: Layer[],
   overdraw: number,
+  options: { glow?: boolean } = {},
 ): void {
+  const plan = buildRenderPlan(layers);
+  const receivers =
+    options.glow === false ? plan.map(() => null) : glowReceivers(plan);
+
   // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
-  for (const step of buildRenderPlan(layers)) {
+  for (let si = 0; si < plan.length; si++) {
+    const step = plan[si];
     if (step.kind === "hatch") {
       // No zoom clamp: exports use the true world weight.
       drawHatchLayer(ctx, step.painted);
@@ -104,8 +123,22 @@ export function drawArtworkPlan(
     // a genuinely different colour still meets it.
     const radius = stepRoundRadius(step);
     const outline = stepOutlineWeight(step);
+    const adjust = stepColorAdjust(step);
+
+    // Before the layer's own fills: the layer casts the shadow, it does not
+    // receive it.
+    const glow = stepGlow(step);
+    const receiver = receivers[si];
+    if (glow && receiver) {
+      drawGlow(ctx, glow, silhouetteGeometry(step.painted, radius), receiver);
+    }
+
     if (radius > 0 || outline > 0) {
-      for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
+      for (const { fill, rings } of stepRegionGeometry(
+        step.painted,
+        radius,
+        adjust,
+      )) {
         if (outline > 0) {
           // Outline effect: a stroke of the boundary at the selected weight
           // instead of a solid fill; the interior stays empty. Round joins land
@@ -133,7 +166,7 @@ export function drawArtworkPlan(
     }
 
     const byColor = new Map<string, [number, number][][]>();
-    for (const tri of generateTriangles(step.painted)) {
+    for (const tri of generateTriangles(step.painted, adjust)) {
       const list = byColor.get(tri.fill);
       if (list) list.push(tri.points);
       else byColor.set(tri.fill, [tri.points]);

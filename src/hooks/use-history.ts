@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
+import { isIdentityAdjustment } from "@/lib/color-adjust";
 
 /** What a layer's `painted` values mean. Absent is `"fill"`, so every document
  *  saved before hatch layers existed keeps working with no migration. */
@@ -39,10 +40,60 @@ export interface OutlineEffect {
   enabled: boolean;
 }
 
+/**
+ * A non-directional drop shadow cast by the layer onto whatever is beneath it.
+ *
+ * Two things separate this from a stock drop shadow, and both are load-bearing:
+ * it draws *under* the layer that owns it (the layer casts, it does not
+ * receive), and it is clipped to the solid cells of the fill layers below — a
+ * shadow falls on a surface, it does not hang in mid-air over bare canvas. A
+ * glow on the bottommost fill layer therefore renders nothing at all, which is
+ * correct and is why `LayerPanel` says so.
+ *
+ * `radius` is a 0–1 fraction of `GLOW_RADIUS_AT_FULL` denoting the blur σ in
+ * world units, stored as a fraction for the same reason as the other two.
+ * `color` is *encoded* (`"p,c"`) so the shadow follows palette shifts like all
+ * painted data. See `lib/glow.ts`.
+ */
+export interface GlowEffect {
+  type: "glow";
+  /** 0–1 fraction of one cell stride; the Gaussian σ. */
+  radius: number;
+  /** 0–1 peak alpha of the shadow. */
+  opacity: number;
+  /** Encoded colour, `"paletteIdx,colorIdx"`. */
+  color: string;
+  enabled: boolean;
+}
+
+/**
+ * A hue / saturation / brightness filter over the layer's colours.
+ *
+ * The one effect that is not geometry: it changes what colour a cell renders as,
+ * never where it is. Applied to the *resolved* hex on its way to a renderer, so
+ * `painted` keeps its encoded values and the layer still follows the global
+ * palette shift underneath the filter. All three are −100…100 and 0 is
+ * "leave alone"; see `lib/color-adjust.ts`.
+ */
+export interface AdjustColorEffect {
+  type: "adjustColor";
+  /** −100 → black, +100 → white. */
+  brightness: number;
+  /** −100…100 → a half turn of the wheel each way. */
+  hue: number;
+  /** −100 → grey, +100 → fully saturated. */
+  saturation: number;
+  enabled: boolean;
+}
+
 /** A non-destructive per-layer geometry filter. `painted` is never touched —
  *  effects are applied when geometry is built for rendering, so switching one
  *  off restores the artwork exactly. */
-export type LayerEffect = RoundCornersEffect | OutlineEffect;
+export type LayerEffect =
+  | RoundCornersEffect
+  | OutlineEffect
+  | GlowEffect
+  | AdjustColorEffect;
 
 /** Reads a layer's effects, defaulting an absent field to none. Use this rather
  *  than touching `.effects` directly, exactly as with `layerKind`. */
@@ -53,9 +104,19 @@ export const layerEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
  *  effect list that reduces to nothing here must render byte-identically to no
  *  effect at all, which is what keeps existing exports unchanged. */
 export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
-  layerEffects(l).filter((e) =>
-    e.enabled && (e.type === "roundCorners" ? e.radius > 0 : e.weight > 0),
-  );
+  layerEffects(l).filter((e) => {
+    if (!e.enabled) return false;
+    switch (e.type) {
+      case "roundCorners":
+        return e.radius > 0;
+      case "outline":
+        return e.weight > 0;
+      case "glow":
+        return e.radius > 0 && e.opacity > 0;
+      case "adjustColor":
+        return !isIdentityAdjustment(e);
+    }
+  });
 
 export interface Layer {
   id: string;

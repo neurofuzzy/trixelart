@@ -8,8 +8,17 @@ import type { HexMode } from "@/components/Footer";
 import { type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
 import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
-import { buildRenderPlan, drawHatchLayer, stepRoundRadius, stepOutlineWeight } from "@/lib/hatch-render";
+import {
+  buildRenderPlan,
+  drawHatchLayer,
+  glowReceivers,
+  stepColorAdjust,
+  stepGlow,
+  stepRoundRadius,
+  stepOutlineWeight,
+} from "@/lib/hatch-render";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
 export function GridCanvas({
   size,
@@ -103,12 +112,36 @@ export function GridCanvas({
         return {
           radius,
           outline,
-          regions: stepRegionGeometry(step.painted, radius),
+          regions: stepRegionGeometry(
+            step.painted,
+            radius,
+            stepColorAdjust(step),
+          ),
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [plan, hueOffset, saturationOffset],
   );
+
+  // Glow geometry, memoised on the same key and for the same reason. Kept apart
+  // from `effectPlan` because a glow needs two shapes rather than one: the
+  // caster (this step's own silhouette) and the receiver (everything below it).
+  // Entries are `null` for steps that cast nothing, or that have nothing beneath
+  // them to catch it.
+  const glowPlan = useMemo(() => {
+    const receivers = glowReceivers(plan);
+    return plan.map((step, si) => {
+      const spec = stepGlow(step);
+      const receiver = receivers[si];
+      if (!spec || !receiver) return null;
+      return {
+        spec,
+        receiver,
+        caster: silhouetteGeometry(step.painted, stepRoundRadius(step)),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, hueOffset, saturationOffset]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -183,6 +216,11 @@ export function GridCanvas({
         continue;
       }
 
+      // Under this step's own fills, and clipped to the layers below: the layer
+      // casts the shadow, it does not receive it.
+      const glow = glowPlan[si];
+      if (glow) drawGlow(ctx, glow.spec, glow.caster, glow.receiver);
+
       // Corner rounding and outlines draw whole regions, so they cannot be
       // viewport-culled the way loose triangles are — a region reaches past the
       // visible box and its ring has to be closed. The geometry is memoised on
@@ -211,6 +249,12 @@ export function GridCanvas({
         continue;
       }
 
+      // Built once per step so its memo covers the whole layer; `undefined`
+      // unless a colour-adjust effect is on, which keeps the common case on the
+      // path it has always taken. The rounded/outlined branch above needs no
+      // equivalent — `stepRegionGeometry` has already applied it.
+      const adjust = stepColorAdjust(step);
+
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {
         for (let q = minQ; q <= maxQ; q++) {
@@ -218,7 +262,8 @@ export function GridCanvas({
             const key = `${q},${r},${type}`;
             const fill = step.painted[key];
             if (fill) {
-              const hex = resolveColor(fill);
+              const resolved = resolveColor(fill);
+              const hex = adjust ? adjust(resolved) : resolved;
               const list = colorGroups.get(hex);
               if (list) list.push({ q, r, type });
               else colorGroups.set(hex, [{ q, r, type }]);
@@ -754,7 +799,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, plan, effectPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
+  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
 
   return (
     <canvas

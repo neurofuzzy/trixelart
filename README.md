@@ -95,7 +95,8 @@ on Android/Chrome, use **Install app**. It launches full-screen with no browser 
 - **HTML5 Canvas** with device-pixel-ratio scaling — no drawing libraries
 - No backend; state persists in `localStorage`
 
-See **[AGENTS.md](AGENTS.md)** for an architecture overview and **[CODEMAP.md](CODEMAP.md)** for an
+See **[CLAUDE.md](CLAUDE.md)** for an architecture overview, **[docs/](docs/)** for the
+design notes behind each area, and **[CODEMAP.md](CODEMAP.md)** for an
 auto-generated source map.
 
 ## Contributing

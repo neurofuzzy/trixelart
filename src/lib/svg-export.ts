@@ -10,8 +10,11 @@ import {
 import type { Layer } from "@/hooks/use-history";
 import {
   buildRenderPlan,
+  glowReceivers,
   hatchStrokes,
   hatchStrokesBounds,
+  stepColorAdjust,
+  stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
   type HatchStroke,
@@ -21,6 +24,7 @@ import {
   roundedRingToPath,
   stepRegionGeometry,
 } from "@/lib/round-corners";
+import { glowSVG, rotateRoundedRings, silhouetteGeometry } from "@/lib/glow";
 
 export interface TriangleData {
   points: [number, number][];
@@ -78,7 +82,14 @@ function ensureCW(points: [number, number][]): [number, number][] {
   return points;
 }
 
-export function generateTriangles(painted: Record<string, string>): TriangleData[] {
+/** `adjust` is the colour-adjust effect's filter (`stepColorAdjust`), applied to
+ *  each resolved fill. Doing it here rather than at the emit sites means the
+ *  merge, per-triangle and cropped paths all get it, and `mergeTrianglesByColor`
+ *  keys on the colour the file will actually carry. */
+export function generateTriangles(
+  painted: Record<string, string>,
+  adjust?: (hex: string) => string,
+): TriangleData[] {
   const entries = Object.entries(painted);
   const triangles: TriangleData[] = [];
 
@@ -89,7 +100,8 @@ export function generateTriangles(painted: Record<string, string>): TriangleData
     const r = parseInt(parts[1]);
     const type = parts[2] as "up" | "down";
     const verts = getTriVertices(q, r, type);
-    const fill = resolveColor(encoded);
+    const resolved = resolveColor(encoded);
+    const fill = adjust ? adjust(resolved) : resolved;
     triangles.push({
       points: ensureCW([
         [roundNum(verts[0].x), roundNum(verts[0].y)],
@@ -260,10 +272,12 @@ function wrap(
   h: number,
   body: string,
   options?: SVGExportOptions,
+  defs = "",
 ): string {
   const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"`;
   const parts = [
     options?.metadata ?? "",
+    defs ? `  <defs>\n${defs}\n  </defs>` : "",
     // Percentages resolve against the viewport the viewBox establishes, so this
     // covers the page exactly without restating its dimensions.
     options?.background
@@ -288,17 +302,22 @@ export function generateSVG(
   // convex corner inward or bulges a concave one into the neighbouring region,
   // so the artwork's bounding box is unchanged and can still be measured off the
   // raw lattice.
-  const resolved = plan.map((step) =>
-    step.kind === "fill"
-      ? {
-          kind: "fill" as const,
-          tris: generateTriangles(step.painted),
-          painted: step.painted,
-          radius: stepRoundRadius(step),
-          outline: stepOutlineWeight(step),
-        }
-      : { kind: "hatch" as const, strokes: hatchStrokes(step.painted) },
-  );
+  const resolved = plan.map((step) => {
+    if (step.kind !== "fill") {
+      return { kind: "hatch" as const, strokes: hatchStrokes(step.painted) };
+    }
+    // Built once per step and reused by both the triangle and the region path,
+    // so the memo inside it stays warm across the whole layer.
+    const adjust = stepColorAdjust(step);
+    return {
+      kind: "fill" as const,
+      tris: generateTriangles(step.painted, adjust),
+      painted: step.painted,
+      radius: stepRoundRadius(step),
+      outline: stepOutlineWeight(step),
+      adjust,
+    };
+  });
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const grow = (b: { minX: number; minY: number; maxX: number; maxY: number } | null) => {
@@ -336,15 +355,40 @@ export function generateSVG(
   const ox = -minX + PADDING;
   const oy = -minY + PADDING;
 
+  // A glow is clipped to the fill layers below it, which are inside the box
+  // already measured above — so unlike the outline effect it never reaches past
+  // the artwork and needs no bounds growth of its own.
+  const receivers = glowReceivers(plan);
+  const defs: string[] = [];
+
   const body = resolved
-    .map((step) => {
+    .map((step, si) => {
       if (step.kind === "hatch") return hatchMarkup(step.strokes, ox, oy);
       if (step.tris.length === 0) return "";
+
+      // Emitted before the step's own fills: the layer casts, it does not
+      // receive.
+      const spec = stepGlow(plan[si]);
+      const receiver = receivers[si];
+      const glow =
+        spec && receiver
+          ? glowSVG(
+              spec,
+              silhouetteGeometry(step.painted, step.radius),
+              receiver,
+              String(si),
+              fmt,
+              ox,
+              oy,
+            )
+          : null;
+      if (glow) defs.push(glow.defs);
+      const before = glow ? `${glow.body}\n` : "";
       // Rounded and outlined steps are inherently merged — the effects are
       // defined on whole regions — so they ignore the `merge` option rather
       // than offering a per-triangle variant that could not express an arc.
       if (step.radius > 0 || step.outline > 0) {
-        return stepRegionGeometry(step.painted, step.radius)
+        const fills = stepRegionGeometry(step.painted, step.radius, step.adjust)
           .map(({ fill, rings }) => {
             const d = rings
               .map((r) => roundedRingToPath(r, fmt, ox, oy))
@@ -360,32 +404,39 @@ export function generateSVG(
           })
           .filter(Boolean)
           .join("\n");
+        return fills ? before + fills : before.trimEnd();
       }
       if (options?.merge) {
-        return mergeTrianglesByColor(step.tris, ox, oy)
+        return (
+          before +
+          mergeTrianglesByColor(step.tris, ox, oy)
+            .map(
+              ({ fill, d }) =>
+                `  <path d="${d}" fill="${fill}"${
+                  options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+                }/>`,
+            )
+            .join("\n")
+        );
+      }
+      return (
+        before +
+        step.tris
           .map(
-            ({ fill, d }) =>
-              `  <path d="${d}" fill="${fill}"${
+            ({ points, fill }) =>
+              `  <polygon points="${points.map((p) => `${fmt(p[0] + ox)},${fmt(p[1] + oy)}`).join(" ")}" fill="${fill}"${
                 options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
               }/>`,
           )
-          .join("\n");
-      }
-      return step.tris
-        .map(
-          ({ points, fill }) =>
-            `  <polygon points="${points.map((p) => `${fmt(p[0] + ox)},${fmt(p[1] + oy)}`).join(" ")}" fill="${fill}"${
-              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-            }/>`,
-        )
-        .join("\n");
+          .join("\n")
+      );
     })
     .filter(Boolean)
     .join("\n");
 
   if (!body) return wrap(EMPTY_SIZE, EMPTY_SIZE, "", options);
 
-  return wrap(w, h, body, options);
+  return wrap(w, h, body, options, defs.join("\n"));
 }
 
 /* ------------------------------------------------------------------ */
@@ -534,8 +585,21 @@ export function generateCroppedSVG(
     maxY: world.y + world.h,
   };
 
-  const body = buildRenderPlan(layers)
-    .map((step) => {
+  const plan = buildRenderPlan(layers);
+  const receivers = glowReceivers(plan);
+  const defs: string[] = [];
+
+  // Glow is the one thing this exporter cannot clip for real. Everything else
+  // is cut to the crop as genuine 4- and 5-gons, but the visible shadow is
+  // (blurred raster) ∩ (surface below) and blur spreads, so there is no polygon
+  // to emit. It also must *not* be cut: a shadow cast from just outside the crop
+  // still falls inside it, and clipping the caster would open a seam at every
+  // tile join. So the caster and receiver stay whole and a rect `<clipPath>`
+  // bounds the result — the documented exception to this file's own rule.
+  const cropClip = `    <clipPath id="glow-crop"><rect x="0" y="0" width="${w}" height="${h}"/></clipPath>`;
+
+  const body = plan
+    .map((step, si) => {
       if (step.kind === "hatch") {
         // Clipped to the crop in world space, then rotated into display space —
         // the same order the fill path uses below.
@@ -562,9 +626,39 @@ export function generateCroppedSVG(
       // `<clipPath>`.
       const radius = stepRoundRadius(step);
       const outline = stepOutlineWeight(step);
+      const adjust = stepColorAdjust(step);
+
+      // Rotated into display space and shifted to the crop origin like every
+      // other shape here, but never cut — see the note on `cropClip` above.
+      const spec = stepGlow(step);
+      const receiver = receivers[si];
+      const glow =
+        spec && receiver
+          ? glowSVG(
+              spec,
+              rotateRoundedRings(
+                silhouetteGeometry(step.painted, radius),
+                gridRotation,
+              ),
+              rotateRoundedRings(receiver, gridRotation),
+              String(si),
+              fmt,
+              -display.x,
+              -display.y,
+            )
+          : null;
+      if (glow) defs.push(glow.defs);
+      const before = glow
+        ? `  <g clip-path="url(#glow-crop)">\n${glow.body}\n  </g>\n`
+        : "";
+
       if (radius > 0 || outline > 0) {
         const out: string[] = [];
-        for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
+        for (const { fill, rings } of stepRegionGeometry(
+          step.painted,
+          radius,
+          adjust,
+        )) {
           const ds: string[] = [];
           for (const ring of rings) {
             const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
@@ -594,14 +688,14 @@ export function generateCroppedSVG(
             );
           }
         }
-        return out.join("\n");
+        return out.length ? before + out.join("\n") : before.trimEnd();
       }
 
       // Clip in world space (where the crop rect is axis-aligned), then rotate
       // the survivors into display space and shift the crop origin to (0,0).
       // The only rotations used are 0 and 90 degrees, so this stays exact.
       const clipped: TriangleData[] = [];
-      for (const tri of generateTriangles(step.painted)) {
+      for (const tri of generateTriangles(step.painted, adjust)) {
         const poly = clipPolygonToRect(tri.points, world);
         if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
         // Rounding can merge two distinct vertices, so dedupe again afterwards
@@ -617,20 +711,23 @@ export function generateCroppedSVG(
         clipped.push({ fill: tri.fill, points });
       }
 
-      if (clipped.length === 0) return "";
+      if (clipped.length === 0) return before.trimEnd();
 
       if (options?.merge) {
-        return mergeTrianglesByColor(clipped)
-          .map(
-            ({ fill, d }) =>
-              `  <path d="${d}" fill="${fill}"${
-                options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-              }/>`,
-          )
-          .join("\n");
+        return (
+          before +
+          mergeTrianglesByColor(clipped)
+            .map(
+              ({ fill, d }) =>
+                `  <path d="${d}" fill="${fill}"${
+                  options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+                }/>`,
+            )
+            .join("\n")
+        );
       }
 
-      return clipped
+      return before + clipped
         .map(
           ({ points, fill }) =>
             `  <polygon points="${points.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${fill}"${
@@ -643,5 +740,10 @@ export function generateCroppedSVG(
     .join("\n");
 
   if (!body) return `${open}\n</svg>`;
-  return `${open}\n${body}\n</svg>`;
+  // The crop rect is only referenced when something actually casts a shadow, so
+  // a glow-free crop export is byte-identical to before.
+  const defsMarkup = defs.length
+    ? `  <defs>\n${cropClip}\n${defs.join("\n")}\n  </defs>\n`
+    : "";
+  return `${open}\n${defsMarkup}${body}\n</svg>`;
 }

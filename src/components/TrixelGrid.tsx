@@ -1756,6 +1756,7 @@ export default function TrixelGrid() {
             onMoveLayer={moveLayer}
             onCommit={onCommit}
             onPointerEnter={() => setHoveredTri(null)}
+            palettes={computedPalettes}
           />
         )}
         {gridSettingsOpen && (
