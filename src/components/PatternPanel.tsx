@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PanelShell } from "@/components/PanelShell";
 import { encodeColor, resolveColor } from "@/lib/constants";
 import {
   PATTERN_BLEND_MODES,
@@ -186,6 +187,7 @@ export function PatternPanel({
   palettes,
   paletteIdx,
   onPaletteIdxChange,
+  onClose,
   onPointerEnter,
 }: {
   layers: PatternLayer[];
@@ -196,6 +198,7 @@ export function PatternPanel({
   palettes: { name: string; colors: string[] }[];
   paletteIdx: number;
   onPaletteIdxChange: (i: number) => void;
+  onClose: () => void;
   onPointerEnter: () => void;
 }) {
   const palette = palettes[paletteIdx]?.colors ?? palettes[0].colors;
@@ -268,27 +271,17 @@ export function PatternPanel({
   };
 
   return (
-    // Full-height drawer flush to the right edge. It overlays the canvas rather
-    // than shrinking it: the drawer only exists while the pattern tool is
-    // selected, so docking it into the layout would reflow and re-centre the
-    // artwork on every tool switch.
-    <aside
-      className="absolute z-40 top-0 right-0 bottom-0 w-96 flex flex-col bg-card/95 backdrop-blur-lg border-l border-white/10 shadow-2xl cursor-default"
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-      onPointerEnter={onPointerEnter}
-      data-tour="pattern"
-    >
-      <header className="flex items-center justify-between px-4 h-11 border-b border-white/10 shrink-0">
-        <span className="text-xs uppercase tracking-widest text-white/70">
-          Pattern
-        </span>
-        <span className="text-xs text-white/40">
+    <PanelShell
+      title="Pattern"
+      tour="pattern"
+      trailing={
+        <span className="text-xs text-white/40 mr-1">
           {layers.length} layer{layers.length === 1 ? "" : "s"}
         </span>
-      </header>
-
+      }
+      onClose={onClose}
+      onPointerEnter={onPointerEnter}
+    >
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
       {/* The preview is the only child allowed to flex, so it absorbs whatever
           height the controls leave over and is the first thing to give way on a
@@ -514,6 +507,6 @@ export function PatternPanel({
       )}
 
       </div>
-    </aside>
+    </PanelShell>
   );
 }

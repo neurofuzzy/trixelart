@@ -50,8 +50,10 @@ No tests configured.
 
 ## Rules that apply everywhere
 
-- **GOLDEN RULE**: Every editing action that modifies `painted` state MUST push a `ProjectSnapshot` to history via `pushHistory()` so it is undoable. This includes paint strokes, erase strokes, move-tool translations, stamp placement, palette remapping (`onShiftUp`/`onShiftDown`), selection deletion, pattern-brush strokes, pattern-preset capture/delete, and any future editing features. Missing a `pushHistory` call means the user cannot undo that action.
-  - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell.
+- **GOLDEN RULE**: Every editing action that changes anything inside `ProjectSnapshot` MUST push one via `pushHistory()`. That is `painted` — paint, erase, move-tool translations, stamp placement, palette remapping (`onShiftUp`/`onShiftDown`), selection deletion, pattern-brush strokes, pattern-preset capture/delete — **and the layer stack itself**: add, delete, duplicate, reorder, visibility, effects.
+  - **Skipping the push is worse than "not undoable".** The next commit snapshots the changed value anyway, so undoing that *later* edit silently rolls this one back too. Layer visibility and reorder had exactly this bug: hide a layer, paint a stroke, undo the stroke, and the layer came back.
+  - The escape hatch for state that should not be undoable is to **not apply it on restore**, not to skip the push. `registerRestore` deliberately leaves the grid settings alone, and undo/redo deliberately leave `activeLayerIdx` alone (clamped to the restored layer count), so that moving around between strokes is never rolled back.
+  - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell. In `LayerPanel` every mutation goes through its local `commit()` for the same reason.
 - **Colors are stored encoded**, not as hex: `"paletteIdx,colorIdx"` via `encodeColor`, resolved through `resolveColor` (`src/lib/constants.ts`). `PALETTE_DEFS` holds 14 HSL-derived palettes × 9 lightnesses, shifted globally by `hueOffset`/`satOffset`. Painted data therefore follows palette changes automatically — compare encoded values, not resolved hex, when testing swatch identity (separate palettes can resolve to the same color). The documented exceptions all share one reason: where the only question is *whether the eye sees a boundary*, comparison is on the resolved hex (`region-outline.ts`, `round-corners.ts`).
 - **`setPainted` updaters must be pure** — React StrictMode replays them. Precompute the keys/colors outside the updater (see `edit-tool.ts` and `pattern-tool.ts`).
 - **Adding a field to `ProjectSnapshot`** means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist. See [docs/persistence.md](docs/persistence.md) for the view-state / authored-content split that decides whether a new setting belongs there at all.
@@ -71,15 +73,19 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Dodge / Burn | `D` / `B` | Step the palette index lighter/darker |
 | Clone | `C` | Clone-stamp from a captured source |
 | Eyedropper | `I` | Pick a painted color |
-| Pan | `H` | Drag to translate painted trixels (grid offset); right-click pans view |
-| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot |
+| Move | `H` | Drag to translate painted trixels; **ALT-drag moves every layer**. Click without dragging re-origins the lattice on that trixel. Right-click pans the view |
+| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot. Drag the selection to move its contents — **ALT-drag moves every layer**, SHIFT-drag copies, ALT-*click* still removes a hex from the selection |
 | Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
-| Crop | `X` | Drag handles to set the export region |
+| Crop | `X` | Drag handles to set the export region. **No toolbar button** — reached from the hamburger's "Export for Fabric...", and closing its drawer leaves the mode |
 
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)
 - Stroke painting: `getTrianglesOnLine` samples along pointer moves for continuous strokes
-- `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`
+- **ALT means "all layers" on both dragging tools** (move, and dragging a hex selection), read live on every pointer move so it can be pressed or released mid-drag. On the select tool it shares a target with the older ALT-click-to-deselect, and the two are split by gesture: a press that never travels a whole lattice step is a click
+- **The move tool does not compensate the view after a drag.** It used to: the artwork's world position changed and the view shifted the same amount the other way, so on release the piece snapped back to exactly where it started on screen and the drag appeared to do nothing. The *click* branch still compensates, and there it is right — that gesture re-indexes the lattice origin and is meant to leave the picture where it is
+- `setAllPainted` (`useHistory`, on `ToolContext`) writes every layer's map at once; `setPainted` can only address the active layer. Only the move tool's ALT path needs it, and it stays off the common path deliberately — writing the whole stack on every pointer move gives every layer a new identity and rebuilds all their effect geometry
+- `isToolAllowed(tool, kind)` (`tools/types.ts`) is the single source of truth for which tools a layer kind permits, enforced once by wrapping `setTool` as `changeTool` in `TrixelGrid`. **`changeTool` is the only caller of `setTool`** — it also reconciles the panel slot, so a new tool-switching path must go through it
+- **The four right-hand drawers share one slot** and only one is ever open: `panel: PanelId | null` in `TrixelGrid`, `PanelShell` for the frame. Pattern and Crop & Export are owned by their tool; Layers and Grid Settings are toggled from the footer. See [docs/ui.md](docs/ui.md)
 
 Full keyboard map: [docs/ui.md](docs/ui.md).
 

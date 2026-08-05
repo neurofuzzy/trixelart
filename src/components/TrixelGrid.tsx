@@ -83,6 +83,7 @@ import { CutExportDialog } from "@/components/CutExportDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
 import { GridSettingsPanel } from "@/components/GridSettingsPanel";
+import { panelForTool, type PanelId } from "@/components/PanelShell";
 import {
   ExportPanel,
   DEFAULT_EXPORT_SETTINGS,
@@ -143,6 +144,7 @@ export default function TrixelGrid() {
     activeLayerIdx,
     painted,
     setPainted,
+    setAllPainted,
     paintedRef,
     pushHistory,
     handleUndo,
@@ -344,8 +346,11 @@ export default function TrixelGrid() {
     seq: number;
   } | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
-  const [layersOpen, setLayersOpen] = useState(false);
-  const [gridSettingsOpen, setGridSettingsOpen] = useState(false);
+  // The panel slot. All four drawers occupy the same strip down the right-hand
+  // edge, so at most one may be open — two would sit on top of each other, and
+  // the second would be unreachable. One piece of state rather than a boolean
+  // per drawer is what makes that structural instead of a rule to remember.
+  const [panel, setPanel] = useState<PanelId | null>(null);
   const hexEnabled = gridDivisions > 0 && hexMode !== "world";
   const effectiveFlowerRadius = hexEnabled ? flowerRadius : 0;
 
@@ -410,22 +415,75 @@ export default function TrixelGrid() {
   // pick. Because `tool` can then never hold a disallowed value, the dispatch
   // in use-interaction needs no guard of its own.
   const changeTool = useCallback((t: Tool) => {
-    if (isToolAllowed(t, activeLayerKindRef.current)) setTool(t);
-    // Pattern and crop draw their own full-height right-hand drawers; the grid
-    // settings drawer must give way rather than sit on top of them.
-    if (t === "pattern" || t === "crop") setGridSettingsOpen(false);
+    if (!isToolAllowed(t, activeLayerKindRef.current)) return;
+    setTool(t);
+    // The panel slot follows the tool, and this is the only place it can be
+    // done: `tool` does not change when the *same* tool is re-selected, so an
+    // effect keyed on it would never fire and the drawer's own close button
+    // would be a one-way door.
+    //
+    // Pattern and crop *own* a drawer — the drawer is that tool's controls, so
+    // selecting the tool opens it and leaving the tool closes it again. The
+    // layers and grid drawers are opened by hand and survive a tool change,
+    // unless a tool-owned drawer takes the slot from them.
+    setPanel((p) =>
+      panelForTool(t) ?? (p === "pattern" || p === "export" ? null : p),
+    );
   }, []);
+
+  /**
+   * The only way the panel slot is set from outside `changeTool`.
+   *
+   * Crop is the one tool with no toolbar button — the Crop & Export drawer *is*
+   * its interface — so leaving that drawer has to leave the mode too. Otherwise
+   * opening Layers on top of it left the canvas covered in crop handles, with
+   * painting locked out and nothing on screen to explain why. That was the whole
+   * UX complaint the panel slot exposed.
+   *
+   * Order matters: `setPanel(id)` lands first, so `changeTool`'s own slot
+   * reconciliation sees the pending value and leaves it alone rather than
+   * clearing the drawer that is opening.
+   */
+  const leaveCropMode = useCallback(() => {
+    if (toolRef.current !== "crop") return;
+    changeTool(activeLayerKindRef.current === "hatch" ? "hatch" : "paint");
+  }, [changeTool]);
+
+  const showPanel = useCallback(
+    (id: PanelId | null) => {
+      setPanel(id);
+      if (id !== "export") leaveCropMode();
+    },
+    [leaveCropMode],
+  );
+
+  // `tool === "crop"` implies `panel === "export"`: `changeTool` is the only
+  // thing that can select crop and it opens the drawer, and `showPanel` is the
+  // only thing that can take the slot away and it leaves the mode. So a footer
+  // toggle — which can only reach `layers` or `grid` — always leaves the export
+  // drawer if crop was active, in either direction, and needs no reading of the
+  // current panel to decide.
+  const togglePanel = useCallback(
+    (id: PanelId) => {
+      setPanel((p) => (p === id ? null : id));
+      leaveCropMode();
+    },
+    [leaveCropMode],
+  );
 
   // Move to a usable tool when the active layer's kind changes. Keyed on the
   // kind rather than on `layers`, so it doesn't re-run on every stroke, and it
   // fires for layer selection, add, delete, reorder, undo/redo and project load
   // alike. Only switches when the current tool is actually disallowed, so
   // clicking between layers while holding erase doesn't yank the tool away.
+  // Routed through `changeTool` rather than `setTool` so this path reconciles
+  // the panel slot too — selecting a hatch layer while the pattern drawer is
+  // open has to close it, since the tool it belongs to is going away.
   useEffect(() => {
     if (!isToolAllowed(toolRef.current, activeLayerKind)) {
-      setTool(activeLayerKind === "hatch" ? "hatch" : "paint");
+      changeTool(activeLayerKind === "hatch" ? "hatch" : "paint");
     }
-  }, [activeLayerKind]);
+  }, [activeLayerKind, changeTool]);
 
   const gridDivisionsRef = useRef(gridDivisions);
   gridDivisionsRef.current = gridDivisions;
@@ -831,6 +889,7 @@ export default function TrixelGrid() {
     quantizeTargets,
     painted,
     setPainted,
+    setAllPainted,
     onCommit,
     containerRef,
     flowerRadius: effectiveFlowerRadius,
@@ -1204,9 +1263,11 @@ export default function TrixelGrid() {
     (c: string) => {
       const idx = activePalette.indexOf(c);
       if (idx >= 0) setColorIdx(idx);
-      setTool("paint");
+      // Through `changeTool`, not `setTool`: picking a colour is a tool change
+      // like any other, and it has to close a tool-owned drawer behind it.
+      changeTool("paint");
     },
-    [activePalette],
+    [activePalette, changeTool],
   );
 
   const onPaletteShift = useCallback(
@@ -1696,7 +1757,7 @@ export default function TrixelGrid() {
             onPaletteChange={(colors, idx) => {
               setActivePaletteIdx(idx);
               setColorIdx(colors.length - 1);
-              setTool("paint");
+              changeTool("paint");
             }}
             onPointerEnter={() => setHoveredTri(null)}
             hueOffset={hueOffset}
@@ -1705,7 +1766,9 @@ export default function TrixelGrid() {
             onSaturationOffsetChange={setSatOffset}
           />
         )}
-        {tool === "pattern" && (
+        {/* The panel slot. Every branch below is keyed on `panel`, so exactly
+            one drawer can be on screen and no pair of them can collide. */}
+        {panel === "pattern" && (
           <PatternPanel
             layers={patternLayers}
             onLayersChange={setPatternLayers}
@@ -1715,6 +1778,7 @@ export default function TrixelGrid() {
             palettes={computedPalettes}
             paletteIdx={patternPaletteIdx}
             onPaletteIdxChange={setPatternPaletteIdx}
+            onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
@@ -1730,7 +1794,7 @@ export default function TrixelGrid() {
             onConvert={() => setHatchifyOpen(true)}
           />
         )}
-        {tool === "crop" && (
+        {panel === "export" && (
           <ExportPanel
             layers={visibleLayers}
             crop={crop}
@@ -1740,10 +1804,11 @@ export default function TrixelGrid() {
             palettes={computedPalettes}
             settings={exportSettings}
             onSettingsChange={updateExportSettings}
+            onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
-        {layersOpen && (
+        {panel === "layers" && (
           <LayerPanel
             layers={layers}
             activeLayerIdx={activeLayerIdx}
@@ -1755,11 +1820,12 @@ export default function TrixelGrid() {
             onSetLayerEffects={setLayerEffects}
             onMoveLayer={moveLayer}
             onCommit={onCommit}
+            onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
             palettes={computedPalettes}
           />
         )}
-        {gridSettingsOpen && (
+        {panel === "grid" && (
           <GridSettingsPanel
             gridDivisions={gridDivisions}
             onGridDivisionsChange={setGridDivisions}
@@ -1768,7 +1834,7 @@ export default function TrixelGrid() {
             gridOrientation={gridOrientation}
             onGridOrientationChange={setGridOrientation}
             onSpreadHexArtwork={onSpreadHexArtwork}
-            onClose={() => setGridSettingsOpen(false)}
+            onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />
         )}
@@ -1785,10 +1851,9 @@ export default function TrixelGrid() {
         captureMode={captureMode}
         cloneSourceSet={cloneSource !== null}
         tooltip={tooltip}
-        layersOpen={layersOpen}
-        onToggleLayers={() => setLayersOpen((o) => !o)}
-        gridSettingsOpen={gridSettingsOpen}
-        onToggleGridSettings={() => setGridSettingsOpen((o) => !o)}
+        hasSelection={selectedHexes.length > 0}
+        panel={panel}
+        onTogglePanel={togglePanel}
       />
 
       <ExportDialog

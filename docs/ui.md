@@ -8,8 +8,8 @@
 |---|---|
 | `P` | Paint tool |
 | `E` | Erase tool |
-| `H` | Pan tool |
-| `S` | Select tool |
+| `H` | Move tool (ALT-drag moves all layers) |
+| `S` | Select tool (ALT-drag a selection moves all layers; ALT-click deselects a hex) |
 | `T` | Stamp tool |
 | `F` | Fill tool |
 | `N` | Pattern brush |
@@ -17,7 +17,7 @@
 | `D` / `B` | Dodge / Burn |
 | `C` | Clone |
 | `I` | Eyedropper |
-| `X` | Crop & export |
+| `X` | Crop & export (also opens its drawer; there is no toolbar button) |
 | `R` | Switch to Select and rotate selection 60° CW |
 | `Shift+R` | Switch to Select and rotate selection 60° CCW |
 | `1`–`9` | Select color + switch to Paint |
@@ -31,6 +31,32 @@
 | `Delete` / `Backspace` | Erase selected hex contents |
 
 Shortcuts suppressed when focus is in `<input>` or `<textarea>` (except `Escape` and undo/redo).
+
+## The panel slot
+
+Four right-hand drawers — **Layers**, **Grid Settings**, **Pattern** and **Crop & Export** — share one strip down the right edge of the canvas, and **exactly one may be open at a time**. That is held by a single `panel: PanelId | null` in `TrixelGrid` rather than a boolean per drawer: with four booleans "only one" is a rule every new call site has to remember, and the failure mode is two drawers stacked on the same 384px of screen with the lower one unreachable.
+
+`PanelShell` (`components/PanelShell.tsx`) is the frame — the `<aside>`, the header, the close button, and the pointer handlers that stop a drag on a slider painting a stroke through the artwork behind it. It **overlays the canvas rather than docking**: drawers come and go as tools and toggles change, and docking would reflow and re-centre the artwork every time, so the piece would appear to jump while the user is drawing.
+
+Children supply their own scroll container, because the four do not agree on what should absorb leftover height — `PatternPanel` and `ExportPanel` give it to a preview, the other two to nothing.
+
+**Two kinds of drawer, and the difference is who opens them.**
+
+- **Tool-owned** (`panelForTool`): the Pattern drawer *is* the pattern brush's controls, and Crop & Export is the crop tool's. Selecting the tool opens it; leaving the tool closes it.
+  - **Crop goes further: the drawer owns the tool back.** Crop has no toolbar button — it is entered from the hamburger's "Export for Fabric..." — so closing its drawer, or letting another drawer take the slot, exits crop mode (`showPanel` → `leaveCropMode`). Without that, opening Layers over it left the canvas covered in crop handles with painting locked out and nothing on screen to explain why. A tool whose whole interface is one drawer cannot outlive the drawer.
+- **Manual**: Layers and Grid Settings are toggled from the footer and survive a tool change — unless a tool-owned drawer takes the slot, which is the one thing that can evict them.
+
+**The reconciliation lives in `changeTool`, not in an effect keyed on `tool`.** Re-selecting the tool that already owns the slot does not change `tool`, so an effect would never fire and the drawer's own close button would be a one-way door: closed, with no way back short of switching tools twice. Doing it in the handler also avoids the cascading render `setState` inside an effect costs.
+
+That only works because **`changeTool` is now the sole caller of `setTool`** — the two colour-palette paths that forced `paint` directly were routed through it. They were already leaks in the layer-kind lock-out the wrapper exists to enforce; the slot only made them visible. The lock-out effect calls `changeTool` for the same reason: selecting a hatch layer while the Pattern drawer is open moves the tool to `hatch`, and the drawer belonging to the tool that just went away has to go with it.
+
+`tool === "crop"` therefore implies `panel === "export"`, which is what lets the footer's toggle exit crop mode without reading the current panel at all.
+
+Verified in a browser across the whole matrix — footer toggles, tool switches, close-and-reopen, and a tool change out of a tool-owned drawer: never more than one `<aside>` on screen, and no path that leaves a drawer stranded.
+
+## Transient popovers
+
+The fan-out (flower radius) slider hangs off its toolbar button as a small popover. It closes on **any pointer-down outside its wrapper** — another tool, a menu, the canvas — via a listener on `document` in the **capture** phase. Bubble phase does not work here: the canvas container and every drawer call `stopPropagation` on pointer events to keep drags off the artwork, so a bubbling listener never hears the click that most needs to close it. It also unmounts if the hex lattice is switched off underneath it, since its own button is disabled in that state.
 
 ## Zoom & touch
 

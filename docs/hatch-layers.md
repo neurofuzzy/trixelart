@@ -16,9 +16,9 @@ A **second layer kind** holding line work instead of fills, so hatching composit
 
 Select **is** allowed: `rotateHatchValue`/`flipHatchValue` permute the direction mask alongside the geometry (a 60° rotation is a 3-cycle on the bits), so rotating a hatched selection carries its angles round with it.
 
-**UI.** Deliberately *not* a drawer — hatch has four scalars and a colour, not a stack to edit, and it reuses the controls the app already has:
+**UI.** Deliberately *not* a drawer of its own — hatch has four scalars and a colour, not a stack to edit, and a drawer would have to fight the other four for the panel slot every time the brush was picked up. It reuses the controls the app already has:
 
-- The `+` in `LayerPanel` is a dropdown ("Normal layer" / "Hatch layer"); each row carries a kind icon.
+- The `+` in the Layers drawer's header is a dropdown ("Normal layer" / "Hatch layer"); each row carries a kind icon.
 - **Hatch is not in `editTools`.** It takes over the Paint slot via `brushTool(kind)` in `Toolbar.tsx`, so the toolbar shows *one* pencil that means Paint on a fill layer and Hatch on a hatch layer. Two pencils side by side, one of them permanently disabled, is worse than one button that changes meaning — so hatch is the documented exception to the "add the tool to `editTools`" rule in [CLAUDE.md](../CLAUDE.md#tools). It is still in `isEditTool`.
 - The ordinary `ColorPalette` swatch row drives the hatch brush, pointed at the brush's **own** palette (`hatchPaletteIdx`, derived from `decodeColor(hatchBrush.color)`) rather than the paint palette — otherwise an eyedropper pick landing on a mark authored elsewhere highlights the wrong swatch, or none. `1`–`9` must encode against the same index for the same reason.
 - `HatchBar` is a footer-sized strip overlaid at the bottom of the canvas holding the three direction toggles and the density and weight sliders. Keyed on `activeLayerKind`, not `tool`, so it doesn't flicker away when the user reaches for erase; `ColorPalette` takes `raised` to clear it on small screens.

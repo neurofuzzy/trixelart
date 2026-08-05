@@ -45,6 +45,7 @@ interface UseInteractionArgs {
   quantizeTargets: QuantizeTarget[];
   painted: Record<string, string>;
   setPainted: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setAllPainted: (maps: Record<string, string>[]) => void;
   onCommit: () => void;
   containerRef: { current: HTMLDivElement | null };
   flowerRadius: number;
@@ -87,6 +88,7 @@ export function useInteraction(args: UseInteractionArgs) {
     quantizeTargets,
     painted,
     setPainted,
+    setAllPainted,
     onCommit,
     containerRef,
     flowerRadius,
@@ -186,8 +188,10 @@ export function useInteraction(args: UseInteractionArgs) {
   const hoverTargets = useMemo<TriKey[]>(() => {
     if (!hoveredTri) return [];
     // The crop tool paints nothing, so a ghost trixel would only be noise
-    // under the crop rectangle.
-    if (tool === "crop") return [];
+    // under the crop rectangle. The move tool paints nothing either, and its
+    // ghost was worse than noise: it marked a cell the drag does not act on —
+    // a move takes the whole layer, not the trixel under the cursor.
+    if (tool === "crop" || tool === "pan") return [];
     if (tool === "select" || tool === "stamp" || tool === "eyedropper" || tool === "fill")
       return [hoveredTri];
     // The pattern brush covers a whole hex, so the ghost shows that footprint
@@ -310,6 +314,7 @@ export function useInteraction(args: UseInteractionArgs) {
     screenToWorld,
     painted,
     setPainted,
+    setAllPainted,
     paintedRef,
     onCommit,
     tool,

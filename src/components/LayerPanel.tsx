@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { HatchGlyph } from "@/components/HatchBar";
+import { PanelShell } from "@/components/PanelShell";
 import {
   layerEffects,
   layerKind,
@@ -132,9 +133,9 @@ const EFFECT_SLIDERS: Record<LayerEffect["type"], EffectSlider[]> = {
     { key: "opacity", label: "Opacity" },
   ],
   adjustColor: [
-    { key: "brightness", label: "Bright", min: -100, max: 100, step: 1, scale: 1, unit: "" },
+    { key: "brightness", label: "Brightness", min: -100, max: 100, step: 1, scale: 1, unit: "" },
     { key: "hue", label: "Hue", min: -100, max: 100, step: 1, scale: 1, unit: "" },
-    { key: "saturation", label: "Sat", min: -100, max: 100, step: 1, scale: 1, unit: "" },
+    { key: "saturation", label: "Saturation", min: -100, max: 100, step: 1, scale: 1, unit: "" },
   ],
 };
 
@@ -162,6 +163,7 @@ export function LayerPanel({
   onSetLayerEffects,
   onMoveLayer,
   onCommit,
+  onClose,
   onPointerEnter,
   palettes,
 }: {
@@ -175,6 +177,7 @@ export function LayerPanel({
   onSetLayerEffects: (idx: number, effects: LayerEffect[]) => void;
   onMoveLayer: (idx: number, dir: -1 | 1) => void;
   onCommit: () => void;
+  onClose: () => void;
   onPointerEnter: () => void;
   palettes: { name: string; colors: string[] }[];
 }) {
@@ -182,6 +185,15 @@ export function LayerPanel({
   /** Index of the effect whose colour is being picked, or `null`. */
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
 
+  /**
+   * Every layer edit goes through here.
+   *
+   * `Layer` is part of `ProjectSnapshot`, so an uncommitted change to one is
+   * worse than merely not being undoable: the *next* commit captures it, and
+   * undoing that later edit then rolls this one back too, as an invisible side
+   * effect. Visibility and reorder used to do exactly that — hide a layer, paint
+   * a stroke, undo the stroke, and the layer came back.
+   */
   const commit = (fn: () => void) => {
     fn();
     onCommit();
@@ -221,31 +233,20 @@ export function LayerPanel({
   };
 
   return (
-    <div
-      /* Middle-right at every width. The small-screen layout used to sit
-         bottom-centre, on top of the colour swatches — and, once hatch layers
-         added a bar along the bottom, on top of that too. */
-      className="absolute z-40 flex flex-col gap-1.5 p-3 bg-card/80 backdrop-blur-lg border rounded-2xl shadow-2xl cursor-default
-        bottom-1/2 right-4 translate-y-1/2"
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-      onPointerEnter={onPointerEnter}
-    >
-      <div className="flex items-center justify-between gap-2 mb-0.5">
-        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
-          Layers
-        </span>
-        {/* Adding a layer is a structural edit, so it goes through `commit`
-            and lands in the undo stack like duplicate and delete do. */}
+    <PanelShell
+      title="Layers"
+      tour="layers-panel"
+      trailing={
+        /* Adding a layer is a structural edit, so it goes through `commit`
+           and lands in the undo stack like duplicate and delete do. */
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+              className="inline-flex items-center justify-center h-6 w-6 rounded text-white/50 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-30"
               disabled={!canAdd}
               title={canAdd ? "Add layer" : "Layer limit reached"}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-4 h-4" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" sideOffset={6}>
@@ -259,9 +260,12 @@ export function LayerPanel({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-
-      <div className="flex flex-col gap-1">
+      }
+      onClose={onClose}
+      onPointerEnter={onPointerEnter}
+    >
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 p-4">
+      <div className="flex flex-col gap-1 shrink-0">
         {[...layers].reverse().map((layer) => {
           const i = layers.indexOf(layer);
           const isFirst = i === 0;
@@ -271,7 +275,7 @@ export function LayerPanel({
             <div
               key={layer.id}
               className={cn(
-                "flex items-center gap-1 p-1.5 rounded-lg border transition-colors",
+                "flex items-center gap-1.5 p-2 rounded-lg border transition-colors",
                 i === activeLayerIdx
                   ? "bg-cyan-500/20 border-cyan-500/40"
                   : "bg-transparent border-transparent hover:bg-accent/50",
@@ -279,67 +283,67 @@ export function LayerPanel({
             >
               <button
                 className={cn(
-                  "inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-accent-foreground transition-colors",
+                  "inline-flex items-center justify-center h-7 w-7 shrink-0 rounded text-muted-foreground hover:text-accent-foreground transition-colors",
                   !layer.visible && "opacity-40",
                 )}
-                onClick={() => onToggleVisibility(i)}
+                onClick={() => commit(() => onToggleVisibility(i))}
                 title={layer.visible ? "Hide layer" : "Show layer"}
               >
                 {layer.visible ? (
-                  <Eye className="w-3.5 h-3.5" />
+                  <Eye className="w-4 h-4" />
                 ) : (
-                  <EyeOff className="w-3.5 h-3.5" />
+                  <EyeOff className="w-4 h-4" />
                 )}
               </button>
 
               <button
-                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground truncate hover:text-foreground min-w-[60px] text-left"
+                className="flex-1 min-w-0 flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground text-left"
                 onClick={() => onSelectLayer(i)}
                 title={`${layer.name} — ${layerKind(layer)} layer`}
               >
                 {layerKind(layer) === "hatch" ? (
-                  <HatchGlyph className="w-3 h-3 shrink-0 text-amber-400/80" />
+                  <HatchGlyph className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />
                 ) : (
-                  <Square className="w-3 h-3 shrink-0 opacity-50" />
+                  <Square className="w-3.5 h-3.5 shrink-0 opacity-50" />
                 )}
                 <span className="truncate">{layer.name}</span>
               </button>
 
-              <div className="flex items-center gap-0.5 ml-auto">
+              <div className="flex items-center gap-0.5 shrink-0">
                 <button
-                  className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+                  className="inline-flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
                   onClick={() => commit(() => onDuplicateLayer(i))}
                   disabled={!canAdd}
                   title="Duplicate layer"
                 >
-                  <Copy className="w-3 h-3" />
+                  <Copy className="w-3.5 h-3.5" />
                 </button>
 
                 <button
-                  className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+                  className="inline-flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
                   onClick={() => commit(() => onDeleteLayer(i))}
                   disabled={isFirst}
                   title={isFirst ? "Cannot delete background layer" : "Delete layer"}
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
 
                 <div className="flex flex-col -space-y-0.5">
                   <button
-                    className="inline-flex items-center justify-center h-3 w-4 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
-                    onClick={() => onMoveLayer(i, 1)}
+                    className="inline-flex items-center justify-center h-3.5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
+                    onClick={() => commit(() => onMoveLayer(i, 1))}
                     disabled={isLast}
                     title="Move layer up"
                   >
-                    <ChevronUp className="w-2.5 h-2.5" />
+                    <ChevronUp className="w-3 h-3" />
                   </button>
                   <button
-                    className="inline-flex items-center justify-center h-3 w-4 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
-                    onClick={() => onMoveLayer(i, -1)}
+                    className="inline-flex items-center justify-center h-3.5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-20"
+                    onClick={() => commit(() => onMoveLayer(i, -1))}
                     disabled={isFirst}
                     title="Move layer down"
                   >
-                    <ChevronDown className="w-2.5 h-2.5" />
+                    <ChevronDown className="w-3 h-3" />
                   </button>
                 </div>
               </div>
@@ -349,19 +353,19 @@ export function LayerPanel({
       </div>
 
       {showEffects && (
-        <div className="mt-1 pt-2 border-t border-border/50 flex flex-col gap-1.5">
+        <div className="pt-3 border-t border-border/50 flex flex-col gap-1.5 shrink-0">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
+            <span className="text-xs uppercase tracking-wide text-white/60">
               Effects
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
+                  className="inline-flex items-center justify-center h-6 w-6 rounded text-white/50 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-30"
                   disabled={allAdded}
                   title={allAdded ? "No more effects available" : "Add effect"}
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={6}>
@@ -446,40 +450,38 @@ export function LayerPanel({
           </div>
 
           {effects.length === 0 && (
-            <span className="text-[10px] text-muted-foreground/60 italic">
-              None
-            </span>
+            <span className="text-xs text-muted-foreground/60 italic">None</span>
           )}
 
           {effects.map((effect, i) => (
             <div
               key={effect.type}
-              className="flex flex-col gap-1 p-1.5 rounded-lg bg-accent/30"
+              className="flex flex-col gap-1.5 p-2 rounded-lg bg-accent/30"
             >
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <button
                   className={cn(
-                    "inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-accent-foreground transition-colors",
+                    "inline-flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:text-accent-foreground transition-colors",
                     !effect.enabled && "opacity-40",
                   )}
                   onClick={() => commit(() => patchEffect(i, { enabled: !effect.enabled }))}
                   title={effect.enabled ? "Disable effect" : "Enable effect"}
                 >
                   {effect.enabled ? (
-                    <Eye className="w-3.5 h-3.5" />
+                    <Eye className="w-4 h-4" />
                   ) : (
-                    <EyeOff className="w-3.5 h-3.5" />
+                    <EyeOff className="w-4 h-4" />
                   )}
                 </button>
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
                   <EffectGlyph
                     type={effect.type}
-                    className="w-3 h-3 shrink-0 opacity-60"
+                    className="w-3.5 h-3.5 shrink-0 opacity-60"
                   />
                   {EFFECT_LABEL[effect.type]}
                 </span>
                 <button
-                  className="ml-auto inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                  className="ml-auto inline-flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                   onClick={() =>
                     commit(() =>
                       onSetLayerEffects(
@@ -490,7 +492,7 @@ export function LayerPanel({
                   }
                   title="Remove effect"
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -501,7 +503,7 @@ export function LayerPanel({
               {EFFECT_SLIDERS[effect.type].map(
                 ({ key, label, min = 0, max = 1, step = 0.01, scale = 100, unit = "%" }) => (
                   <label key={key} className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0 w-12">
+                    <span className="text-xs uppercase tracking-wide text-white/60 shrink-0 w-20">
                       {label}
                     </span>
                     <input
@@ -518,7 +520,7 @@ export function LayerPanel({
                       onKeyUp={onCommit}
                       className="flex-1 min-w-0 h-2 accent-cyan-500 disabled:opacity-40"
                     />
-                    <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-right shrink-0">
+                    <span className="text-xs font-mono text-white/50 tabular-nums w-10 text-right shrink-0">
                       {Math.round(
                         (effect as unknown as Record<string, number>)[key] *
                           scale,
@@ -532,11 +534,11 @@ export function LayerPanel({
               {effect.type === "glow" && (
                 <>
                   <label className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground shrink-0 w-12">
+                    <span className="text-xs uppercase tracking-wide text-white/60 shrink-0 w-20">
                       Colour
                     </span>
                     <button
-                      className="flex-1 min-w-0 h-5 rounded border border-border/60 disabled:opacity-40"
+                      className="flex-1 min-w-0 h-6 rounded border border-border/60 disabled:opacity-40"
                       style={{ background: resolveColor(effect.color) }}
                       disabled={!effect.enabled}
                       onClick={() => setColorPickerFor(i)}
@@ -544,7 +546,7 @@ export function LayerPanel({
                     />
                   </label>
                   {!hasSurfaceBelow && (
-                    <span className="text-[10px] leading-snug text-amber-400/80">
+                    <span className="text-xs leading-snug text-amber-400/80">
                       Nothing below to catch it — a glow only falls on the solid
                       cells of layers underneath.
                     </span>
@@ -575,6 +577,7 @@ export function LayerPanel({
         palettes={palettes}
         title="Glow colour"
       />
-    </div>
+      </div>
+    </PanelShell>
   );
 }

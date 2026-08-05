@@ -30,7 +30,11 @@ byte-identically to no effect" true for each type's own definition of nothing.
 
 Replaces each corner of a contiguous same-colour region with a circular arc.
 `src/lib/round-corners.ts` is the maths (pure); the UI is an Effects section in
-`LayerPanel` under the selected fill layer.
+the Layers drawer under the selected fill layer. All four effects share one row
+shape driven by `EFFECT_SLIDERS`, so a new one is a table entry rather than a
+branch — the geometry effects are 0–1 fractions shown as a percentage and colour
+adjust carries its own signed range, which is the only reason that table has a
+range at all.
 
 **Regions** are extracted by the same boundary-following ring walk
 `mergeTrianglesByColor` uses — count lattice edges, keep the ones seen once,

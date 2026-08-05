@@ -264,6 +264,23 @@ export function useHistory() {
     [],
   );
 
+  /**
+   * Replaces the painted map of *every* layer at once, by index.
+   *
+   * `setPainted` can only ever address `layers[activeLayerIdx]`, which is right
+   * for painting — but the move tool's ALT-drag translates the whole stack, and
+   * expressing that as N calls would produce N renders and N intermediate states
+   * where the layers have slid apart from each other.
+   *
+   * Maps must be precomputed by the caller: the updater has to stay pure,
+   * because StrictMode replays it.
+   */
+  const setAllPainted = useCallback((maps: Record<string, string>[]) => {
+    setLayers((prev) =>
+      prev.map((l, i) => (maps[i] ? { ...l, painted: maps[i] } : l)),
+    );
+  }, []);
+
   const paintedRef = useRef(painted);
   paintedRef.current = painted;
 
@@ -280,12 +297,28 @@ export function useHistory() {
     [historyIdx],
   );
 
+  /**
+   * Which layer is selected is *where you are*, not what you made, so undo and
+   * redo leave it alone — exactly as they leave the grid settings alone, and for
+   * the same reason: selecting a layer between two strokes should not be rolled
+   * back by undoing one of them. `activeLayerIdx` stays in `ProjectSnapshot`
+   * because a saved project should reopen on the layer it was left on; it is
+   * only *applying* it that is wrong here.
+   *
+   * The clamp is the whole reason this is a function rather than a deletion:
+   * undoing an "add layer" shortens the stack, and an index left pointing past
+   * the end selects nothing.
+   */
+  const keepActiveLayer = (target: ProjectSnapshot) => {
+    setActiveLayerIdx((i) => Math.max(0, Math.min(i, target.layers.length - 1)));
+  };
+
   const handleUndo = useCallback(() => {
     if (historyIdx <= 0) return;
     const from = history[historyIdx];
     const target = history[historyIdx - 1];
     setLayers(target.layers);
-    setActiveLayerIdx(target.activeLayerIdx);
+    keepActiveLayer(target);
     restoreRef.current(target, from);
     setHistoryIdx((i) => i - 1);
   }, [history, historyIdx]);
@@ -295,7 +328,7 @@ export function useHistory() {
     const from = history[historyIdx];
     const target = history[historyIdx + 1];
     setLayers(target.layers);
-    setActiveLayerIdx(target.activeLayerIdx);
+    keepActiveLayer(target);
     restoreRef.current(target, from);
     setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
@@ -403,6 +436,7 @@ export function useHistory() {
     activeLayerIdx,
     painted,
     setPainted,
+    setAllPainted,
     paintedRef,
     history,
     historyIdx,

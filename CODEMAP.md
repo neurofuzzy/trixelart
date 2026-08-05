@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-05 06:18:30
-# Files: 88
-# Lines of code: ~20765
+# Last updated: 2026-08-05 07:16:23
+# Files: 89
+# Lines of code: ~21081
 ```
 - **/app**
   - **/lib**
@@ -69,7 +69,7 @@
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
   - [GridSettingsPanel.tsx](../src/components/GridSettingsPanel.tsx)
-    - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer — same she...
+    - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer. One of th...
   - [HatchBar.tsx](../src/components/HatchBar.tsx)
     - Function: `HatchGlyph` - Lines at the family's true angle. Used both for...
     - Function: `HatchBar`
@@ -81,6 +81,10 @@
     - Function: `Model3DPreview` - Orbitable 3D preview of the export model, lit b...
   - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
     - Function: `PalettePicker`
+  - [PanelShell.tsx](../src/components/PanelShell.tsx)
+    - Type: `PanelId` - The four right-hand drawers. Exactly one may be...
+    - Function: `panelForTool` - The drawer a tool owns, or `null` for the tools...
+    - Function: `PanelShell` - The drawer shell: full-height, flush to the rig...
   - [PatternPalette.tsx](../src/components/PatternPalette.tsx)
     - Function: `PatternPalette`
   - [PatternPanel.tsx](../src/components/PatternPanel.tsx)
@@ -149,7 +153,7 @@
     - [paint-tool.ts](../src/lib/tools/paint-tool.ts)
       - Variable: `paintTool`
     - [pan-tool.ts](../src/lib/tools/pan-tool.ts)
-      - Variable: `panTool`
+      - Variable: `panTool` - The move tool: drags the artwork across the lat...
     - [pattern-tool.ts](../src/lib/tools/pattern-tool.ts)
       - Variable: `PATTERN_MIN_N` - The hex grid can be off (N = 0) or very coarse,...
       - Function: `patternBrushN`
@@ -157,7 +161,7 @@
     - [pick-value.ts](../src/lib/tools/pick-value.ts)
       - Function: `pickValueAt` - Adopts whatever is under the cursor as the curr...
     - [select-tool.ts](../src/lib/tools/select-tool.ts)
-      - Variable: `selectTool`
+      - Variable: `selectTool` - Hex selection, and dragging what is inside it. ...
     - [selection-utils.ts](../src/lib/tools/selection-utils.ts)
       - Function: `snapshotKey`
       - Function: `upsertSelectionSnapshot`
@@ -166,6 +170,7 @@
     - [types.ts](../src/lib/tools/types.ts)
       - Type: `Tool`
       - Function: `isToolAllowed` - The single source of truth for which tools a la...
+      - Interface: `SelectItem` - One selected hex's contents, captured at pointe...
       - Interface: `View`
       - Interface: `Pt`
       - Type: `DragState`
