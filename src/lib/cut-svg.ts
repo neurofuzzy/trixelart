@@ -2,6 +2,7 @@ import { getTriVertices, stringToTri } from "@/lib/grid-math";
 import { signedArea, computeModelTransform, type Pt } from "@/lib/mesh-export";
 import { cutLayers, type CutFrame } from "@/lib/cut-mesh";
 import type { CutPlan } from "@/lib/cut-export";
+import { flattenRoundedRing, roundPolygon } from "@/lib/round-corners";
 
 // ---------------------------------------------------------------------------
 // Cut plan → one layered SVG for cutting machines (see docs/fabrication-export
@@ -206,16 +207,38 @@ function hexNeck(
 /**
  * Traces the union boundary of a triangle set as closed loops (world coords).
  * With `merge`, corner-touching pieces are welded with tiny-hexagon necks.
+ *
+ * `round` is the corner-rounding radius in world units, 0 for none. Unlike the
+ * flat artwork, a cut sheet has no airtightness constraint to respect — the
+ * sheets are *nested*, so a rounded piece sits on a strictly larger one and
+ * cannot open a gap — hence every non-collinear corner is eligible and no
+ * boundary-degree test is needed.
+ *
+ * The result is flattened back to a polyline rather than carrying arcs, so
+ * everything downstream (bounds, the SVG path emit, and the 3D preview's
+ * extrusion) keeps working on plain points. A cutter follows a dense polyline
+ * as happily as an arc.
+ *
+ * Rounding runs *after* the necks are inserted, and the run clamp is what makes
+ * that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
+ * those vertices to nearly nothing on its own and the tiny-hexagon bridge keeps
+ * the shape it was designed to have.
  */
 export function traceUnionLoops(
   keys: string[],
   merge = false,
   neck = 0,
+  round = 0,
 ): Pt[][] {
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
   const raw = walkLoops(edges, merge);
-  return raw.map((loop) => hexNeck(loop, deg, merge ? neck : 0));
+  const loops = raw.map((loop) => hexNeck(loop, deg, merge ? neck : 0));
+  if (round <= 0) return loops;
+  return loops.map((loop) => {
+    const rounded = roundPolygon(loop, round, () => true);
+    return flattenRoundedRing(rounded).map(([x, y]) => ({ x, y }));
+  });
 }
 
 /**
@@ -256,6 +279,8 @@ export interface CutSVGOptions {
   mergeIslands?: boolean;
   /** Hexagon-neck radius for merges, in world units (0 = sharp weld). */
   neck?: number;
+  /** Corner-rounding radius in world units (0 = sharp), from the layer effect. */
+  round?: number;
 }
 
 /** Gap between tiled layers, in mm. */
@@ -289,7 +314,9 @@ export function buildCutSVG(
   const merge = options.mergeIslands ?? false;
   const neck = options.neck ?? 0;
 
-  const traced = layers.map((l) => traceUnionLoops(l.keys, merge, neck));
+  const traced = layers.map((l) =>
+    traceUnionLoops(l.keys, merge, neck, options.round ?? 0),
+  );
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,

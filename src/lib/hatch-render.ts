@@ -1,6 +1,7 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
-import { layerKind, type Layer } from "@/hooks/use-history";
+import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
+import { OUTLINE_WEIGHT_AT_FULL } from "@/lib/round-corners";
 import {
   clipSegmentToRect,
   clipSegmentToTriangle,
@@ -15,17 +16,53 @@ import {
 /** One drawing pass for an exporter: either a batch of fill layers flattened
  *  together, or a single hatch layer. */
 export type RenderStep =
-  | { kind: "fill"; painted: Record<string, string> }
+  | { kind: "fill"; painted: Record<string, string>; effects: LayerEffect[] }
   | { kind: "hatch"; painted: Record<string, string> };
 
+/** The rounding radius a fill step should be drawn with, or 0 for none. Effects
+ *  are a list so a second one can be added later; today exactly one changes
+ *  geometry, and a step with none must render identically to before effects
+ *  existed. */
+export function stepRoundRadius(step: RenderStep): number {
+  if (step.kind !== "fill") return 0;
+  for (const e of step.effects) {
+    if (e.type === "roundCorners" && e.enabled) return e.radius;
+  }
+  return 0;
+}
+
+/** The outline stroke width a fill step should be drawn with, in world units,
+ *  or 0 for none. Like `stepRoundRadius`, an effect whose weight is zero is a
+ *  no-op and must render identically to no effect at all. */
+export function stepOutlineWeight(step: RenderStep): number {
+  if (step.kind !== "fill") return 0;
+  for (const e of step.effects) {
+    if (e.type === "outline" && e.enabled) {
+      return e.weight * OUTLINE_WEIGHT_AT_FULL;
+    }
+  }
+  return 0;
+}
+
 /**
- * Visible layers, bottom to top, with *consecutive* fill layers coalesced.
+ * Visible layers, bottom to top, with *consecutive* effect-free fill layers
+ * coalesced.
  *
  * The coalescing is what keeps hatch-free documents exporting exactly as before:
  * `generateSVG` used to receive one pre-flattened map, so `mergeTrianglesByColor`
  * welded shapes across layer boundaries. Emitting a group per layer instead
  * would silently regress that merge. A run is only broken where a hatch layer
  * genuinely sits between fills — which is correct, because z-order demands it.
+ *
+ * **A run is also broken wherever either side carries an active effect.** An
+ * effect reads the step's coalesced map to find region boundaries, so flattening
+ * two layers together lets one layer's cells influence the other's geometry:
+ * two same-colour rounded layers would weld into a single region and round as
+ * one shape, an unrounded layer's cells would be pulled into a neighbour's
+ * rounded region, and two different radii would silently pick one. Layers with
+ * an effect must round against their *own* painted content, so each one is its
+ * own step. Only layers with none coalesce, which is the common case (all of
+ * them carrying none).
  */
 export function buildRenderPlan(layers: Layer[]): RenderStep[] {
   const steps: RenderStep[] = [];
@@ -35,11 +72,17 @@ export function buildRenderPlan(layers: Layer[]): RenderStep[] {
       steps.push({ kind: "hatch", painted: layer.painted });
       continue;
     }
+    const effects = activeEffects(layer);
     const last = steps[steps.length - 1];
-    if (last && last.kind === "fill") {
+    if (
+      last &&
+      last.kind === "fill" &&
+      last.effects.length === 0 &&
+      effects.length === 0
+    ) {
       Object.assign(last.painted, layer.painted);
     } else {
-      steps.push({ kind: "fill", painted: { ...layer.painted } });
+      steps.push({ kind: "fill", painted: { ...layer.painted }, effects });
     }
   }
   return steps;

@@ -11,6 +11,52 @@ export type LayerKind = "fill" | "hatch";
  *  everywhere rather than touching `.kind` directly, or old saves misbehave. */
 export const layerKind = (l: { kind?: LayerKind }): LayerKind => l.kind ?? "fill";
 
+/**
+ * Rounds the corners of every contiguous same-colour region on the layer.
+ *
+ * `radius` is a 0–1 fraction of one cell stride (`ROUND_RADIUS_AT_FULL`, i.e.
+ * `SIDE`), stored as a fraction so the saved value does not depend on `SIDE` —
+ * but it denotes an absolute world distance, the *same* one at every corner.
+ * That is what lets neighbouring polygons meet airtight under one setting; it is
+ * cut back only where the local geometry cannot hold it. See
+ * `lib/round-corners.ts`.
+ */
+export interface RoundCornersEffect {
+  type: "roundCorners";
+  /** 0–1 fraction of one cell stride. */
+  radius: number;
+  enabled: boolean;
+}
+
+/** A non-destructive per-layer geometry filter. `painted` is never touched —
+ *  effects are applied when geometry is built for rendering, so switching one
+ *  off restores the artwork exactly. */
+export interface OutlineEffect {
+  type: "outline";
+  /** 0–1 fraction of one cell stride; the stroke width of the region boundary.
+   *  See `OUTLINE_WEIGHT_AT_FULL`. */
+  weight: number;
+  enabled: boolean;
+}
+
+/** A non-destructive per-layer geometry filter. `painted` is never touched —
+ *  effects are applied when geometry is built for rendering, so switching one
+ *  off restores the artwork exactly. */
+export type LayerEffect = RoundCornersEffect | OutlineEffect;
+
+/** Reads a layer's effects, defaulting an absent field to none. Use this rather
+ *  than touching `.effects` directly, exactly as with `layerKind`. */
+export const layerEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
+  l.effects ?? [];
+
+/** The effects that actually change geometry — enabled, and not a no-op. An
+ *  effect list that reduces to nothing here must render byte-identically to no
+ *  effect at all, which is what keeps existing exports unchanged. */
+export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
+  layerEffects(l).filter((e) =>
+    e.enabled && (e.type === "roundCorners" ? e.radius > 0 : e.weight > 0),
+  );
+
 export interface Layer {
   id: string;
   name: string;
@@ -19,6 +65,9 @@ export interface Layer {
   kind?: LayerKind;
   painted: Record<string, string>;
   visible: boolean;
+  /** Absent means none, so every document saved before effects existed keeps
+   *  working with no migration — the same contract as `kind`. */
+  effects?: LayerEffect[];
 }
 
 export interface ProjectSnapshot {
@@ -32,6 +81,11 @@ export interface ProjectSnapshot {
   /** Saved pattern-brush stacks; see `tri-pattern.ts`. */
   patternPresets: unknown[];
   lastPaintTri: string | null;
+  /** Set only on snapshots whose hex spacing changed as part of the edit
+   *  (the spread-hex-artwork operation). Undo/redo must restore the spacing
+   *  from these — unlike ordinary view settings, which are deliberately left
+   *  alone so changing one between strokes is not rolled back by Ctrl+Z. */
+  spreadHex?: boolean;
 }
 
 const STORAGE_KEY = "trixel-save";
@@ -82,11 +136,16 @@ export function useHistory() {
   const layersRef = useRef(layers);
   layersRef.current = layers;
 
-  const restoreRef = useRef<(s: ProjectSnapshot) => void>(() => {});
+  const restoreRef = useRef<(s: ProjectSnapshot, from: ProjectSnapshot) => void>(
+    () => {},
+  );
 
-  const registerRestore = useCallback((fn: (s: ProjectSnapshot) => void) => {
-    restoreRef.current = fn;
-  }, []);
+  const registerRestore = useCallback(
+    (fn: (s: ProjectSnapshot, from: ProjectSnapshot) => void) => {
+      restoreRef.current = fn;
+    },
+    [],
+  );
 
   useEffect(() => {
     try {
@@ -162,19 +221,21 @@ export function useHistory() {
 
   const handleUndo = useCallback(() => {
     if (historyIdx <= 0) return;
+    const from = history[historyIdx];
     const target = history[historyIdx - 1];
     setLayers(target.layers);
     setActiveLayerIdx(target.activeLayerIdx);
-    restoreRef.current(target);
+    restoreRef.current(target, from);
     setHistoryIdx((i) => i - 1);
   }, [history, historyIdx]);
 
   const handleRedo = useCallback(() => {
     if (historyIdx >= history.length - 1) return;
+    const from = history[historyIdx];
     const target = history[historyIdx + 1];
     setLayers(target.layers);
     setActiveLayerIdx(target.activeLayerIdx);
-    restoreRef.current(target);
+    restoreRef.current(target, from);
     setHistoryIdx((i) => i + 1);
   }, [history, historyIdx]);
 
@@ -217,6 +278,8 @@ export function useHistory() {
           ...makeLayer(`Layer ${nextNum}`, layerKind(src)),
           painted: { ...src.painted },
           visible: src.visible,
+          // Deep-copied, or editing one copy's radius would move the other's.
+          effects: layerEffects(src).map((e) => ({ ...e })),
         };
         const next = [...prev, dup];
         setActiveLayerIdx(next.length - 1);
@@ -225,6 +288,19 @@ export function useHistory() {
     },
     [],
   );
+
+  /** Replaces one layer's effect stack. Like every other structural layer edit
+   *  the caller follows this with `onCommit()`, so it lands in the undo stack —
+   *  effects live on the `Layer`, which is already part of `ProjectSnapshot`. */
+  const setLayerEffects = useCallback((idx: number, effects: LayerEffect[]) => {
+    setLayers((prev) => {
+      const l = prev[idx];
+      if (!l) return prev;
+      const next = [...prev];
+      next[idx] = { ...l, effects };
+      return next;
+    });
+  }, []);
 
   const toggleLayerVisibility = useCallback((idx: number) => {
     setLayers((prev) => {
@@ -277,6 +353,7 @@ export function useHistory() {
     deleteLayer,
     duplicateLayer,
     toggleLayerVisibility,
+    setLayerEffects,
     moveLayer,
     setActiveLayerIdx,
     resetToSingleLayer,

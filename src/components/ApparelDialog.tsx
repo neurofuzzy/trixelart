@@ -5,8 +5,9 @@ import { createPortal } from "react-dom";
 import { Shirt, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, normalizeProjectFilename } from "@/lib/utils";
-import type { Layer } from "@/hooks/use-history";
+import { activeEffects, layerKind, type Layer } from "@/hooks/use-history";
 import { resolveColor } from "@/lib/constants";
+import { OUTLINE_WEIGHT_AT_FULL } from "@/lib/round-corners";
 import { canvasToPngBlob, downloadBlob } from "@/lib/png-export";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
 import {
@@ -23,6 +24,7 @@ import {
   apparelPreviewView,
   artworkBounds,
   cutPieceReport,
+  outlineCutCircles,
   renderApparelPreview,
   renderApparelToCanvas,
   unitsPerMm,
@@ -153,12 +155,42 @@ export function ApparelDialog({
     [bounds, gridRotation, settings.widthInches, settings.dpi],
   );
 
+  // Split the fill layers: stroked (outline) layers cannot be cut along their
+  // region boundaries — the outline *is* the boundary, so cutting there would
+  // erase it. They get a circle punched at every lattice vertex instead, sized
+  // to the stroke, while ordinary fills keep the boundary cut.
+  const { boundaryFills, outlineLayers } = useMemo(() => {
+    const boundary: Record<string, string> = {};
+    const outlines: { painted: Record<string, string>; weight: number }[] = [];
+    for (const layer of layers) {
+      if (!layer.visible || layerKind(layer) === "hatch") continue;
+      const outline = activeEffects(layer).find((e) => e.type === "outline");
+      if (outline) {
+        outlines.push({
+          painted: layer.painted,
+          weight: outline.weight * OUTLINE_WEIGHT_AT_FULL,
+        });
+      } else {
+        Object.assign(boundary, layer.painted);
+      }
+    }
+    return { boundaryFills: boundary, outlineLayers: outlines };
+  }, [layers]);
+
   // Only recomputed when the fills change, not on every slider drag: the joined
   // runs are a property of the artwork, and the gap width only scales the pen.
   const cutSegments = useMemo(
-    () => (open && settings.cut ? apparelCutSegments(fills) : []),
-    [open, settings.cut, fills],
+    () => (open && settings.cut ? apparelCutSegments(boundaryFills) : []),
+    [open, settings.cut, boundaryFills],
   );
+  // One circle per lattice vertex of each outline layer, radius a third of the
+  // stroke — a controlled break point wherever the stroke passes a vertex.
+  const cutCircles = useMemo(() => {
+    if (!open || !settings.cut) return [];
+    return outlineLayers.flatMap(({ painted, weight }) =>
+      outlineCutCircles(painted, weight / 3),
+    );
+  }, [open, settings.cut, outlineLayers]);
   const report = useMemo(
     () => (open && settings.cut ? cutPieceReport(fills) : null),
     [open, settings.cut, fills],
@@ -198,6 +230,7 @@ export function ApparelDialog({
         view,
         cutSegments,
         cutWorld,
+        cutCircles,
         garmentHex,
       );
       c.style.width = `${wrap.clientWidth}px`;
@@ -216,6 +249,7 @@ export function ApparelDialog({
     zoom,
     cutSegments,
     cutWorld,
+    cutCircles,
     garmentHex,
   ]);
 
@@ -233,6 +267,7 @@ export function ApparelDialog({
         apparelExportView(bounds, size),
         cutSegments,
         cutWorld,
+        cutCircles,
       );
       const blob = await canvasToPngBlob(canvas);
       if (!blob) {
@@ -252,6 +287,7 @@ export function ApparelDialog({
     gridRotation,
     cutSegments,
     cutWorld,
+    cutCircles,
     projectName,
     onOpenChange,
   ]);
@@ -350,7 +386,10 @@ export function ApparelDialog({
                 after a few washes. Punching a thin gap along every colour
                 boundary breaks the print into separate pieces that flex with the
                 fabric. A flat field of one colour stays whole — there is no
-                boundary inside it.
+                boundary inside it. Outline (stroked) layers are cut instead by
+                a small circle at every lattice vertex, sized to a third of the
+                stroke, so the strokes gain a controlled break point at each
+                vertex rather than being erased.
               </p>
             </Section>
 

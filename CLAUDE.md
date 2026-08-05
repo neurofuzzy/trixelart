@@ -178,6 +178,196 @@ Reduce writes to layers *other* than the active one, so `applyHatchify` rebuilds
 
 The selection is cleared wholesale before the new marks are merged, so re-running with different settings replaces rather than accumulates. Settings are view state → `trixel-settings`, like the brush.
 
+## Layer effects
+
+Non-destructive per-layer geometry filters. `Layer.effects` is optional and
+**absent means none** — read it through `layerEffects(l)` / `activeEffects(l)`
+(`use-history.ts`), never `l.effects` directly, exactly as with `layerKind`, and
+every pre-existing save, project JSON and history snapshot keeps working with no
+migration. Effects never touch `painted`: the lattice data is untouched and
+switching one off restores the artwork byte for byte (verified — a disabled or
+zero-radius effect produces identical SVG output).
+
+`Layer` is already inside `ProjectSnapshot`, so effects ride undo/redo,
+`trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
+is the reason they live on the layer rather than in `trixel-settings`: they are
+authored content, and putting them there costs nothing to persist. They are a
+list so a second effect can be added without re-plumbing; today two change
+geometry (round corners and outline), and both may sit on the same layer. Hatch
+layers are excluded — line work has no filled region to reshape.
+
+### Round corners
+
+Replaces each corner of a contiguous same-colour region with a circular arc.
+`src/lib/round-corners.ts` is the maths (pure); the UI is an Effects section in
+`LayerPanel` under the selected fill layer.
+
+**Regions** are extracted by the same boundary-following ring walk
+`mergeTrianglesByColor` uses — count lattice edges, keep the ones seen once,
+chain them into loops. Colours are compared **resolved, not encoded**,
+deliberately breaking the usual rule for the same reason `region-outline.ts`
+does: the only question is whether the eye sees a boundary.
+
+**Airtightness is a property of the vertex, not of the polygon.** Six triangles
+meet at every lattice vertex, so a region's interior angle there is a multiple of
+60°. Where exactly two regions meet, their angles are θ and 360−θ and both
+boundaries run along **the same two rays** — one region traverses them one way,
+the other the reverse. A single circle of radius r tangent to both rays serves
+both at once: convex for the θ<180 side, concave for the other. So **there is no
+separate concave code path**; each region rounds its own ring in ignorance of its
+neighbours and the results abut exactly. If a concave special case ever seems
+necessary, something upstream is wrong.
+
+**Junctions are left sharp.** Where three or more regions meet, three circles
+tangent to two of the three rays leave an uncoverable curvilinear triangle
+belonging to no region. Hence the rule: *round a vertex iff exactly two boundary
+edges are incident to it* — counting unpainted as a colour, so the silhouette
+rounds too. The count is always even; 4 or 6 means a junction, or a region
+pinching against itself. Collinear pairs need no special case, the tangent
+distance being zero at 180°.
+
+**One radius, in world units, for the whole layer.** The slider is a 0–1 fraction
+of `ROUND_RADIUS_AT_FULL` = `SIDE` (one cell stride) — stored as a fraction so the
+saved value does not depend on `SIDE`, but denoting an absolute distance that is
+the *same at every corner*. Scaling each corner by its own maximum instead makes
+the radius vary from vertex to vertex — a lone triangle at 14.4 beside a corner
+at 86.6 — which is visibly not one radius and was the original bug here.
+
+**The clamp reads only the shared boundary.** Tangent distance is `r·cot(α/2)`,
+so an unclamped radius overruns its edge; each straight run of length `L` between
+two rounded corners requires `r·(cot(α₁/2) + cot(α₂/2)) ≤ L`, and each vertex
+takes `min(r, …)` over its two runs. Runs and angles belong to the *shared*
+boundary, so both regions compute an identical clamp and airtightness survives at
+every setting (verified exactly equal at 15%, 50% and 100%). Clamping on anything
+region-local — area, cell count, ring length — gives the two sides different radii
+and tears the seam open. That is the easy mistake here.
+
+Nothing clamps below `SIDE/(2√3)` ≈ 14.43, i.e. **28.9% of the slider**: that is
+where two 60° corners consume exactly one lattice edge between them, and it is
+also a single triangle's incircle, so a lone trixel is fully round there and
+cannot get rounder. Above it corners saturate progressively as their runs run
+out, tightest first, so the upper range still does real work on larger shapes.
+
+**Lattice vertices are keyed by integers, never by rounded coordinates.** Every
+vertex is `(i·SIDE + j·SIDE/2, j·H)`, and a triangle's corners are fixed integer
+offsets from its `(q, r)`. This is not just tidiness: `(r+1)·H` and `r·H + H`
+differ by an ulp so a coordinate key needs rounding, rounding reintroduces a
+`-0.000` vs `0.000` split that silently miscounts a vertex's degree, and the
+`toFixed` calls cost 4× the total runtime (81 ms → 19.7 ms on `mandala`, the
+largest bundled example). Edges pack as `(base vertex, direction)` — combining
+two vertex ids overflows the exact-integer range.
+
+**Rendering** — one shape, three backends, all driven off `ringTangents` so they
+cannot disagree about where an arc begins. The arc's centre and sweep are
+recovered from the two tangent points (`cornerArc`); canvas draws it with `arc`
+from the entry tangent, SVG emits explicit `A` commands with the sweep flag taken
+from the turn direction, and the cropped SVG flattens arcs to chords first,
+because an arc cannot survive Sutherland–Hodgman and that exporter clips for real
+rather than hiding overflow behind a `<clipPath>`. Canvas deliberately avoids
+`arcTo`: it re-derives the tangent distance from the corner, and where the run
+clamp has pulled the tangent points inward it adds a connecting line that doubles
+back along the edge — a hairpin sliver of the very curve the corner was meant to
+be.
+
+### Outline
+
+Swaps a fill layer's solid for a stroke of each region boundary at a selected
+weight; the interior stays empty. It takes **the same region rings as corner
+rounding** (`regionRings`), and the two effects compose: an outlined layer with
+a round-corners effect strokes the *rounded* rings. `stepRegionGeometry` in
+`round-corners.ts` returns the rings for either case as a single shape (plain
+rings carry `radius: 0` corners), so the renderers trace/stroke/fill one path —
+they never branch on whether the outline is rounded.
+
+The weight is a 0–1 fraction of `OUTLINE_WEIGHT_AT_FULL` = `SIDE`, stored as a
+fraction for the same reason as `radius` but denoting an absolute width, the same
+at every edge. A zero weight is a no-op: `activeEffects` drops it and the layer
+renders solid, byte-identical to no effect. Strokes join with `round`, which lands
+exactly on the stroke edge; a miter at the lattice's sharp 60° corners pokes ~2×
+past it (miter ratio 2), and beveling the same corner cuts back to the stroke's
+midpoint — both wrong for a uniform-width outline. Because two adjacent regions'
+outlines overlap at their shared boundary (each stroke is centred on it), the
+rings are drawn in a deterministic colour order — `regionRings` sorts by encoded
+colour index, then palette, so a lighter region's outline wins over a darker
+neighbour's. Outline is honoured exactly where corner rounding is — the canvas
+preview and the PNG/SVG (full + cropped) exports, all via `buildRenderPlan` — and
+deliberately not in the 3D/plotter fabrication paths, which walk `painted`
+directly and never saw rounding either. (The apparel cut is the exception: it
+must *not* ignore outline, because a stroked layer cut along its own boundary
+would erase itself — see below.) An SVG outline extends the document box by
+`weight/2` (a stroke is centred on the boundary); the crop export needs no box
+change since the crop rect is fixed.
+
+**`buildRenderPlan` carries the effects and stops coalescing across differing
+ones.** Coalescing flattens consecutive fill layers into one map, and rounding
+reads that map to find region boundaries — merging a rounded layer with an
+unrounded one would round the neighbour's cells, and merging two radii would
+silently pick one. `GridCanvas` was moved onto `buildRenderPlan` for this: it
+used to walk `layers` itself, which would have made the preview round a different
+set of regions than the export.
+
+Geometry is memoised on the plan in `GridCanvas`, since the draw effect re-runs
+on pan, zoom, hover and the ant-march tick, none of which change geometry. The
+hue and saturation offsets are dependencies of that memo even though they are not
+arguments — `resolveColor` reads them from module state, and without them a
+palette shift leaves stale colours and stale region boundaries baked in.
+
+### Rounding in the cutting export
+
+The cutting export honours the effect too, but through a **different path** — it
+has its own boundary tracer (`traceUnionLoops`) and groups by *sheet assignment*
+rather than by colour, so it picks up nothing from the colour-region code.
+
+**Sheets are nested** (level *j* holds every triangle at level *j* and above), so
+a rounded piece sits on a strictly larger one and cannot open a gap. There is no
+airtightness constraint and therefore no boundary-degree test: every
+non-collinear corner is eligible. That is why `roundPolygon` exists separately
+from `roundRing` — the two consumers answer "which vertices may round" in
+completely different ways, and only the *clamp* is shared, which is the part
+that is easy to get wrong.
+
+Rounding runs **after** the tiny-hexagon necks are inserted, and the run clamp is
+what makes that safe: a neck's edges are `neck`-sized, so the clamp drives the
+radius at those vertices to almost nothing by itself and the bridge keeps its
+designed shape.
+
+Loops are **flattened back to polylines**, not left carrying arcs, so bounds, the
+SVG path emit and the 3D extrusion all keep working on plain points. A cutter
+follows a dense polyline as happily as an arc.
+
+**The dialog's 3D preview is deliberately NOT rounded** — it still extrudes the
+raw lattice triangles, so it shows sharp corners while the SVG it downloads is
+rounded. That mismatch is known and is the lesser evil.
+
+Making it match needs a real polygon triangulator: `MeshBuilder.prism` takes only
+triangles, while a rounded sheet is an arbitrary polygon that may enclose holes.
+A hand-rolled ear clipper with hole bridging was tried and **reverted**. It looked
+right on synthetic blocks and failed badly on real artwork — up to 36% area error
+on multi-loop sheets, output degenerating into thin slivers, and O(n³) behaviour
+that hung on sheets with hundreds of boundary vertices. The failure modes are the
+classic ones (vertex-on-boundary containment tests, coincident vertices from the
+hole bridges), and getting them right means an earcut-class implementation, not
+a hundred lines. Do not retry it casually.
+
+One real bug did come out of that attempt and is fixed: `flattenRoundedRing`
+emitted **coincident consecutive points** wherever the clamp is tight enough that
+one corner's exit tangent lands exactly on the next corner's entry tangent. Those
+zero-length edges are invisible in a filled path but are degenerate input to
+anything that reasons about the polygon — a clipper, a triangulator, a plotter —
+so the flattener now dedupes before returning (measured 84 → 0 on a real sheet).
+
+`mergedFillPainted` throws away layer identity, so a per-layer radius cannot
+survive it: `mergedFillRoundFraction` takes the **largest enabled** radius among
+visible fill layers. Predictable, and it matches the intent — if the artwork
+reads as rounded, the cut should be too.
+
+**Still not honoured by the cut dialog's 3D preview (above), the plotter,
+apparel cuts, or the 3D export.** The plotter and apparel cuts run on
+`region-outline.ts`'s `RawSeg` — a line family plus a 1-D interval —
+which structurally cannot represent an arc; the 3D export extrudes the lattice
+directly. With rounding on, apparel *fills* round but its cut gaps still follow
+the straight lattice boundary, diverging slightly near corners.
+
 ## Crop & export
 
 Rectangular export region for print-on-demand (Spoonflower et al.) and for handing vector work to Inkscape. Separate from the whole-artwork `ExportDialog` in the hamburger menu, which is untouched.
@@ -261,6 +451,7 @@ Its own dialog, off the hamburger ("Export for Apparel..."), in `src/lib/apparel
 **The stencil cut.** A large unbroken area of transfer ink is stiff and cracks along fold lines after a few washes; breaking it into pieces separated by thin bare-fabric gaps lets the garment flex instead. The lines to cut along are the ones the plotter's outline pass already computes, punched out of the alpha with `destination-out`. Three decisions, all load-bearing:
 
 - **Colour boundaries only, never the lattice.** A flat field of one colour comes out as one piece. Gridding it would turn a drawing into a mosaic, and the trixel lattice is far finer than anything a garment needs.
+- **Stroked (outline) layers cut differently.** Cutting along an outline layer's own region boundaries would erase the ink — the outline *is* the boundary. `ApparelDialog` splits fill layers by `activeEffects`: ordinary fills keep the boundary cut, while each outline layer gets `outlineCutCircles` — a circle punched at **every** lattice vertex of its painted area, radius a third of the stroke weight. Where the outline stroke passes a vertex the circle cuts a controlled break point through it (so the print can flex at each vertex), and where it does not (the transparent interior) it cuts nothing.
 - **The silhouette is not cut** (`outlineSegments`' `silhouette: false`). The outside of the artwork is already the edge of the alpha, so cutting there buys no flex and only erodes the design by half a gap width. This is the **only** behavioural difference from the plotter's outline set.
 - **Round caps and joins, not butt.** A joined run ends where runs of the other two families cross it; a butt cap stops half a gap short of the crossing and leaves a hairline of ink bridging every junction, which welds the pieces back together and undoes the cut. Verified: three regions meeting at a point export as 3 alpha-connected components, not 1.
 
@@ -278,7 +469,7 @@ Two preview zooms. **Fit** shows the whole design; **Actual size** reproduces th
 
 **No 40 MB ceiling.** `MAX_UPLOAD_BYTES` is Spoonflower's rule and has nothing to do with a garment transfer; the dialog reports the dimensions and lets the encode fail loudly instead.
 
-The dialog draws every visible layer (hatch included, via `drawArtworkPlan`) but takes the cut's regions from `mergedFillPainted` alone — hatch is line work over the colour and bounds nothing of its own.
+The dialog draws every visible layer (hatch included, via `drawArtworkPlan`) but takes the cut's regions from the fill layers alone — hatch is line work over the colour and bounds nothing of its own. Outline layers are pulled out of that set before the boundary cut, and cut with `outlineCutCircles` instead.
 
 ## Symmetry function panel
 
@@ -353,8 +544,9 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 | `src/lib/tools/` | One module per tool + `types.ts` (`Tool`, `DragState`, `ToolContext`, `ToolHandler`) and `index.ts` (`toolMap`) |
 | `src/lib/crop.ts` | Lattice-snapped export crop (`CropRect`, `cropWorldBounds`, `cropDisplayBounds`, `fitCropToPainted`, `hitTestHandle`, `applyCropDrag`). Pure, no DOM |
 | `src/lib/png-export.ts` | Raster export: `renderCropToCanvas`, `renderCropPreview` (3×3 tiling), `cropPixelSize`, `drawArtworkPlan` (the shared world-space draw loop), 40 MB limit |
+| `src/lib/round-corners.ts` | Corner-rounding + outline effects: `regionRings`, `boundaryVertexDegrees`, `roundRing` (degree-2 test) / `roundPolygon` (geometry + run clamp, no eligibility policy), `roundedRegions` / `stepRegionGeometry` (rounded or plain, one shape), `ROUND_RADIUS_AT_FULL`, `OUTLINE_WEIGHT_AT_FULL`, `traceRoundedRing` (canvas) / `roundedRingToPath` (SVG) / `flattenRoundedRing` (clipping). Pure, no DOM |
 | `src/lib/region-outline.ts` | Region boundaries shared by the plotter and apparel exports: `outlineSegments` (+ `silhouette` option), `joinRuns` (1-D interval union + mask subtraction), `segToPoints`, `edgeDir`, `RawSeg`. Pure, no DOM |
-| `src/lib/apparel-export.ts` | PNG-with-alpha garment export: `artworkBounds`, `apparelPixelSize` (row snap + `EDGE_PAD`), `apparelCutSegments`, `cutPieceReport`, `renderApparelToCanvas`, `renderApparelPreview`. Pure except the `render*` functions |
+| `src/lib/apparel-export.ts` | PNG-with-alpha garment export: `artworkBounds`, `apparelPixelSize` (row snap + `EDGE_PAD`), `apparelCutSegments` (boundary cut) / `outlineCutCircles` (stroked-layer vertex break points), `CutCircle`, `cutPieceReport`, `renderApparelToCanvas`, `renderApparelPreview`. Pure except the `render*` functions |
 | `src/lib/tri-pattern.ts` | Pattern brush maths: `triPatternValue`, stack compositing, OKLab palette quantization. Pure, no DOM |
 | `src/lib/hatch.ts` | Hatch maths: `encodeHatch`/`decodeHatch`, `hatchU`/`hatchStep`, `hatchLinesInBox` (+ `HatchAlign`), `clipSegmentToTriangle`, `clipSegmentToRect`, `groupHatchMarks`, `rotateHatchValue`/`flipHatchValue`, `mapEncodedColor`. Pure, no DOM |
 | `src/lib/hatch-render.ts` | `buildRenderPlan` (the shared bottom-to-top layer walk), `drawHatchLayer` for canvas, `hatchStrokes`/`hatchStrokesBounds` for SVG |
@@ -386,7 +578,8 @@ The importer is split for this: `loadProjectText(text, label)` holds the contain
 - `HexCoord { c, k }` — `src/lib/hex-flower.ts`
 - `SelectionSnapshot { id, N, c, k, trixels }` — `src/lib/hex-flower.ts`
 - `Tool` — `src/lib/tools/types.ts` (`paint | erase | fill | pattern | hatch | pan | select | stamp | clone | dodge | burn | eyedropper | crop`)
-- `LayerKind = "fill" | "hatch"`, `Layer` — `src/hooks/use-history.ts`
+- `LayerKind = "fill" | "hatch"`, `Layer`, `LayerEffect`, `RoundCornersEffect`, `OutlineEffect` — `src/hooks/use-history.ts`
+- `Ring`, `RingPoint`, `RoundedRing`, `RoundedCorner`, `RegionRings` — `src/lib/round-corners.ts`
 - `HatchBrush`, `HatchDir`, `HatchAlign` — `src/lib/hatch.ts`
 - `HatchifySettings`, `HatchifyMode`, `HatchifyResult` — `src/lib/hatchify.ts`
 - `PlotterSettings`, `PenMode`, `PageSizeId`, `PlotterLayout`, `PlotterPlot`, `PlotterStroke` — `src/lib/plotter-export.ts`

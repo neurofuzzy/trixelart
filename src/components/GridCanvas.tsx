@@ -1,14 +1,15 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
-import { layerKind, type Layer } from "@/hooks/use-history";
+import { type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
 import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
-import { drawHatchLayer } from "@/lib/hatch-render";
+import { buildRenderPlan, drawHatchLayer, stepRoundRadius, stepOutlineWeight } from "@/lib/hatch-render";
+import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
 
 export function GridCanvas({
   size,
@@ -76,6 +77,39 @@ export function GridCanvas({
     return () => cancelAnimationFrame(raf);
   }, [selectedHexes]);
 
+  // The same plan the exporters walk, so preview and file agree on coalescing.
+  const plan = useMemo(() => buildRenderPlan(layers), [layers]);
+
+  // Effect geometry (rounding + outline), memoised on the plan. The draw effect
+  // below re-runs on pan, zoom, hover and the marching-ants tick — none of which
+  // change geometry — so rebuilding rings inside it would redo the whole artwork
+  // many times a second. Keyed on `plan`, it is rebuilt only when a stroke lands
+  // or a slider moves. Entries are `null` for steps with no effect, which keeps
+  // this array index-aligned with `plan`.
+  //
+  // The offsets are dependencies even though they are not arguments: regions are
+  // grouped by *resolved* colour, and `resolveColor` reads the global hue and
+  // saturation shift. Without them a palette shift would leave the previous
+  // colours — and the region boundaries they implied — baked into the memo.
+  // The rule cannot see that dependency, since the offsets are read through
+  // module-level state rather than passed in — hence the suppression.
+  const effectPlan = useMemo(
+    () =>
+      plan.map((step) => {
+        if (step.kind !== "fill") return null;
+        const radius = stepRoundRadius(step);
+        const outline = stepOutlineWeight(step);
+        if (radius <= 0 && outline <= 0) return null;
+        return {
+          radius,
+          outline,
+          regions: stepRegionGeometry(step.painted, radius),
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, hueOffset, saturationOffset],
+  );
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0 || !mounted) return;
@@ -127,16 +161,20 @@ export function GridCanvas({
         Math.max(minX, maxX) / SIDE - minR * 0.5,
       ) + buffer;
 
-    // Artwork — rendered bottom-to-top through all visible layers. Fill layers
-    // group by colour for fewer fillStyle changes; hatch layers draw line work.
-    // The branch is not optional: a hatch value fed to `resolveColor` comes back
-    // as the raw string, and canvas silently *keeps the previous* fillStyle
-    // rather than erroring, so the marks would paint as arbitrary solid colour.
-    for (const layer of layers) {
-      if (!layer.visible) continue;
+    // Artwork — rendered bottom-to-top through the same `buildRenderPlan` the
+    // exporters walk, so the canvas and a file cannot disagree about which
+    // layers coalesce. That matters for effects: a rounded step finds its region
+    // boundaries in the coalesced map, so rounding what the plan merged is the
+    // only way the preview matches the export.
+    // Fill steps group by colour for fewer fillStyle changes; hatch steps draw
+    // line work. The branch is not optional: a hatch value fed to `resolveColor`
+    // comes back as the raw string, and canvas silently *keeps the previous*
+    // fillStyle rather than erroring, so the marks would paint as solid colour.
+    for (let si = 0; si < plan.length; si++) {
+      const step = plan[si];
 
-      if (layerKind(layer) === "hatch") {
-        drawHatchLayer(ctx, layer.painted, {
+      if (step.kind === "hatch") {
+        drawHatchLayer(ctx, step.painted, {
           minX,
           minY,
           maxX,
@@ -145,12 +183,40 @@ export function GridCanvas({
         continue;
       }
 
+      // Corner rounding and outlines draw whole regions, so they cannot be
+      // viewport-culled the way loose triangles are — a region reaches past the
+      // visible box and its ring has to be closed. The geometry is memoised on
+      // the plan instead, so the cost lands on an edit rather than on every pan
+      // and hover redraw.
+      const eff = effectPlan[si];
+      if (eff) {
+        for (const { fill, rings } of eff.regions) {
+          ctx.beginPath();
+          for (const ring of rings) traceRoundedRing(ctx, ring);
+          if (eff.outline > 0) {
+            // The outline effect swaps the solid for a stroke of the region
+            // boundary at the layer's selected weight; the interior stays empty.
+            // Round joins land exactly on the stroke edge; miter pokes 2x past
+            // it and bevel cuts back to the midpoint.
+            ctx.strokeStyle = fill;
+            ctx.lineWidth = eff.outline;
+            ctx.lineJoin = "round";
+            ctx.lineCap = "round";
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = fill;
+            ctx.fill();
+          }
+        }
+        continue;
+      }
+
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {
         for (let q = minQ; q <= maxQ; q++) {
           for (const type of ["up", "down"] as const) {
             const key = `${q},${r},${type}`;
-            const fill = layer.painted[key];
+            const fill = step.painted[key];
             if (fill) {
               const hex = resolveColor(fill);
               const list = colorGroups.get(hex);
@@ -688,7 +754,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, layers, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
+  }, [size, view, plan, effectPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
 
   return (
     <canvas

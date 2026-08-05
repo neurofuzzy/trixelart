@@ -20,6 +20,7 @@ import {
   type CutFrame,
 } from "@/lib/cut-mesh";
 import { buildCutSVG } from "@/lib/cut-svg";
+import { ROUND_RADIUS_AT_FULL } from "@/lib/round-corners";
 import { normalizeProjectFilename } from "@/lib/utils";
 
 const FRAMES: { value: CutFrame; label: string; hint: string }[] = [
@@ -53,11 +54,14 @@ export function CutExportDialog({
   open,
   onOpenChange,
   painted,
+  roundFraction = 0,
   projectName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
+  /** Corner-rounding effect, as the 0-1 slider fraction. See `round-corners.ts`. */
+  roundFraction?: number;
   projectName: string;
 }) {
   const [widthMm, setWidthMm] = useState(DEFAULT_CUT_STACK_OPTIONS.widthMm);
@@ -74,6 +78,9 @@ export function CutExportDialog({
 
   // Hexagon-neck radius in world units (SIDE = 50); 0 = sharp weld.
   const neck = mergeIslands ? joinSize * 18 : 0;
+
+  // The layer effect's radius in the same world units the cut geometry uses.
+  const round = roundFraction * ROUND_RADIUS_AT_FULL;
 
   const stack = useMemo(
     () =>
@@ -107,6 +114,7 @@ export function CutExportDialog({
       frame,
       mergeIslands,
       neck,
+      round,
     });
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml" });

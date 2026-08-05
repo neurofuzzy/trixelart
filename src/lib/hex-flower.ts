@@ -1,4 +1,4 @@
-import { SIDE, H, worldToTri, triToString, triCenter, type TriKey, type TriType } from "./grid-math";
+import { SIDE, H, worldToTri, triToString, stringToTri, triCenter, type TriKey, type TriType } from "./grid-math";
 import { encodeColor } from "./constants";
 import { flipHatchValue, mapEncodedColor, rotateHatchValue } from "./hatch";
 
@@ -263,6 +263,37 @@ export function paintTargets(
     for (const o of offsets) {
       out.push({ q: b.q + o.dq, r: b.r + o.dr, type: b.type });
     }
+  }
+  return out;
+}
+
+/**
+ * Rescales the whole artwork onto a coarser (or finer) hex lattice: each
+ * painted trixel is re-centred on the hex of the new spacing with the same
+ * (c, k) index. A hex's contents keep their internal layout exactly — the
+ * offset from its home-hex centre is preserved — so at `newN > oldN` every
+ * design gets `newN - oldN` rings of empty hexes' worth of breathing room
+ * around it. Colours and hatch values pass through untouched: this is a pure
+ * translation of each hex's contents, not a re-colouring.
+ */
+export function spreadHexArtwork(
+  painted: Record<string, string>,
+  oldN: number,
+  newN: number,
+): Record<string, string> {
+  if (oldN <= 0 || newN <= 0 || oldN === newN) return painted;
+  const dN = newN - oldN;
+  const out: Record<string, string> = {};
+  for (const [key, color] of Object.entries(painted)) {
+    const t = stringToTri(key);
+    const { c, k } = triToHex(t.q, t.r, t.type, oldN);
+    out[
+      triToString({
+        q: t.q + dN * (c - k),
+        r: t.r + dN * (c + 2 * k),
+        type: t.type,
+      })
+    ] = color;
   }
   return out;
 }

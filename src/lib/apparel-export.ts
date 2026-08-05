@@ -251,6 +251,53 @@ export function apparelCutSegments(
   );
 }
 
+/** One punched circle in world space. */
+export interface CutCircle {
+  x: number;
+  y: number;
+  radius: number;
+}
+
+/**
+ * The cut for a stroked (outline) layer.
+ *
+ * Cutting a stroked layer along its region boundaries would erase the ink — the
+ * outline *is* the boundary. Instead, a small circle is punched at **every**
+ * lattice vertex of the painted area, sized to a third of the stroke weight.
+ * Where the outline stroke passes a vertex the circle cuts a controlled break
+ * point through it — the print can flex at each vertex without the outline
+ * itself being erased — and where the stroke does not pass (the transparent
+ * interior) the circle cuts nothing.
+ */
+export function outlineCutCircles(
+  painted: Record<string, string>,
+  radius: number,
+): CutCircle[] {
+  const seen = new Set<string>();
+  const out: CutCircle[] = [];
+  const add = (i: number, j: number) => {
+    const k = `${i},${j}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ x: i * SIDE + j * (SIDE / 2), y: j * H, radius });
+  };
+  for (const key in painted) {
+    if (!decodeColor(painted[key])) continue;
+    const tri = stringToTri(key);
+    if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
+    if (tri.type === "up") {
+      add(tri.q, tri.r);
+      add(tri.q + 1, tri.r);
+      add(tri.q, tri.r + 1);
+    } else {
+      add(tri.q, tri.r + 1);
+      add(tri.q + 1, tri.r + 1);
+      add(tri.q + 1, tri.r);
+    }
+  }
+  return out;
+}
+
 export interface CutPieceReport {
   /** Separate pieces the cut leaves behind. */
   pieces: number;
@@ -373,6 +420,7 @@ export function renderApparelToCanvas(
   view: ApparelView,
   cutSegments: [[number, number], [number, number]][],
   cutWorld: number,
+  cutCircles: CutCircle[] = [],
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -418,6 +466,21 @@ export function renderApparelToCanvas(
     ctx.globalCompositeOperation = "source-over";
   }
 
+  if (cutCircles.length > 0) {
+    // Stroked-layer break points: one circle per lattice vertex, punched out of
+    // the alpha wherever it overlaps ink. `moveTo` before each arc keeps the
+    // circles from being joined by a stray connector line.
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    for (const c of cutCircles) {
+      ctx.moveTo(c.x + c.radius, c.y);
+      ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
   ctx.restore();
 }
 
@@ -433,6 +496,7 @@ export function renderApparelPreview(
   view: ApparelView,
   cutSegments: [[number, number], [number, number]][],
   cutWorld: number,
+  cutCircles: CutCircle[],
   garmentHex: string,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -451,6 +515,7 @@ export function renderApparelPreview(
     view,
     cutSegments,
     cutWorld,
+    cutCircles,
   );
 
   canvas.width = view.canvasW;

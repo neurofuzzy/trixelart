@@ -1,7 +1,8 @@
 import { generateTriangles } from "@/lib/svg-export";
 import { cropDisplayBounds, type CropRect } from "@/lib/crop";
 import type { Layer } from "@/hooks/use-history";
-import { buildRenderPlan, drawHatchLayer } from "@/lib/hatch-render";
+import { buildRenderPlan, drawHatchLayer, stepOutlineWeight, stepRoundRadius } from "@/lib/hatch-render";
+import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
 
 /**
  * Raster export of a crop region.
@@ -92,6 +93,42 @@ export function drawArtworkPlan(
     if (step.kind === "hatch") {
       // No zoom clamp: exports use the true world weight.
       drawHatchLayer(ctx, step.painted);
+      continue;
+    }
+
+    // Corner rounding draws whole regions rather than triangles, and the outline
+    // effect strokes them. Rounding removes the seams this function's overdraw
+    // stroke exists to close — the leak comes from abutting *same-colour*
+    // triangles being composited separately, and a merged region has no interior
+    // edges left — so only the region boundary is overdrawn (or outlined), where
+    // a genuinely different colour still meets it.
+    const radius = stepRoundRadius(step);
+    const outline = stepOutlineWeight(step);
+    if (radius > 0 || outline > 0) {
+      for (const { fill, rings } of stepRegionGeometry(step.painted, radius)) {
+        if (outline > 0) {
+          // Outline effect: a stroke of the boundary at the selected weight
+          // instead of a solid fill; the interior stays empty. Round joins land
+          // exactly on the stroke edge.
+          ctx.strokeStyle = fill;
+          ctx.lineWidth = outline;
+          ctx.lineJoin = "round";
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          for (const ring of rings) traceRoundedRing(ctx, ring);
+          ctx.stroke();
+          continue;
+        }
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        for (const ring of rings) traceRoundedRing(ctx, ring);
+        ctx.fill();
+
+        ctx.strokeStyle = fill;
+        ctx.lineWidth = overdraw;
+        ctx.lineJoin = "round";
+        ctx.stroke();
+      }
       continue;
     }
 
