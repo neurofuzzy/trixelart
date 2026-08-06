@@ -23,6 +23,7 @@ import {
 import {
   noiseRegionFills,
   noiseSubFills,
+  type NoisePeriod,
   type SubdivisionNoiseSpec,
 } from "@/lib/subdivision-noise";
 import {
@@ -53,6 +54,11 @@ export interface SVGExportOptions {
   /** Markup inserted directly after the opening tag — a `<metadata>` block for
    *  the project file. Omitted → nothing, so the artwork export is unchanged. */
   metadata?: string;
+  /** The crop's `{ m, n }`, so subdivision noise folds onto the same repeat the
+   *  fabric exports use. This export is the *whole* artwork and has no crop of
+   *  its own, but the grain still has to match the preview and the tile, so the
+   *  caller passes the document's crop. Omitted only where there is none. */
+  period?: NoisePeriod;
 }
 
 export const PRECISION = 3;
@@ -354,7 +360,7 @@ export function generateSVG(
     // Built once per step and reused by both the triangle and the region path,
     // so the memo inside it stays warm across the whole layer.
     const adjust = stepColorAdjust(step);
-    const noise = stepSubdivisionNoise(step);
+    const noise = stepSubdivisionNoise(step, options?.period);
     return {
       kind: "fill" as const,
       // Sub-triangles retile the cell exactly, so noise leaves the bounding box
@@ -707,7 +713,7 @@ export function generateCroppedSVG(
       const radius = stepRoundRadius(step);
       const outline = stepOutlineWeight(step);
       const adjust = stepColorAdjust(step);
-      const noise = stepSubdivisionNoise(step);
+      const noise = stepSubdivisionNoise(step, { m: crop.m, n: crop.n });
 
       // Rotated into display space and shifted to the crop origin like every
       // other shape here, but never cut — see the note on `cropClip` above.

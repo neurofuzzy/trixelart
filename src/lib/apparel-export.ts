@@ -1,4 +1,5 @@
 import { H, SIDE, connectedComponents, getTriVertices, stringToTri } from "@/lib/grid-math";
+import type { NoisePeriod } from "@/lib/subdivision-noise";
 import { rotatePoint } from "@/lib/crop";
 import { decodeColor, resolveColor } from "@/lib/constants";
 import { drawArtworkPlan } from "@/lib/png-export";
@@ -421,6 +422,7 @@ export function renderApparelToCanvas(
   cutSegments: [[number, number], [number, number]][],
   cutWorld: number,
   cutCircles: CutCircle[] = [],
+  noisePeriod?: NoisePeriod,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -446,7 +448,10 @@ export function renderApparelToCanvas(
   // shadow spreads translucent ink straight across the stencil cut gaps below,
   // welding the pieces back together and undoing the flex the cut exists to
   // provide — the same reason the cut ignores hatch.
-  drawArtworkPlan(ctx, layers, 1 / Math.min(view.sx, view.sy), { glow: false });
+  drawArtworkPlan(ctx, layers, 1 / Math.min(view.sx, view.sy), {
+    glow: false,
+    period: noisePeriod,
+  });
 
   if (cutWorld > 0 && cutSegments.length > 0) {
     // The runs are in **world** coordinates and ride the transform already on

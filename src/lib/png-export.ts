@@ -15,6 +15,7 @@ import {
   drawSubFills,
   noiseRegionFills,
   onLatticeRow,
+  type NoisePeriod,
 } from "@/lib/subdivision-noise";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
 import { drawGlow, silhouetteGeometry } from "@/lib/glow";
@@ -85,7 +86,9 @@ export function renderCropToCanvas(
 
   // Sized off the smaller scale so the overdraw is at least one device pixel on
   // both axes.
-  drawArtworkPlan(ctx, layers, 1 / Math.min(sx, sy));
+  drawArtworkPlan(ctx, layers, 1 / Math.min(sx, sy), {
+    period: { m: crop.m, n: crop.n },
+  });
 
   ctx.restore();
 }
@@ -106,7 +109,7 @@ export function drawArtworkPlan(
   ctx: CanvasRenderingContext2D,
   layers: Layer[],
   overdraw: number,
-  options: { glow?: boolean } = {},
+  options: { glow?: boolean; period?: NoisePeriod } = {},
 ): void {
   const plan = buildRenderPlan(layers);
   const receivers =
@@ -130,7 +133,7 @@ export function drawArtworkPlan(
     const radius = stepRoundRadius(step);
     const outline = stepOutlineWeight(step);
     const adjust = stepColorAdjust(step);
-    const noise = stepSubdivisionNoise(step);
+    const noise = stepSubdivisionNoise(step, options.period);
 
     // Before the layer's own fills: the layer casts the shadow, it does not
     // receive it.

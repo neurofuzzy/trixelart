@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
 import type { Layer } from "@/hooks/use-history";
+import type { NoisePeriod } from "@/lib/subdivision-noise";
 import { normalizeProjectFilename } from "@/lib/utils";
 
 function stripSvgDimensions(svg: string): string {
@@ -29,6 +30,7 @@ export function ExportDialog({
   projectName,
   settings,
   onSettingsChange,
+  noisePeriod,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -37,13 +39,16 @@ export function ExportDialog({
   projectName: string;
   settings: SVGExportOptions;
   onSettingsChange: (patch: Partial<SVGExportOptions>) => void;
+  /** The crop's repeat, so subdivision noise matches the preview and the
+   *  fabric tile rather than growing its own grain here. */
+  noisePeriod?: NoisePeriod;
 }) {
   const stroke = settings.stroke ?? false;
   const merge = settings.merge ?? false;
 
   const svg = useMemo(
-    () => generateSVG(layers, { stroke, merge }),
-    [layers, stroke, merge],
+    () => generateSVG(layers, { stroke, merge, period: noisePeriod }),
+    [layers, stroke, merge, noisePeriod],
   );
 
   const previewSvg = useMemo(() => stripSvgDimensions(svg), [svg]);

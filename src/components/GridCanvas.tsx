@@ -96,6 +96,25 @@ export function GridCanvas({
   // The same plan the exporters walk, so preview and file agree on coalescing.
   const plan = useMemo(() => buildRenderPlan(layers), [layers]);
 
+  // The grain folds onto the crop's repeat, so the preview shows the pattern the
+  // fabric tile will actually carry.
+  //
+  // Keyed on the two numbers, never on `crop` itself: the crop object is
+  // replaced on every handle drag, and a new identity here would invalidate
+  // `effectPlan` and rebuild every region's geometry mid-gesture. Only `m` and
+  // `n` change the grain — where the crop sits does not, because the grain is
+  // periodic under the crop's own translations and any window of that size
+  // tiles. Read out first so the dependency really is the two numbers.
+  const cropM = crop?.m;
+  const cropN = crop?.n;
+  const noisePeriod = useMemo(
+    () =>
+      cropM !== undefined && cropN !== undefined
+        ? { m: cropM, n: cropN }
+        : undefined,
+    [cropM, cropN],
+  );
+
   // Effect geometry (rounding + outline), memoised on the plan. The draw effect
   // below re-runs on pan, zoom, hover and the marching-ants tick — none of which
   // change geometry — so rebuilding rings inside it would redo the whole artwork
@@ -117,7 +136,7 @@ export function GridCanvas({
         const outline = stepOutlineWeight(step);
         if (radius <= 0 && outline <= 0) return null;
         const adjust = stepColorAdjust(step);
-        const noise = stepSubdivisionNoise(step);
+        const noise = stepSubdivisionNoise(step, noisePeriod);
         return {
           radius,
           outline,
@@ -134,7 +153,7 @@ export function GridCanvas({
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [plan, hueOffset, saturationOffset],
+    [plan, hueOffset, saturationOffset, noisePeriod],
   );
 
   // Glow geometry, memoised on the same key and for the same reason. Kept apart
@@ -282,7 +301,7 @@ export function GridCanvas({
       // path it has always taken. The rounded/outlined branch above needs no
       // equivalent — `stepRegionGeometry` has already applied it.
       const adjust = stepColorAdjust(step);
-      const noise = stepSubdivisionNoise(step);
+      const noise = stepSubdivisionNoise(step, noisePeriod);
 
       // Subdivision noise emits four fills per cell instead of one, so it gets
       // its own gather rather than widening the plain one. Still viewport-culled
@@ -849,7 +868,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
+  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod]);
 
   return (
     <canvas

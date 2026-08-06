@@ -56,6 +56,46 @@ export interface SubdivisionNoiseSpec {
    *  document saved before the mode existed keeps its grain. Read it through
    *  `subdivisionMode`, never directly, exactly as with `layerKind`. */
   mode?: SubdivisionMode;
+  /** The repeat the grain is folded onto — the crop's `{ m, n }`. Absent leaves
+   *  the noise unbounded, which does not survive a fabric tiling; see
+   *  `canonicalCell`. Threaded in by each backend rather than stored on the
+   *  effect, because it belongs to the export rectangle, not to the layer. */
+  period?: NoisePeriod;
+}
+
+/** A repeat rectangle in lattice steps: `m` cells wide, `n` double-rows tall —
+ *  exactly `CropRect`'s `m`/`n`, which is the only repeat the lattice has. */
+export interface NoisePeriod {
+  m: number;
+  n: number;
+}
+
+/**
+ * The representative of `(q, r)` within one repeat of the crop.
+ *
+ * Hashing raw coordinates makes the grain unbounded, and a fabric tile then
+ * fails to repeat: a cell straddling the crop edge takes its two halves from
+ * `q` and `q + m`, which hash differently, so the discontinuity lands right on
+ * the seam. Folding the coordinate onto the crop first makes the grain repeat
+ * with the tile, so the seam disappears.
+ *
+ * The fold has to follow the lattice's *actual* symmetries, which are not a
+ * plain `(q mod m, r mod 2n)`. The crop's translations are `(q+m, r)` and
+ * `(q−n, r+2n)` — the vertical one shifts `q`, because `(0, 2H) = 2v − u` — so
+ * the row index has to pay that shift back before `q` is reduced. Verified
+ * invariant under both generators.
+ */
+export function canonicalCell(
+  q: number,
+  r: number,
+  period?: NoisePeriod,
+): [number, number] {
+  if (!period || period.m <= 0 || period.n <= 0) return [q, r];
+  const rows = 2 * period.n;
+  const k = Math.floor(r / rows);
+  const rr = r - k * rows;
+  const qq = (((q + k * period.n) % period.m) + period.m) % period.m;
+  return [qq, rr];
 }
 
 /** Reads a spec's mode, defaulting an absent field to the original split. */
@@ -248,8 +288,11 @@ export function noiseSubFills(
   }
   const ramp = colorRamp(encoded);
   const scale = Math.max(0, Math.min(100, spec.amount)) / 100;
+  // Geometry stays at the real coordinates; only the *hash key* folds onto the
+  // repeat, so the grain tiles with the crop while the cell stays where it is.
+  const [hq, hr] = canonicalCell(q, r, spec.period);
   return subdivideCell(a, b, c, subdivisionMode(spec)).map((points, sub) => {
-    const n = noiseAt(q, r, type, sub, spec.seed) * scale;
+    const n = noiseAt(hq, hr, type, sub, spec.seed) * scale;
     const level = Math.max(
       -NOISE_LEVELS,
       Math.min(NOISE_LEVELS, Math.round(n * NOISE_LEVELS)),

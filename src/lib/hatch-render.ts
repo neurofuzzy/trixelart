@@ -1,7 +1,10 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { colorAdjuster } from "@/lib/color-adjust";
-import type { SubdivisionNoiseSpec } from "@/lib/subdivision-noise";
+import type {
+  NoisePeriod,
+  SubdivisionNoiseSpec,
+} from "@/lib/subdivision-noise";
 import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
 import { OUTLINE_WEIGHT_AT_FULL, type RoundedRing } from "@/lib/round-corners";
 import {
@@ -103,11 +106,15 @@ export function stepColorAdjust(
  */
 export function stepSubdivisionNoise(
   step: RenderStep,
+  period?: NoisePeriod,
 ): SubdivisionNoiseSpec | null {
   if (step.kind !== "fill") return null;
   for (const e of step.effects) {
     if (e.type === "subdivisionNoise" && e.enabled && e.amount > 0) {
-      return { amount: e.amount, seed: e.seed, mode: e.mode };
+      // `period` is the crop's repeat, supplied by the backend rather than
+      // stored on the effect — every backend must pass the *same* one or the
+      // preview and the file grow different grain.
+      return { amount: e.amount, seed: e.seed, mode: e.mode, period };
     }
   }
   return null;

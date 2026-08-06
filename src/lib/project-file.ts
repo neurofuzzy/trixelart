@@ -1,6 +1,7 @@
 import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
 import { normalizeProjectFilename } from "@/lib/utils";
 import type { ProjectSnapshot } from "@/hooks/use-history";
+import type { NoisePeriod } from "@/lib/subdivision-noise";
 
 /**
  * The project file: an SVG that draws the artwork and carries the project's
@@ -105,7 +106,10 @@ export function projectFileName(projectName: string): string {
  * documents at length), and a project file's bytes should not change because
  * someone toggled a checkbox in an unrelated export dialog.
  */
-export function buildProjectSVG(payload: ProjectPayload): string {
+export function buildProjectSVG(
+  payload: ProjectPayload,
+  noisePeriod?: NoisePeriod,
+): string {
   const json = cdataSafe(JSON.stringify(payload, null, 2));
   // The namespace is declared on the element that uses the prefix, not on the
   // root, so `generateSVG` needs to know nothing about it.
@@ -121,6 +125,10 @@ export function buildProjectSVG(payload: ProjectPayload): string {
     merge: true,
     background: PROJECT_BG,
     metadata,
+    // A second argument rather than a payload field: the crop is workspace
+    // state, and folding it into the payload would silently add it to every
+    // saved project file.
+    period: noisePeriod,
   });
 }
 

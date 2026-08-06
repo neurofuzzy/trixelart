@@ -323,6 +323,37 @@ site already walked `points.length`.
 cell would multiply an SVG export's element count by the same factor for a grain
 finer than most exports resolve.
 
+### The grain folds onto the crop, or fabric does not repeat
+
+Hashing raw `(q, r)` makes the grain unbounded, and a fabric tile then **fails to
+repeat** even though the lattice does: a cell straddling the crop edge takes its
+two halves from `q` and `q + m`, which hash differently, so the discontinuity
+lands exactly on the seam. Measured on a deliberately periodic painting — the
+geometry tiled perfectly and the grain did not.
+
+So `canonicalCell` folds the *hash key* (never the geometry) onto one repeat of
+the crop, and the grain repeats with the tile. The fold is **not** a plain
+`(q mod m, r mod 2n)`: the crop's translations are `(q+m, r)` and `(q−n, r+2n)`,
+and the vertical one shifts `q` because `(0, 2H) = 2v − u`, so the row index has
+to pay that shift back before `q` is reduced. Verified invariant under both
+generators, and verified that the naive fold is *not*.
+
+Two consequences worth knowing:
+
+- **Where the crop sits does not matter**, only its `m`/`n`. The grain is
+  periodic under the crop's own translation lattice, so any window of that size
+  tiles — sliding the crop never re-rolls it. That is why `GridCanvas` keys its
+  memo on the two numbers rather than the crop object, which is replaced on every
+  handle drag.
+- **Resizing the crop re-rolls the grain everywhere**, and on artwork larger than
+  the crop the grain visibly repeats. That is the accepted price of a true fabric
+  repeat; there is no period that both tiles the crop and never repeats.
+
+`period` is threaded in by each backend rather than stored on the effect, because
+it belongs to the export rectangle, not the layer — and **every** backend must
+pass the same one (preview, both SVG exports, the fabric PNG, the apparel PNG and
+the project thumbnail) or the grain on screen is not the grain in the file.
+
 **Threaded exactly where `adjust` is**, and for the same reason — it reaches the
 flat-fill path of the PNG exporter and both SVG exporters through the single
 `noise` parameter on `generateTriangles`, so no emit site changed. Only
