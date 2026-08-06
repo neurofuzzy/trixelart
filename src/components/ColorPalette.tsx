@@ -62,7 +62,11 @@ export function ColorPalette({
           title={`Color ${i + 1} (${i + 1})`}
           className={cn(
             "w-8 h-8 rounded-full border-2 transition-all hover:scale-110 shrink-0",
-            color === c
+            // `colorIdx` is deliberately kept while the no-print pen is active,
+            // so that leaving the marker restores the last colour. The strip
+            // must therefore drop its highlight explicitly, or two swatches
+            // read as selected at once.
+            !noPrintActive && color === c
               ? "border-white scale-125 shadow-lg"
               : "border-white/10 opacity-70",
           )}
