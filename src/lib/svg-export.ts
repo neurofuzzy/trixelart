@@ -23,7 +23,9 @@ import {
 import {
   noiseRegionFills,
   noiseSubFills,
+  noiseTile,
   type NoisePeriod,
+  type NoiseTile,
   type SubdivisionNoiseSpec,
 } from "@/lib/subdivision-noise";
 import {
@@ -258,6 +260,106 @@ export function mergeTrianglesByColor(triangles: TriangleData[], ox = 0, oy = 0)
   return results;
 }
 
+/**
+ * The distinct painted colours of a step, as `resolvedHex -> encodedValue`.
+ *
+ * Keyed on the resolved hex because that is what `regionRings` groups on, so
+ * this lines up one-to-one with the regions. The encoded value comes along
+ * because the grain's ramp is derived from the palette index, which only the
+ * encoded form carries. Two different encoded values *can* resolve to the same
+ * hex — the documented palette overlap — and then the first one wins; they are
+ * one region by definition, so it has to be one ramp.
+ */
+function stepPaintedColors(painted: Record<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const key in painted) {
+    const encoded = painted[key];
+    const base = resolveColor(encoded);
+    if (!out.has(base)) out.set(base, encoded);
+  }
+  return out;
+}
+
+/**
+ * One repeat of the grain as an SVG `<pattern>`.
+ *
+ * This is the whole point of making the noise periodic: a noised layer states
+ * its texture once and every region then *references* it, instead of the file
+ * carrying four polygons per painted cell. Cost stops scaling with the artwork
+ * and becomes a function of the crop alone.
+ *
+ * The tile opens with a solid `<rect>` of the region's own colour so the region
+ * can be a single path with no fill underneath it — that also means there is no
+ * pinhole between tile pieces for the background to show through, which is the
+ * failure the layered fill was guarding against.
+ *
+ * `x`/`y` place the tile origin on **world** `(0, 0)`, so the pattern lattice and
+ * the artwork lattice stay locked together no matter where the artwork sits.
+ */
+function noisePatternMarkup(
+  id: string,
+  tile: NoiseTile,
+  baseFill: string,
+  adjust: ((hex: string) => string) | undefined,
+  x: number,
+  y: number,
+  transform?: string,
+): string {
+  const pieces = tile.fills
+    .map(
+      ({ points, hex }) =>
+        `      <polygon points="${points
+          .map((p) => `${fmt(p.x)},${fmt(p.y)}`)
+          .join(" ")}" fill="${adjust ? adjust(hex) : hex}"/>`,
+    )
+    .join("\n");
+  return (
+    `    <pattern id="${id}" patternUnits="userSpaceOnUse" ` +
+    `x="${fmt(x)}" y="${fmt(y)}" width="${fmt(tile.w)}" height="${fmt(tile.h)}"` +
+    `${transform ? ` patternTransform="${transform}"` : ""}>\n` +
+    `      <rect x="0" y="0" width="${fmt(tile.w)}" height="${fmt(tile.h)}" fill="${baseFill}"/>\n` +
+    `${pieces}\n    </pattern>`
+  );
+}
+
+/**
+ * Builds one pattern per painted colour of a step and returns `base -> url(#id)`
+ * ready to drop into a `fill`. Empty when the step has no grain to state.
+ */
+function noisePatternFills(
+  painted: Record<string, string>,
+  noise: SubdivisionNoiseSpec | null,
+  adjust: ((hex: string) => string) | undefined,
+  idPrefix: string,
+  defs: string[],
+  x: number,
+  y: number,
+  transform?: string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!noise) return out;
+  let i = 0;
+  for (const [base, encoded] of stepPaintedColors(painted)) {
+    const tile = noiseTile(encoded, noise);
+    // No period means no repeat to state; the caller falls back to geometry.
+    if (!tile) return new Map();
+    const id = `${idPrefix}-${i++}`;
+    defs.push(
+      noisePatternMarkup(
+        id,
+        tile,
+        adjust ? adjust(base) : base,
+        adjust,
+        x,
+        y,
+        transform,
+      ),
+    );
+    out.set(base, `url(#${id})`);
+  }
+  return out;
+}
+
 function computeBounds(triangles: TriangleData[]) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const tri of triangles) {
@@ -363,9 +465,12 @@ export function generateSVG(
     const noise = stepSubdivisionNoise(step, options?.period);
     return {
       kind: "fill" as const,
-      // Sub-triangles retile the cell exactly, so noise leaves the bounding box
-      // this is also measured for alone.
-      tris: generateTriangles(step.painted, adjust, noise),
+      // Deliberately *without* the noise: a noised step is emitted as region
+      // geometry under a `<pattern>` (see below), so the per-cell triangles are
+      // only wanted for the bounding box here — and the pieces retile the cell
+      // exactly, so the box is the same either way. Building them four-fold
+      // just to measure would be pure waste.
+      tris: generateTriangles(step.painted, adjust),
       painted: step.painted,
       radius: stepRoundRadius(step),
       outline: stepOutlineWeight(step),
@@ -439,18 +544,33 @@ export function generateSVG(
           : null;
       if (glow) defs.push(glow.defs);
       const before = glow ? `${glow.body}\n` : "";
+      // **A noised step is region geometry too**, rounded or not: the grain is a
+      // `<pattern>` fill on the region rather than loose polygons inside it, so
+      // the shape stated in the file is the artwork's own and the texture is a
+      // reference. That is also why noise ignores `merge` — regions are already
+      // merged by construction, exactly as rounding and outline are.
+      const patterns = noisePatternFills(
+        step.painted,
+        step.outline > 0 ? null : step.noise,
+        step.adjust,
+        `noise-${si}`,
+        defs,
+        ox,
+        oy,
+      );
       // Rounded and outlined steps are inherently merged — the effects are
       // defined on whole regions — so they ignore the `merge` option rather
       // than offering a per-triangle variant that could not express an arc.
-      if (step.radius > 0 || step.outline > 0) {
-        // The grain is clipped to the region rather than emitted loose, so a
-        // rounded corner cuts it back exactly where it cuts the fill. Skipped
-        // under an outline: that effect leaves the interior deliberately empty,
-        // so there is no fill there to texture.
-        const regionFills =
-          step.noise && step.outline === 0
-            ? noiseRegionFills(step.painted, step.noise)
-            : null;
+      // Without a period there is no repeat to state, so the grain falls back to
+      // loose polygons clipped to the region. The pattern is an *optimisation*,
+      // never a precondition — dropping the texture because an optional argument
+      // was missing would be a silent visual regression.
+      const loose =
+        step.noise && step.outline === 0 && patterns.size === 0
+          ? noiseRegionFills(step.painted, step.noise)
+          : null;
+
+      if (step.radius > 0 || step.outline > 0 || patterns.size > 0 || loose) {
         const fills = stepRegionGeometry(step.painted, step.radius, step.adjust)
           .map(({ fill, base, rings }, ri) => {
             const d = rings
@@ -461,32 +581,31 @@ export function generateSVG(
             if (step.outline > 0) {
               return `  <path d="${d}" fill="none" stroke="${fill}" stroke-width="${fmt(step.outline)}" stroke-linejoin="round"/>`;
             }
-            const solid = `  <path d="${d}" fill="${fill}"${
+            // The pattern's own backing rect carries the region's colour, so a
+            // grained region needs no solid path underneath it — and with no
+            // gap between the two there is nowhere for the background to show
+            // through at a reflex corner, which is what the layered version
+            // existed to prevent.
+            const paint = patterns.get(base) ?? fill;
+            const solid = `  <path d="${d}" fill="${paint}"${
               options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
             }/>`;
-            const grain = regionFills?.get(base);
-            if (grain?.length) {
-              const id = `noise-${si}-${ri}`;
-              defs.push(`    <clipPath id="${id}"><path d="${d}"/></clipPath>`);
-              const polys = grain
-                .map(
-                  ({ points, hex }) =>
-                    `    <polygon points="${points.map((p) => `${fmt(p.x + ox)},${fmt(p.y + oy)}`).join(" ")}" fill="${
-                      step.adjust ? step.adjust(hex) : hex
-                    }"/>`,
-                )
-                .join("\n");
-              // **The solid fill goes down first and the grain rides on top.**
-              // The grain only covers the cells the artwork was painted in,
-              // while the rounded ring bulges *past* them at every reflex
-              // corner — so emitting the clipped group alone leaves that bulge
-              // uncovered, as a transparent lens bounded by the arc on one side
-              // and raw cell edges on the other. The canvas and PNG backends
-              // always layered it this way; this is what keeps the file
-              // matching them.
-              return `${solid}\n  <g clip-path="url(#${id})">\n${polys}\n  </g>`;
-            }
-            return solid;
+            const grain = loose?.get(base);
+            if (!grain?.length) return solid;
+            // Fallback only: solid fill first, grain clipped over it. The grain
+            // covers just the painted cells, so the ring's bulge at a reflex
+            // corner needs the fill underneath or it exports as a hole.
+            const id = `noise-${si}-${ri}`;
+            defs.push(`    <clipPath id="${id}"><path d="${d}"/></clipPath>`);
+            const polys = grain
+              .map(
+                ({ points, hex }) =>
+                  `    <polygon points="${points.map((p) => `${fmt(p.x + ox)},${fmt(p.y + oy)}`).join(" ")}" fill="${
+                    step.adjust ? step.adjust(hex) : hex
+                  }"/>`,
+              )
+              .join("\n");
+            return `${solid}\n  <g clip-path="url(#${id})">\n${polys}\n  </g>`;
           })
           .filter(Boolean)
           .join("\n");
@@ -739,20 +858,35 @@ export function generateCroppedSVG(
         ? `  <g clip-path="url(#glow-crop)">\n${glow.body}\n  </g>\n`
         : "";
 
-      if (radius > 0 || outline > 0) {
+      // The grain as a `<pattern>`, exactly as the full exporter states it. The
+      // tile is drawn in **world** coordinates, so it needs the same world →
+      // display map every shape here goes through: rotate, then shift the crop
+      // origin to (0,0). SVG applies a transform list right to left, hence the
+      // translate first. This is also what keeps the pattern locked to the
+      // lattice, so the crop tiles seamlessly.
+      //
+      // No fallback here, unlike `generateSVG`: this exporter is *given* a crop
+      // and `m`/`n` are clamped to at least 1 everywhere they are produced, so
+      // the tile always exists.
+      const patternTransform = `translate(${fmt(-display.x)},${fmt(-display.y)}) rotate(${fmt((gridRotation * 180) / Math.PI)})`;
+      const patterns = noisePatternFills(
+        step.painted,
+        outline > 0 ? null : noise,
+        adjust,
+        `noise-${si}`,
+        defs,
+        0,
+        0,
+        patternTransform,
+      );
+
+      if (radius > 0 || outline > 0 || patterns.size > 0) {
         const out: string[] = [];
-        // Same rule as the full exporter: the grain rides inside the region's
-        // clip so rounding cuts it back with the fill, and an outline skips it
-        // because its interior is meant to stay empty.
-        const regionFills =
-          noise && outline === 0 ? noiseRegionFills(step.painted, noise) : null;
-        let ri = -1;
         for (const { fill, base, rings } of stepRegionGeometry(
           step.painted,
           radius,
           adjust,
         )) {
-          ri++;
           const ds: string[] = [];
           for (const ring of rings) {
             const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
@@ -776,51 +910,12 @@ export function generateCroppedSVG(
             );
             continue;
           }
-          const grain = regionFills?.get(base);
-          if (grain?.length) {
-            const polys: string[] = [];
-            for (const { points, hex } of grain) {
-              // Cut in world space and rotated into display space, exactly as
-              // the loose triangles below are — the region's clip path has
-              // already been through the same treatment, so the two agree.
-              const poly = clipPolygonToRect(
-                points.map((p) => [p.x, p.y] as [number, number]),
-                world,
-              );
-              if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
-              const pts = dedupeRing(
-                poly.map((p) => {
-                  const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
-                  return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
-                }),
-                0,
-              );
-              if (pts.length < 3) continue;
-              polys.push(
-                `    <polygon points="${pts.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${
-                  adjust ? adjust(hex) : hex
-                }"/>`,
-              );
-            }
-            if (polys.length) {
-              const id = `noise-${si}-${ri}`;
-              defs.push(
-                `    <clipPath id="${id}"><path d="${ds.join(" ")}"/></clipPath>`,
-              );
-              // Solid fill first, grain over it — see the note in `generateSVG`.
-              // The grain covers only the painted cells, so the ring's bulge at
-              // a reflex corner would otherwise export as a transparent lens.
-              out.push(
-                `  <path d="${ds.join(" ")}" fill="${fill}"${
-                  options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-                }/>`,
-              );
-              out.push(`  <g clip-path="url(#${id})">\n${polys.join("\n")}\n  </g>`);
-              continue;
-            }
-          }
+          // The pattern's backing rect carries the region's colour, so the
+          // region stays a single path and there is no seam between a fill and
+          // a grain layer for the background to show through.
+          const paint = patterns.get(base) ?? fill;
           out.push(
-            `  <path d="${ds.join(" ")}" fill="${fill}"${
+            `  <path d="${ds.join(" ")}" fill="${paint}"${
               options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
             }/>`,
           );
@@ -832,7 +927,7 @@ export function generateCroppedSVG(
       // the survivors into display space and shift the crop origin to (0,0).
       // The only rotations used are 0 and 90 degrees, so this stays exact.
       const clipped: TriangleData[] = [];
-      for (const tri of generateTriangles(step.painted, adjust, noise)) {
+      for (const tri of generateTriangles(step.painted, adjust)) {
         const poly = clipPolygonToRect(tri.points, world);
         if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
         // Rounding can merge two distinct vertices, so dedupe again afterwards

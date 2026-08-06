@@ -1,4 +1,4 @@
-import { H, getTriVertices, type TriType } from "@/lib/grid-math";
+import { H, SIDE, getTriVertices, type TriType } from "@/lib/grid-math";
 import { COLOR_COUNT, decodeColor, encodeColor, resolveColor } from "@/lib/constants";
 
 /**
@@ -317,6 +317,55 @@ export function noiseSubFills(
  */
 export const onLatticeRow = (y: number): boolean =>
   Math.abs(y / H - Math.round(y / H)) < 1e-3;
+
+/** One repeat of the grain for a single painted colour, in **world**
+ *  coordinates spanning `[0, w] x [0, h]`. Pieces overhang the left and right
+ *  edges; the consumer is expected to clip. */
+export interface NoiseTile {
+  w: number;
+  h: number;
+  fills: SubFill[];
+}
+
+/**
+ * The grain for one encoded colour over exactly one repeat of the crop.
+ *
+ * This is what lets a vector export state the texture **once** and reference it,
+ * instead of emitting four polygons per painted cell: since the grain is already
+ * periodic (see `canonicalCell`), one repeat is the whole of it. `null` without a
+ * period, because there is then no repeat to state.
+ *
+ * Rows tile the height exactly — a cell spans `[r·H, (r+1)·H]`, so `2n` rows
+ * cover `[0, h]` with nothing hanging over. Columns do not, because each row is
+ * sheared half a cell to the right of the one above, so the `q` range runs wide
+ * and the tile clips. That is seamless rather than lossy: a piece cut off the
+ * right edge has a period-translate hanging over the left edge with identical
+ * grain, so the neighbouring copy supplies exactly the part that was cut.
+ */
+export function noiseTile(
+  encoded: string,
+  spec: SubdivisionNoiseSpec,
+): NoiseTile | null {
+  const period = spec.period;
+  if (!period || period.m <= 0 || period.n <= 0) return null;
+  const rows = 2 * period.n;
+  const w = period.m * SIDE;
+  const h = rows * H;
+
+  const fills: SubFill[] = [];
+  for (let r = 0; r < rows; r++) {
+    // A cell at (q, r) starts at x = q·SIDE + r·SIDE/2 and is 1.5·SIDE wide, so
+    // these bounds cover the strip with a cell of slack at each end.
+    const qMin = Math.floor(-r / 2) - 2;
+    const qMax = Math.ceil(period.m - r / 2) + 2;
+    for (let q = qMin; q <= qMax; q++) {
+      for (const type of ["up", "down"] as const) {
+        fills.push(...noiseSubFills(q, r, type, encoded, spec));
+      }
+    }
+  }
+  return { w, h, fills };
+}
 
 /** Paints sub-fills onto a 2D context, shared by the canvas preview and the
  *  raster exporter so the two cannot disagree about the grain. */
