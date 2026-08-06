@@ -30,6 +30,8 @@ import {
   computePaletteColors,
   encodeColor,
   decodeColor,
+  isNoPrint,
+  NO_PRINT,
   remapGrid,
   shiftGridPalettes,
   setPaletteOffsets,
@@ -185,7 +187,16 @@ export default function TrixelGrid() {
   // Crop region and export options are view state, like zoom or the grid
   // settings — deliberately *not* part of ProjectSnapshot, or dragging a crop
   // handle would land in the undo stack and Ctrl+Z would stop undoing paint.
+  const [showNoPrint, setShowNoPrint] = useState(true);
   const [crop, setCrop] = useState<CropRect>(DEFAULT_CROP);
+  // Subdivision noise folds its grain onto this so a fabric tile repeats
+  // seamlessly. Every backend must receive the same one — the preview, both
+  // SVG exports, the fabric PNG, the apparel PNG and the project thumbnail —
+  // or the grain on screen is not the grain in the file.
+  const noisePeriod = useMemo(
+    () => ({ m: crop.m, n: crop.n }),
+    [crop.m, crop.n],
+  );
   const [exportSettings, setExportSettings] = useState<ExportSettings>(
     DEFAULT_EXPORT_SETTINGS,
   );
@@ -257,7 +268,19 @@ export default function TrixelGrid() {
     [hueOffset, satOffset],
   );
 
-  useEffect(() => {
+  // **Written during render, not in an effect.** `resolveColor` reads these off
+  // module state rather than taking them as arguments, so every descendant that
+  // resolves a colour needs them current *before* it renders. As an effect this
+  // was a frame late in a way that never corrected itself: React runs child
+  // effects before parent ones, so `GridCanvas` painted the canvas with the
+  // previous offsets and this ran afterwards, and since nothing else changed no
+  // further draw was scheduled. On first load — where the saved offsets arrive
+  // in a single restore and then never change again — the artwork simply kept
+  // the unshifted palette until the next edit happened to redraw it.
+  //
+  // `useMemo` is the sync-external-state-during-render idiom here; the value is
+  // unused and the offsets are the dependency.
+  useMemo(() => {
     setPaletteOffsets(hueOffset, satOffset);
   }, [hueOffset, satOffset]);
 
@@ -275,7 +298,13 @@ export default function TrixelGrid() {
   const [colorIdx, setColorIdx] = useState(8);
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
-  const paintKey = encodeColor(activePaletteIdx, colorIdx);
+  // The no-print pen is a *mode*, not a palette index: the marker has no
+  // palette or lightness, so it cannot be represented as `(paletteIdx, colorIdx)`
+  // the way every real swatch is.
+  const [noPrintPen, setNoPrintPen] = useState(false);
+  const paintKey = noPrintPen
+    ? NO_PRINT
+    : encodeColor(activePaletteIdx, colorIdx);
 
   // On a hatch layer the ordinary swatch row drives the hatch brush, so it
   // shows the brush's *own* palette rather than the paint palette. Anything
@@ -284,7 +313,8 @@ export default function TrixelGrid() {
   // out of the same array, so identity by hex is safe here.
   const hatchColor = decodeColor(hatchBrush.color);
   const hatchPaletteIdx = hatchColor?.paletteIdx ?? activePaletteIdx;
-  const hatchPalette = computedPalettes[hatchPaletteIdx]?.colors ?? activePalette;
+  const hatchPalette =
+    computedPalettes[hatchPaletteIdx]?.colors ?? activePalette;
   const hatchColorIdx = hatchColor?.colorIdx ?? 8;
   const hatchHex = hatchPalette[hatchColorIdx] ?? hatchPalette[8];
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
@@ -361,7 +391,14 @@ export default function TrixelGrid() {
     const out: Record<string, string> = {};
     for (const layer of layers) {
       if (!layer.visible || layerKind(layer) === "hatch") continue;
-      Object.assign(out, layer.painted);
+      for (const key in layer.painted) {
+        // No-print markers are construction marks, not material. This is the
+        // single gate in front of the 3D, cutting and apparel exports — none of
+        // which filters colours itself — so dropping them here keeps a marker
+        // from being extruded, cut or printed.
+        if (isNoPrint(layer.painted[key])) continue;
+        out[key] = layer.painted[key];
+      }
     }
     return out;
   }, [layers]);
@@ -426,8 +463,8 @@ export default function TrixelGrid() {
     // selecting the tool opens it and leaving the tool closes it again. The
     // layers and grid drawers are opened by hand and survive a tool change,
     // unless a tool-owned drawer takes the slot from them.
-    setPanel((p) =>
-      panelForTool(t) ?? (p === "pattern" || p === "export" ? null : p),
+    setPanel(
+      (p) => panelForTool(t) ?? (p === "pattern" || p === "export" ? null : p),
     );
   }, []);
 
@@ -647,6 +684,8 @@ export default function TrixelGrid() {
           setGridOrientation(data.gridOrientation as GridOrientation);
         }
         if (data.brushSize === "hex") setBrushSize("hex");
+        if (typeof data.showNoPrint === "boolean")
+          setShowNoPrint(data.showNoPrint);
         if (typeof data.projectName === "string" && data.projectName.trim())
           setProjectName(data.projectName);
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
@@ -690,8 +729,18 @@ export default function TrixelGrid() {
             // Clamped on ingest — this is a file-format boundary, and a mask of
             // 0 would be a brush that silently paints nothing.
             dirMask: num(h.dirMask, 1, 7, DEFAULT_HATCH_BRUSH.dirMask),
-            density: num(h.density, MIN_DENSITY, MAX_DENSITY, DEFAULT_HATCH_BRUSH.density),
-            weight: num(h.weight, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_HATCH_BRUSH.weight),
+            density: num(
+              h.density,
+              MIN_DENSITY,
+              MAX_DENSITY,
+              DEFAULT_HATCH_BRUSH.density,
+            ),
+            weight: num(
+              h.weight,
+              MIN_WEIGHT,
+              MAX_WEIGHT,
+              DEFAULT_HATCH_BRUSH.weight,
+            ),
             color:
               typeof h.color === "string" ? h.color : DEFAULT_HATCH_BRUSH.color,
           });
@@ -719,9 +768,19 @@ export default function TrixelGrid() {
               MAX_DENSITY,
               Math.max(minDensity, DEFAULT_HATCHIFY.maxDensity),
             ),
-            weight: num(hf.weight, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_HATCHIFY.weight),
+            weight: num(
+              hf.weight,
+              MIN_WEIGHT,
+              MAX_WEIGHT,
+              DEFAULT_HATCHIFY.weight,
+            ),
             densitySkip: Math.round(
-              num(hf.densitySkip, MIN_SKIP, MAX_SKIP, DEFAULT_HATCHIFY.densitySkip),
+              num(
+                hf.densitySkip,
+                MIN_SKIP,
+                MAX_SKIP,
+                DEFAULT_HATCHIFY.densitySkip,
+              ),
             ),
             color:
               typeof hf.color === "string" ? hf.color : DEFAULT_HATCHIFY.color,
@@ -779,6 +838,7 @@ export default function TrixelGrid() {
         symmetry,
         gridOrientation,
         brushSize,
+        showNoPrint,
         projectName,
         hueOffset,
         saturationOffset: satOffset,
@@ -800,6 +860,7 @@ export default function TrixelGrid() {
     symmetry,
     gridOrientation,
     brushSize,
+    showNoPrint,
     projectName,
     hueOffset,
     satOffset,
@@ -853,10 +914,29 @@ export default function TrixelGrid() {
     setCloneOffset(o);
   }, []);
 
-  const onCloneCapture = useCallback((x: number, y: number, c: number, k: number, q: number, r: number, type: string) => {
-    setCloneSource({ x, y, q, r, type });
-    setCloneFlash((prev) => ({ c, k, q, r, type, opacity: 1, seq: (prev?.seq ?? 0) + 1 }));
-  }, []);
+  const onCloneCapture = useCallback(
+    (
+      x: number,
+      y: number,
+      c: number,
+      k: number,
+      q: number,
+      r: number,
+      type: string,
+    ) => {
+      setCloneSource({ x, y, q, r, type });
+      setCloneFlash((prev) => ({
+        c,
+        k,
+        q,
+        r,
+        type,
+        opacity: 1,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+    },
+    [],
+  );
 
   const {
     hoverTargets,
@@ -878,8 +958,16 @@ export default function TrixelGrid() {
     setTool: changeTool,
     color: paintKey,
     setColor: (encoded) => {
+      // A marker is pickable like any other paint, or it would be the one thing
+      // on the canvas the eyedropper silently ignored.
+      if (isNoPrint(encoded)) {
+        setNoPrintPen(true);
+        changeTool("paint");
+        return;
+      }
       const d = decodeColor(encoded);
       if (d && PALETTE_DEFS[d.paletteIdx]) {
+        setNoPrintPen(false);
         setActivePaletteIdx(d.paletteIdx);
         setColorIdx(d.colorIdx);
         changeTool("paint");
@@ -1002,20 +1090,23 @@ export default function TrixelGrid() {
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   const handleExport = useCallback(() => {
-    const svg = buildProjectSVG({
-      ...buildSnapshot(),
-      name: projectName,
-      svgExport,
-      // View state, but it shifts every resolved colour — without it a project
-      // reopens in different colours from the ones its own thumbnail shows.
-      hueOffset,
-      saturationOffset: satOffset,
-      // Likewise the lattice's quarter turn: the same trixels pointy-top are a
-      // different picture. The other grid settings ride along inside the
-      // snapshot already.
-      gridOrientation,
-      version: 1,
-    });
+    const svg = buildProjectSVG(
+      {
+        ...buildSnapshot(),
+        name: projectName,
+        svgExport,
+        // View state, but it shifts every resolved colour — without it a project
+        // reopens in different colours from the ones its own thumbnail shows.
+        hueOffset,
+        saturationOffset: satOffset,
+        // Likewise the lattice's quarter turn: the same trixels pointy-top are a
+        // different picture. The other grid settings ride along inside the
+        // snapshot already.
+        gridOrientation,
+        version: 1,
+      },
+      noisePeriod,
+    );
     downloadBlob(
       new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
       projectFileName(projectName),
@@ -1024,6 +1115,7 @@ export default function TrixelGrid() {
     buildSnapshot,
     projectName,
     svgExport,
+    noisePeriod,
     hueOffset,
     satOffset,
     gridOrientation,
@@ -1088,9 +1180,7 @@ export default function TrixelGrid() {
           if (Array.isArray(data.layers)) {
             snapLayers = data.layers as Layer[];
             snapActive =
-              typeof data.activeLayerIdx === "number"
-                ? data.activeLayerIdx
-                : 0;
+              typeof data.activeLayerIdx === "number" ? data.activeLayerIdx : 0;
           } else {
             snapLayers = [
               {
@@ -1110,18 +1200,20 @@ export default function TrixelGrid() {
             flowerRadius: data.flowerRadius ?? 0,
             symmetry: data.symmetry ?? "off",
             selections: Array.isArray(data.selections) ? data.selections : [],
-            patternPresets: Array.isArray(data.patternPresets) ? data.patternPresets : [],
+            patternPresets: Array.isArray(data.patternPresets)
+              ? data.patternPresets
+              : [],
             lastPaintTri:
-              typeof data.lastPaintTri === "string"
-                ? data.lastPaintTri
-                : null,
+              typeof data.lastPaintTri === "string" ? data.lastPaintTri : null,
           };
           // Apply the whole layer array, not just the active layer's pixels —
           // otherwise an imported multi-layer project writes into whatever
           // layer is currently selected and the real stack (kinds included)
           // only appears after an undo/redo round trip.
           setLayers(snapLayers);
-          setActiveLayerIdx(Math.max(0, Math.min(snapActive, snapLayers.length - 1)));
+          setActiveLayerIdx(
+            Math.max(0, Math.min(snapActive, snapLayers.length - 1)),
+          );
           pushHistory(snap);
 
           // The grid settings describe the document, not the workspace: the
@@ -1203,23 +1295,23 @@ export default function TrixelGrid() {
         return false;
       }
     },
-  [
-    setLayers,
-    setActiveLayerIdx,
-    pushHistory,
-    setGridDivisions,
-    setHexMode,
-    setFlowerRadius,
-    setSymmetry,
-    setSelections,
-    setActiveSelection,
-    setProjectName,
-    setSvgExport,
-    setHueOffset,
-    setSatOffset,
-    setGridOrientation,
-    setImportError,
-  ],
+    [
+      setLayers,
+      setActiveLayerIdx,
+      pushHistory,
+      setGridDivisions,
+      setHexMode,
+      setFlowerRadius,
+      setSymmetry,
+      setSelections,
+      setActiveSelection,
+      setProjectName,
+      setSvgExport,
+      setHueOffset,
+      setSatOffset,
+      setGridOrientation,
+      setImportError,
+    ],
   );
 
   const handleFileChange = useCallback(
@@ -1263,6 +1355,7 @@ export default function TrixelGrid() {
     (c: string) => {
       const idx = activePalette.indexOf(c);
       if (idx >= 0) setColorIdx(idx);
+      setNoPrintPen(false);
       // Through `changeTool`, not `setTool`: picking a colour is a tool change
       // like any other, and it has to close a tool-owned drawer behind it.
       changeTool("paint");
@@ -1445,7 +1538,8 @@ export default function TrixelGrid() {
    * both the new marks and the requantised fills.
    */
   const applyHatchify = useCallback(() => {
-    if (selectedHexes.length === 0 || gridDivisions <= 0 || !isHatchLayer) return;
+    if (selectedHexes.length === 0 || gridDivisions <= 0 || !isHatchLayer)
+      return;
 
     const res = hatchify(
       hatchifySource,
@@ -1689,6 +1783,7 @@ export default function TrixelGrid() {
           saturationOffset={satOffset}
           crop={crop}
           showCrop={tool === "crop"}
+          showNoPrint={showNoPrint}
         />
 
         {tool === "select" ? (
@@ -1735,7 +1830,8 @@ export default function TrixelGrid() {
             palettes={computedPalettes}
             onColorChange={(c) => {
               const idx = hatchPalette.indexOf(c);
-              if (idx >= 0) setHatchBrush({ color: encodeColor(hatchPaletteIdx, idx) });
+              if (idx >= 0)
+                setHatchBrush({ color: encodeColor(hatchPaletteIdx, idx) });
             }}
             onPaletteChange={(colors, idx) => {
               setActivePaletteIdx(idx);
@@ -1757,9 +1853,15 @@ export default function TrixelGrid() {
             onPaletteChange={(colors, idx) => {
               setActivePaletteIdx(idx);
               setColorIdx(colors.length - 1);
+              setNoPrintPen(false);
               changeTool("paint");
             }}
             onPointerEnter={() => setHoveredTri(null)}
+            onNoPrintSelect={() => {
+              setNoPrintPen(true);
+              changeTool("paint");
+            }}
+            noPrintActive={noPrintPen}
             hueOffset={hueOffset}
             onHueOffsetChange={setHueOffset}
             saturationOffset={satOffset}
@@ -1834,6 +1936,8 @@ export default function TrixelGrid() {
             gridOrientation={gridOrientation}
             onGridOrientationChange={setGridOrientation}
             onSpreadHexArtwork={onSpreadHexArtwork}
+            showNoPrint={showNoPrint}
+            onShowNoPrintChange={setShowNoPrint}
             onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />
@@ -1863,6 +1967,7 @@ export default function TrixelGrid() {
         projectName={projectName}
         settings={svgExport}
         onSettingsChange={updateSvgExport}
+        noisePeriod={noisePeriod}
       />
 
       {/* 3D and cutting consume solid regions, so they take the fill-only
@@ -1934,6 +2039,7 @@ export default function TrixelGrid() {
         palettes={computedPalettes}
         settings={apparelSettings}
         onSettingsChange={setApparelSettings}
+        noisePeriod={noisePeriod}
       />
 
       <PlotterDialog

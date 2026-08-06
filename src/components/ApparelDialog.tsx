@@ -9,6 +9,7 @@ import { activeEffects, layerKind, type Layer } from "@/hooks/use-history";
 import { resolveColor } from "@/lib/constants";
 import { OUTLINE_WEIGHT_AT_FULL } from "@/lib/round-corners";
 import { canvasToPngBlob, downloadBlob } from "@/lib/png-export";
+import type { NoisePeriod } from "@/lib/subdivision-noise";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
 import {
   MAX_CUT_MM,
@@ -106,6 +107,7 @@ export function ApparelDialog({
   layers,
   fills,
   gridRotation,
+  noisePeriod,
   projectName,
   palettes,
   settings,
@@ -118,6 +120,8 @@ export function ApparelDialog({
   /** Visible **fill** layers, flattened — what the cut takes its regions from. */
   fills: Record<string, string>;
   gridRotation: number;
+  /** The crop's repeat, so the shirt carries the same grain as the screen. */
+  noisePeriod?: NoisePeriod;
   projectName: string;
   palettes: { name: string; colors: string[] }[];
   settings: ApparelSettings;
@@ -268,6 +272,7 @@ export function ApparelDialog({
         cutSegments,
         cutWorld,
         cutCircles,
+        noisePeriod,
       );
       const blob = await canvasToPngBlob(canvas);
       if (!blob) {
@@ -285,6 +290,7 @@ export function ApparelDialog({
     size,
     layers,
     gridRotation,
+    noisePeriod,
     cutSegments,
     cutWorld,
     cutCircles,

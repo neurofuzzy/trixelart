@@ -9,7 +9,14 @@ import {
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
+  stepSubdivisionNoise,
 } from "@/lib/hatch-render";
+import {
+  drawSubFills,
+  noiseRegionFills,
+  onLatticeRow,
+  type NoisePeriod,
+} from "@/lib/subdivision-noise";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
 import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
@@ -79,7 +86,9 @@ export function renderCropToCanvas(
 
   // Sized off the smaller scale so the overdraw is at least one device pixel on
   // both axes.
-  drawArtworkPlan(ctx, layers, 1 / Math.min(sx, sy));
+  drawArtworkPlan(ctx, layers, 1 / Math.min(sx, sy), {
+    period: { m: crop.m, n: crop.n },
+  });
 
   ctx.restore();
 }
@@ -100,7 +109,7 @@ export function drawArtworkPlan(
   ctx: CanvasRenderingContext2D,
   layers: Layer[],
   overdraw: number,
-  options: { glow?: boolean } = {},
+  options: { glow?: boolean; period?: NoisePeriod } = {},
 ): void {
   const plan = buildRenderPlan(layers);
   const receivers =
@@ -124,6 +133,7 @@ export function drawArtworkPlan(
     const radius = stepRoundRadius(step);
     const outline = stepOutlineWeight(step);
     const adjust = stepColorAdjust(step);
+    const noise = stepSubdivisionNoise(step, options.period);
 
     // Before the layer's own fills: the layer casts the shadow, it does not
     // receive it.
@@ -134,7 +144,12 @@ export function drawArtworkPlan(
     }
 
     if (radius > 0 || outline > 0) {
-      for (const { fill, rings } of stepRegionGeometry(
+      // Clipped to the region so a rounded corner cuts the grain back exactly
+      // where it cuts the fill. Not under an outline: that effect leaves the
+      // interior empty on purpose, so there is nothing there to texture.
+      const regionFills =
+        noise && outline === 0 ? noiseRegionFills(step.painted, noise) : null;
+      for (const { fill, base, rings } of stepRegionGeometry(
         step.painted,
         radius,
         adjust,
@@ -152,6 +167,26 @@ export function drawArtworkPlan(
           ctx.stroke();
           continue;
         }
+        const grain = regionFills?.get(base);
+        if (grain?.length) {
+          // The solid fill goes down first and the grain over it: the clip is
+          // antialiased, so painting only the sub-triangles would leave a
+          // feathered edge where the region meets its neighbour.
+          ctx.save();
+          ctx.beginPath();
+          for (const ring of rings) traceRoundedRing(ctx, ring);
+          ctx.fillStyle = fill;
+          ctx.fill();
+          ctx.strokeStyle = fill;
+          ctx.lineWidth = overdraw;
+          ctx.lineJoin = "round";
+          ctx.stroke();
+          ctx.clip();
+          drawSubFills(ctx, grain, adjust, overdraw);
+          ctx.restore();
+          continue;
+        }
+
         ctx.fillStyle = fill;
         ctx.beginPath();
         for (const ring of rings) traceRoundedRing(ctx, ring);
@@ -166,7 +201,7 @@ export function drawArtworkPlan(
     }
 
     const byColor = new Map<string, [number, number][][]>();
-    for (const tri of generateTriangles(step.painted, adjust)) {
+    for (const tri of generateTriangles(step.painted, adjust, noise)) {
       const list = byColor.get(tri.fill);
       if (list) list.push(tri.points);
       else byColor.set(tri.fill, [tri.points]);
@@ -209,7 +244,12 @@ export function drawArtworkPlan(
           // World-space y equality identifies the lattice's flat edges. Under a
           // quarter turn they become display-vertical, and the width is the
           // snapped axis there, so they are pixel-aligned either way.
-          if (y0 === y1) continue;
+          //
+          // The row test only matters under subdivision noise, which puts flat
+          // edges at `(r + ½)H` as well — those are not pixel-aligned and do
+          // need the stroke. Without it every flat edge is on a row, so this
+          // reduces to the condition it has always been.
+          if (y0 === y1 && onLatticeRow(y0)) continue;
           ctx.moveTo(x0, y0);
           ctx.lineTo(x1, y1);
         }

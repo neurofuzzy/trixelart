@@ -99,6 +99,31 @@ export function computePaletteColors(
   }));
 }
 
+/**
+ * The no-print marker: a construction mark that shapes the artwork but never
+ * renders.
+ *
+ * Painted like any other colour and stored in the same slot, so it rides
+ * `ProjectSnapshot`, undo/redo and the project file with no new field. What it
+ * buys is a *distinct colour that happens to be invisible*: dropping one beside
+ * a region raises the boundary-vertex degree there, and `roundRing` only rounds a
+ * vertex where exactly two boundary edges meet — so the corner stays sharp. That
+ * is the kink. Erasing a cell cannot do the same thing: an empty cell removes
+ * edges, a marker adds a differently-coloured one.
+ *
+ * **Deliberately not a palette value.** It has no comma, so `decodeColor`
+ * rejects it, and no `|`, so `isHatchValue` does too. Nearly every renderer and
+ * exporter already skips what `decodeColor` cannot read, so this direction makes
+ * them skip the marker for free and leaves exactly one place — the degree count
+ * in `round-corners.ts` — that has to be taught to let it in. A reserved palette
+ * index would have inverted that: every one of a dozen sites would have needed a
+ * guard, and forgetting one would leak the marker into a cut file rather than
+ * merely losing a kink.
+ */
+export const NO_PRINT = "noprint";
+
+export const isNoPrint = (value: string): boolean => value === NO_PRINT;
+
 export function encodeColor(paletteIdx: number, colorIdx: number): string {
   return `${paletteIdx},${colorIdx}`;
 }

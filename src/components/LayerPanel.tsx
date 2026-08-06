@@ -12,7 +12,11 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { encodeColor, resolveColor } from "@/lib/constants";
+import { encodeColor, isNoPrint, resolveColor } from "@/lib/constants";
+import {
+  subdivisionMode,
+  type SubdivisionMode,
+} from "@/lib/subdivision-noise";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
 import {
   DropdownMenu,
@@ -92,18 +96,58 @@ function AdjustColorGlyph({ className }: { className?: string }) {
   );
 }
 
+/** A triangle split into four, two of them shaded: the subdivision-noise glyph. */
+function SubdivisionNoiseGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className ?? "w-3.5 h-3.5"}>
+      <path d="M8 2.5 11 8H5z" fill="currentColor" opacity="0.9" />
+      <path d="M5 8 8 13.5H2z" fill="currentColor" opacity="0.35" />
+      <path
+        d="M8 2.5 13.5 13.5H2.5z M5 8h6 M5 8 8 13.5 11 8"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 const DEFAULT_ROUND_RADIUS = 0.5;
 const DEFAULT_OUTLINE_WEIGHT = 0.15;
 const DEFAULT_GLOW_RADIUS = 0.3;
 const DEFAULT_GLOW_OPACITY = 0.55;
 /** The darkest grayscale swatch — a shadow by default, not a coloured glow. */
 const DEFAULT_GLOW_COLOR = encodeColor(0, 0);
+/** Enough grain to be unmistakable when the effect is added, without burying
+ *  the colour it was painted in. */
+const DEFAULT_NOISE_AMOUNT = 50;
+const DEFAULT_NOISE_SEED = 0;
+
+/** The split modes, in the order they are offered. Labelled by the shape each
+ *  one cuts rather than by its name, since that is what the user is picking. */
+const SUBDIVISION_MODES: {
+  mode: SubdivisionMode;
+  label: string;
+  title: string;
+}[] = [
+  {
+    mode: "midpoint",
+    label: "4 tris",
+    title: "Four sub-triangles at the edge midpoints",
+  },
+  {
+    mode: "centroid",
+    label: "3 fins",
+    title: "Three quad fins, corner to centroid",
+  },
+];
 
 const EFFECT_LABEL: Record<LayerEffect["type"], string> = {
   roundCorners: "Round corners",
   outline: "Outline",
   glow: "Glow",
   adjustColor: "Adjust colour",
+  subdivisionNoise: "Subdivision noise",
 };
 
 /**
@@ -137,6 +181,10 @@ const EFFECT_SLIDERS: Record<LayerEffect["type"], EffectSlider[]> = {
     { key: "hue", label: "Hue", min: -100, max: 100, step: 1, scale: 1, unit: "" },
     { key: "saturation", label: "Saturation", min: -100, max: 100, step: 1, scale: 1, unit: "" },
   ],
+  subdivisionNoise: [
+    { key: "amount", label: "Amount", min: 0, max: 100, step: 1, scale: 1, unit: "" },
+    { key: "seed", label: "Seed", min: 0, max: 99, step: 1, scale: 1, unit: "" },
+  ],
 };
 
 function EffectGlyph({
@@ -149,6 +197,8 @@ function EffectGlyph({
   if (type === "roundCorners") return <RoundCornersGlyph className={className} />;
   if (type === "outline") return <OutlineGlyph className={className} />;
   if (type === "adjustColor") return <AdjustColorGlyph className={className} />;
+  if (type === "subdivisionNoise")
+    return <SubdivisionNoiseGlyph className={className} />;
   return <GlowGlyph className={className} />;
 }
 
@@ -208,7 +258,9 @@ export function LayerPanel({
   const hasOutline = effects.some((e) => e.type === "outline");
   const hasGlow = effects.some((e) => e.type === "glow");
   const hasAdjust = effects.some((e) => e.type === "adjustColor");
-  const allAdded = hasRound && hasOutline && hasGlow && hasAdjust;
+  const hasNoise = effects.some((e) => e.type === "subdivisionNoise");
+  const allAdded =
+    hasRound && hasOutline && hasGlow && hasAdjust && hasNoise;
 
   // A glow is clipped to the solid cells beneath it, so on the bottom layer it
   // renders nothing at all. That is correct, but it looks like a broken slider
@@ -219,7 +271,10 @@ export function LayerPanel({
       (l) =>
         l.visible &&
         layerKind(l) === "fill" &&
-        Object.keys(l.painted).length > 0,
+        // A no-print marker renders nothing, so it is no surface for a glow to
+        // land on — a layer holding only markers has to read as empty here or
+        // the warning goes quiet when it should be shown.
+        Object.values(l.painted).some((v) => !isNoPrint(v)),
     );
 
   const patchEffect = (i: number, patch: Record<string, unknown>) => {
@@ -445,6 +500,25 @@ export function LayerPanel({
                   <AdjustColorGlyph className="w-3.5 h-3.5 opacity-60" />
                   Adjust colour
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={hasNoise}
+                  onClick={() =>
+                    commit(() =>
+                      onSetLayerEffects(activeLayerIdx, [
+                        ...effects,
+                        {
+                          type: "subdivisionNoise",
+                          amount: DEFAULT_NOISE_AMOUNT,
+                          seed: DEFAULT_NOISE_SEED,
+                          enabled: true,
+                        },
+                      ]),
+                    )
+                  }
+                >
+                  <SubdivisionNoiseGlyph className="w-3.5 h-3.5 opacity-60" />
+                  Subdivision noise
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -529,6 +603,32 @@ export function LayerPanel({
                     </span>
                   </label>
                 ),
+              )}
+
+              {effect.type === "subdivisionNoise" && (
+                <label className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wide text-white/60 shrink-0 w-20">
+                    Split
+                  </span>
+                  <div className="flex-1 min-w-0 flex gap-1">
+                    {SUBDIVISION_MODES.map(({ mode, label, title }) => (
+                      <button
+                        key={mode}
+                        className={cn(
+                          "flex-1 min-w-0 h-6 rounded border text-xs transition-colors disabled:opacity-40",
+                          subdivisionMode(effect) === mode
+                            ? "border-cyan-500 bg-cyan-500/20 text-white"
+                            : "border-border/60 text-muted-foreground hover:bg-accent",
+                        )}
+                        disabled={!effect.enabled}
+                        onClick={() => commit(() => patchEffect(i, { mode }))}
+                        title={title}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </label>
               )}
 
               {effect.type === "glow" && (

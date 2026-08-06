@@ -18,7 +18,7 @@ and the per-module/per-symbol map is generated — do not restate either here.
 | [docs/ui.md](docs/ui.md) | Keyboard shortcuts, zoom & touch, symmetry function panel, fullscreen |
 | [docs/pattern-brush.md](docs/pattern-brush.md) | The procedural pattern brush and its layer stack |
 | [docs/hatch-layers.md](docs/hatch-layers.md) | Hatch layers, the hatch brush, convert-to-hatches |
-| [docs/layer-effects.md](docs/layer-effects.md) | Round corners, outline, glow, adjust colour |
+| [docs/layer-effects.md](docs/layer-effects.md) | Round corners, outline, glow, adjust colour, subdivision noise |
 | [docs/exports.md](docs/exports.md) | Crop & export (PNG/SVG), plotter export, apparel export |
 | [docs/persistence.md](docs/persistence.md) | localStorage keys, `ProjectSnapshot`, the `.trixel.svg` project file, examples |
 | [docs/fabrication-export.md](docs/fabrication-export.md) | Design spec for the cutting-machine export (not implemented) |
@@ -55,6 +55,8 @@ No tests configured.
   - The escape hatch for state that should not be undoable is to **not apply it on restore**, not to skip the push. `registerRestore` deliberately leaves the grid settings alone, and undo/redo deliberately leave `activeLayerIdx` alone (clamped to the restored layer count), so that moving around between strokes is never rolled back.
   - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell. In `LayerPanel` every mutation goes through its local `commit()` for the same reason.
 - **Colors are stored encoded**, not as hex: `"paletteIdx,colorIdx"` via `encodeColor`, resolved through `resolveColor` (`src/lib/constants.ts`). `PALETTE_DEFS` holds 14 HSL-derived palettes × 9 lightnesses, shifted globally by `hueOffset`/`satOffset`. Painted data therefore follows palette changes automatically — compare encoded values, not resolved hex, when testing swatch identity (separate palettes can resolve to the same color). The documented exceptions all share one reason: where the only question is *whether the eye sees a boundary*, comparison is on the resolved hex (`region-outline.ts`, `round-corners.ts`).
+  - **`NO_PRINT` is a colour that never renders.** A construction mark: it takes part in the boundary-degree count in `round-corners.ts` — which is what forces a corner to stay sharp — and is skipped everywhere else. It deliberately **fails `decodeColor`**, so the many consumers that already skip undecodable values skip it for free; the one place that had to be taught to admit it is `boundaryVertexDegrees`. Adding a new consumer of `painted` means deciding which side it is on, and the safe default (skip) is the one you get by doing nothing. See [docs/layer-effects.md](docs/layer-effects.md).
+  - **`hueOffset`/`satOffset` live in module state** inside `constants.ts` rather than being arguments to `resolveColor`, so `setPaletteOffsets` **must be called during render, not in an effect**. It is a `useMemo` in `TrixelGrid` for exactly that reason. React flushes child effects before parent ones, so as an effect it landed *after* `GridCanvas` had already painted with the previous offsets — and since nothing else had changed, no further draw was scheduled. On first load the saved offsets arrive in one restore and never change again, so the artwork kept the unshifted palette until the next edit happened to redraw it. Anything else that syncs module state consumed by descendants has the same constraint.
 - **`setPainted` updaters must be pure** — React StrictMode replays them. Precompute the keys/colors outside the updater (see `edit-tool.ts` and `pattern-tool.ts`).
 - **Adding a field to `ProjectSnapshot`** means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist. See [docs/persistence.md](docs/persistence.md) for the view-state / authored-content split that decides whether a new setting belongs there at all.
 - **Optional fields on `Layer` are read through a helper, never directly** — `layerKind(l)` for `kind`, `layerEffects(l)` / `activeEffects(l)` for `effects`. Absent means the pre-existing default, which is what lets every old save, project file and history snapshot keep working with no migration.
@@ -96,12 +98,17 @@ both SVG exporters — walks the **same plan**: `buildRenderPlan(layers)`
 (`src/lib/hatch-render.ts`) returns visible layers bottom-to-top with
 consecutive effect-free fill layers coalesced, and hatch layers as their own
 steps. Per-step readers (`stepRoundRadius`, `stepOutlineWeight`, `stepGlow`,
-`stepColorAdjust`, `glowReceivers`) hand each backend what that step needs. A new
-effect or a new backend goes through the plan, or the preview and the file will
-disagree. See [docs/layer-effects.md](docs/layer-effects.md).
+`stepColorAdjust`, `stepSubdivisionNoise`, `glowReceivers`) hand each backend
+what that step needs. A new effect or a new backend goes through the plan, or the
+preview and the file will disagree. See
+[docs/layer-effects.md](docs/layer-effects.md).
 
 Colours resolve at the last moment and geometry is shared: `stepRegionGeometry`
 is the one definition of a region boundary, `ringTangents` the one definition of
-where an arc begins. The fabrication paths (3D, cutting, plotter, apparel cut)
+where an arc begins, `subdivideTri` the one definition of how a cell splits.
+The two effects that are not silhouette — colour adjust and subdivision noise —
+both ride `generateTriangles`' optional parameters rather than each emit site,
+which is what lets one change carry the PNG exporter and both SVG exporters at
+once. The fabrication paths (3D, cutting, plotter, apparel cut)
 deliberately do **not** run the plan — see the per-export notes for what each one
 ignores and why.

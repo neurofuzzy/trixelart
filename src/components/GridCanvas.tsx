@@ -3,7 +3,7 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
-import { resolveColor } from "@/lib/constants";
+import { isNoPrint, resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 import { type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
@@ -16,8 +16,15 @@ import {
   stepGlow,
   stepRoundRadius,
   stepOutlineWeight,
+  stepSubdivisionNoise,
 } from "@/lib/hatch-render";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import {
+  drawSubFills,
+  noiseRegionFills,
+  noiseSubFills,
+  type SubFill,
+} from "@/lib/subdivision-noise";
 import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
 export function GridCanvas({
@@ -44,6 +51,7 @@ export function GridCanvas({
   saturationOffset,
   crop,
   showCrop = false,
+  showNoPrint = true,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -68,6 +76,9 @@ export function GridCanvas({
   saturationOffset?: number;
   crop?: CropRect;
   showCrop?: boolean;
+  /** Editor-only visibility for no-print markers. They shape the artwork
+   *  either way; this only decides whether the scaffolding is drawn. */
+  showNoPrint?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -89,6 +100,25 @@ export function GridCanvas({
   // The same plan the exporters walk, so preview and file agree on coalescing.
   const plan = useMemo(() => buildRenderPlan(layers), [layers]);
 
+  // The grain folds onto the crop's repeat, so the preview shows the pattern the
+  // fabric tile will actually carry.
+  //
+  // Keyed on the two numbers, never on `crop` itself: the crop object is
+  // replaced on every handle drag, and a new identity here would invalidate
+  // `effectPlan` and rebuild every region's geometry mid-gesture. Only `m` and
+  // `n` change the grain — where the crop sits does not, because the grain is
+  // periodic under the crop's own translations and any window of that size
+  // tiles. Read out first so the dependency really is the two numbers.
+  const cropM = crop?.m;
+  const cropN = crop?.n;
+  const noisePeriod = useMemo(
+    () =>
+      cropM !== undefined && cropN !== undefined
+        ? { m: cropM, n: cropN }
+        : undefined,
+    [cropM, cropN],
+  );
+
   // Effect geometry (rounding + outline), memoised on the plan. The draw effect
   // below re-runs on pan, zoom, hover and the marching-ants tick — none of which
   // change geometry — so rebuilding rings inside it would redo the whole artwork
@@ -109,18 +139,25 @@ export function GridCanvas({
         const radius = stepRoundRadius(step);
         const outline = stepOutlineWeight(step);
         if (radius <= 0 && outline <= 0) return null;
+        const adjust = stepColorAdjust(step);
+        const noise = stepSubdivisionNoise(step, noisePeriod);
         return {
           radius,
           outline,
-          regions: stepRegionGeometry(
-            step.painted,
-            radius,
-            stepColorAdjust(step),
-          ),
+          adjust,
+          // Memoised here rather than rebuilt per frame for the same reason the
+          // rings are: this path cannot be viewport-culled, so it must not land
+          // on a pan or a hover. An outline has no interior to texture, so it
+          // takes none.
+          regionFills:
+            noise && outline <= 0
+              ? noiseRegionFills(step.painted, noise)
+              : null,
+          regions: stepRegionGeometry(step.painted, radius, adjust),
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [plan, hueOffset, saturationOffset],
+    [plan, hueOffset, saturationOffset, noisePeriod],
   );
 
   // Glow geometry, memoised on the same key and for the same reason. Kept apart
@@ -228,7 +265,21 @@ export function GridCanvas({
       // and hover redraw.
       const eff = effectPlan[si];
       if (eff) {
-        for (const { fill, rings } of eff.regions) {
+        for (const { fill, base, rings } of eff.regions) {
+          const grain = eff.regionFills?.get(base);
+          if (grain?.length) {
+            // Solid first, grain clipped over it: the clip is antialiased, so
+            // painting only the sub-triangles would feather the region's edge.
+            ctx.save();
+            ctx.beginPath();
+            for (const ring of rings) traceRoundedRing(ctx, ring);
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.clip();
+            drawSubFills(ctx, grain, eff.adjust);
+            ctx.restore();
+            continue;
+          }
           ctx.beginPath();
           for (const ring of rings) traceRoundedRing(ctx, ring);
           if (eff.outline > 0) {
@@ -254,6 +305,28 @@ export function GridCanvas({
       // path it has always taken. The rounded/outlined branch above needs no
       // equivalent — `stepRegionGeometry` has already applied it.
       const adjust = stepColorAdjust(step);
+      const noise = stepSubdivisionNoise(step, noisePeriod);
+
+      // Subdivision noise emits four fills per cell instead of one, so it gets
+      // its own gather rather than widening the plain one. Still viewport-culled
+      // — the sub-triangles live inside the cell that produced them, so the
+      // same bounds hold — which is why this is not memoised the way the
+      // rounded path above has to be.
+      if (noise) {
+        const fills: SubFill[] = [];
+        for (let r = minR; r <= maxR; r++) {
+          for (let q = minQ; q <= maxQ; q++) {
+            for (const type of ["up", "down"] as const) {
+              const encoded = step.painted[`${q},${r},${type}`];
+              if (encoded) {
+                fills.push(...noiseSubFills(q, r, type, encoded, noise));
+              }
+            }
+          }
+        }
+        drawSubFills(ctx, fills, adjust);
+        continue;
+      }
 
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {
@@ -261,7 +334,12 @@ export function GridCanvas({
           for (const type of ["up", "down"] as const) {
             const key = `${q},${r},${type}`;
             const fill = step.painted[key];
-            if (fill) {
+            // A no-print marker never joins the artwork; it gets its own pass
+            // below. Skipping it here is not cosmetic — `resolveColor` hands
+            // back the raw marker string, and canvas *silently keeps the
+            // previous `fillStyle`* for a value it cannot parse, so the cell
+            // would paint in whatever colour happened to be current.
+            if (fill && !isNoPrint(fill)) {
               const resolved = resolveColor(fill);
               const hex = adjust ? adjust(resolved) : resolved;
               const list = colorGroups.get(hex);
@@ -284,6 +362,31 @@ export function GridCanvas({
         }
         ctx.fill();
       }
+    }
+
+    // No-print markers, drawn over the artwork as scaffolding rather than paint.
+    // They are editor-only by definition — every exporter drops them — so this is
+    // the one place they are ever visible, and the toggle hides them without
+    // touching the shape they produce.
+    if (showNoPrint) {
+      ctx.fillStyle = "rgba(236,72,153,0.35)";
+      ctx.beginPath();
+      for (const layer of layers) {
+        if (!layer.visible) continue;
+        for (let r = minR; r <= maxR; r++) {
+          for (let q = minQ; q <= maxQ; q++) {
+            for (const type of ["up", "down"] as const) {
+              if (!isNoPrint(layer.painted[`${q},${r},${type}`] ?? "")) continue;
+              const [a, b, c] = getTriVertices(q, r, type);
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.lineTo(c.x, c.y);
+              ctx.closePath();
+            }
+          }
+        }
+      }
+      ctx.fill();
     }
 
     // Grid outlines — 3 families of parallel lines
@@ -799,7 +902,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop]);
+  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod, showNoPrint, layers]);
 
   return (
     <canvas

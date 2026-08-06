@@ -2,7 +2,8 @@
 
 > Detail doc. Index and the rules that apply everywhere: [CLAUDE.md](../CLAUDE.md). Module/symbol map: [CODEMAP.md](../CODEMAP.md).
 
-Non-destructive per-layer filters — three of geometry and one of colour.
+Non-destructive per-layer filters — three of geometry, one of colour, one of
+texture.
 `Layer.effects` is optional and
 **absent means none** — read it through `layerEffects(l)` / `activeEffects(l)`
 (`use-history.ts`), never `l.effects` directly, exactly as with `layerKind`, and
@@ -15,11 +16,11 @@ zero-radius effect produces identical SVG output).
 `trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
 is the reason they live on the layer rather than in `trixel-settings`: they are
 authored content, and putting them there costs nothing to persist. They are a
-list so further effects can be added without re-plumbing; today there are four
-(round corners, outline, glow and adjust colour) and all four may sit on the same
-layer. Hatch layers are excluded — line work has no filled region to reshape, and
-the colour filter follows them out rather than being the one effect with a
-different eligibility rule.
+list so further effects can be added without re-plumbing; today there are five
+(round corners, outline, glow, adjust colour and subdivision noise) and all five
+may sit on the same layer. Hatch layers are excluded — line work has no filled
+region to reshape, and the colour and texture filters follow them out rather than
+being the one effect with a different eligibility rule.
 
 `activeEffects` **switches on the effect type** rather than testing one field.
 It used to be a two-way ternary; a third effect with two scalars broke that, and
@@ -102,6 +103,45 @@ rather than hiding overflow behind a `<clipPath>`. Canvas deliberately avoids
 clamp has pulled the tangent points inward it adds a connecting line that doubles
 back along the edge — a hairpin sliver of the very curve the corner was meant to
 be.
+
+### Authoring a kink: the no-print marker
+
+`NO_PRINT` (`src/lib/constants.ts`) is a swatch that paints like any other but
+never renders. Its only purpose is to exploit the eligibility rule above: only a
+vertex with exactly two boundary edges may round, so dropping a marker cell
+beside a region raises the degree at the vertices it touches and those corners
+stay sharp. That is a deliberate kink in a shape that rounding would otherwise
+turn to a blob.
+
+**Erasing is not a substitute.** An empty cell *removes* boundary edges; a marker
+*adds* a differently-coloured one. Only the second changes the degree.
+
+**The sentinel deliberately fails `decodeColor`.** Nearly every renderer and
+exporter already skips what it cannot decode, so this direction makes them skip
+the marker for free and leaves exactly one place — the cell loop in
+`boundaryVertexDegrees` — that had to be taught to let it in. A reserved palette
+index would have inverted that: a dozen sites would have needed a guard, and
+forgetting one leaks the marker into a cut file rather than merely losing a kink.
+`regionRings` keeps its own filter, so the marker never produces a ring to draw.
+
+Sites that did *not* already filter, and so needed an explicit guard:
+`generateTriangles` and `stepPaintedColors` (`svg-export.ts`), `GridCanvas`'s
+fill loop — where an unparsable `fillStyle` makes canvas **silently keep the
+previous colour** — `noiseSubFills`, `artworkBounds` (`apparel-export.ts`),
+`fitCropToPainted` (`crop.ts`), and the glow's surface test in `LayerPanel`. The
+fabrication exports (3D, cutting, apparel) are covered in one place by filtering
+`mergedFillPainted` in `TrixelGrid`, which is the only gate in front of all of
+them.
+
+Palette transforms need no change: `remapGrid`, `shiftGridPalettes`, `dodgeColor`
+and `burnColor` all return a value untouched when `decodeColor` fails, so a
+marker survives a palette shift.
+
+The **Show/Hide** switch in Grid Settings is a view toggle only — markers shape
+corners whether or not they are drawn, and they are never in an export either
+way. Verified: markers added on empty cells produce byte-identical SVG while
+dropping exactly the intended corners to radius 0, and the literal `"noprint"`
+appears in no export body.
 
 ## Outline
 
@@ -279,6 +319,172 @@ other: it is authored directly in a colour picker rather than being layer
 content. Honoured in the canvas preview and the PNG/SVG (full + cropped) exports,
 i.e. exactly where the other three are, and likewise not in the fabrication
 paths.
+
+## Subdivision noise
+
+A dither *inside* each cell: the trixel splits into pieces and each is blended
+toward the previous or next palette index. Two sliders — **Amount** 0–100 and
+**Seed** 0–99 — a **Split** toggle, and `src/lib/subdivision-noise.ts` is the
+maths. Verified against the cases that matter: amount 0 exports byte-identically
+to no effect, each mode's pieces retile the parent exactly, the pattern is stable
+across repeated renders and moves with the seed, and rounding clips it.
+
+**The only effect that is texture rather than silhouette**, and the only one that
+changes how many shapes a cell emits. The pieces exactly retile the cell they
+came from, so the artwork's boundary, its bounding box and `painted` are all
+unchanged — which is why nothing downstream had to learn about it beyond the two
+chokepoints below.
+
+### The two splits
+
+`"midpoint"` cuts four sub-triangles at the edge midpoints. Every piece is a
+triangle pointing the same way as the lattice, so the grain reads as a finer
+version of the grid.
+
+`"centroid"` cuts three quad **fins**, each owned by one corner and running
+corner → edge midpoint → centroid → the other edge midpoint. Borrowed from
+nemoworlds' `terrain_surface.frag.wgsl`, which makes the same cut barycentrically
+to facet a rendered surface. Coarser and off-lattice, so it reads as faceting
+rather than as a finer grid.
+
+`mode` is **optional and absent means `"midpoint"`** — read through
+`subdivisionMode(spec)`, never directly, exactly as with `layerKind`. Verified:
+an explicit `"midpoint"` and an absent mode produce identical SVG.
+
+**A fin is a quad, which is the one thing that rippled outward.** `SubFill.points`
+is an open-ended `Pt[]` rather than a triple, and `ensureCW` had a latent bug for
+anything but a triangle — its reversal was `[p0, p2, p1]`, which silently *drops*
+a quad's fourth vertex. It now keeps the first vertex and reverses the rest,
+which is the same result for a triangle and correct for a fin. Every other emit
+site already walked `points.length`.
+
+**Fixed at one subdivision** in both modes. No depth slider: 16 or 64 pieces per
+cell would multiply an SVG export's element count by the same factor for a grain
+finer than most exports resolve.
+
+### The grain folds onto the crop, or fabric does not repeat
+
+Hashing raw `(q, r)` makes the grain unbounded, and a fabric tile then **fails to
+repeat** even though the lattice does: a cell straddling the crop edge takes its
+two halves from `q` and `q + m`, which hash differently, so the discontinuity
+lands exactly on the seam. Measured on a deliberately periodic painting — the
+geometry tiled perfectly and the grain did not.
+
+So `canonicalCell` folds the *hash key* (never the geometry) onto one repeat of
+the crop, and the grain repeats with the tile. The fold is **not** a plain
+`(q mod m, r mod 2n)`: the crop's translations are `(q+m, r)` and `(q−n, r+2n)`,
+and the vertical one shifts `q` because `(0, 2H) = 2v − u`, so the row index has
+to pay that shift back before `q` is reduced. Verified invariant under both
+generators, and verified that the naive fold is *not*.
+
+Two consequences worth knowing:
+
+- **Where the crop sits does not matter**, only its `m`/`n`. The grain is
+  periodic under the crop's own translation lattice, so any window of that size
+  tiles — sliding the crop never re-rolls it. That is why `GridCanvas` keys its
+  memo on the two numbers rather than the crop object, which is replaced on every
+  handle drag.
+- **Resizing the crop re-rolls the grain everywhere**, and on artwork larger than
+  the crop the grain visibly repeats. That is the accepted price of a true fabric
+  repeat; there is no period that both tiles the crop and never repeats.
+
+`period` is threaded in by each backend rather than stored on the effect, because
+it belongs to the export rectangle, not the layer — and **every** backend must
+pass the same one (preview, both SVG exports, the fabric PNG, the apparel PNG and
+the project thumbnail) or the grain on screen is not the grain in the file.
+
+### Vector export states the grain once, as a `<pattern>`
+
+Because the grain is periodic, one repeat *is* the whole of it — so both SVG
+exporters emit `noiseTile` as a `<pattern>` and every region simply references it
+in its `fill`. A noised layer therefore exports as its **own region geometry**
+with a texture reference, not as confetti: the compositional shape stays in the
+file and stays editable, which is the right structure for something that honours
+the topology without being part of it.
+
+Measured on 2,400 trixels: loose polygons 858 KB, pattern with an `m4 n2` crop
+115 KB, with `m8 n4` 308 KB. The win scales with artwork ÷ crop area, since the
+tile *is* the crop — a large crop is a large tile and buys less.
+
+Three things that are load-bearing:
+
+- **The tile opens with a solid `<rect>` of the region's colour**, so a region is
+  a single path with nothing layered under it. That is also what makes the reflex-
+  corner hole impossible here: there is no seam between a fill and a grain layer
+  for the background to come through.
+- **Rows tile the height exactly; columns do not.** A cell spans `[r·H, (r+1)·H]`
+  so `2n` rows cover the tile with no overhang, but each row is sheared half a
+  cell right of the one above, so the `q` range runs wide and the tile clips.
+  Seamless rather than lossy: a piece cut off the right edge has a
+  period-translate hanging over the left edge with identical grain.
+- **The pattern is an optimisation, never a precondition.** Without a period
+  there is no repeat to state, and `generateSVG` falls back to loose polygons
+  clipped to the region. Emitting nothing would silently drop the texture for any
+  caller that forgot the argument — which happened once during development.
+  `generateCroppedSVG` needs no fallback: it is handed a crop, and `m`/`n` are
+  clamped to at least 1 wherever they are produced.
+
+`patternTransform` carries the world → display map in the cropped exporter
+(`translate(-display) rotate(θ)`, applied right to left), which is what keeps the
+pattern locked to the lattice so the fabric tile stays seamless.
+
+**Threaded exactly where `adjust` is**, and for the same reason — it reaches the
+flat-fill path of the PNG exporter and both SVG exporters through the single
+`noise` parameter on `generateTriangles`, so no emit site changed. Only
+`GridCanvas`'s inline grouping loop, which resolves its own fills, gathers its
+own. `stepSubdivisionNoise` returns **`null`** for an absent, disabled or
+zero-amount effect, keeping an unnoised layer on the path it walked before.
+`subdivideCell` is the one definition of how a cell splits, so a mode cannot mean
+one thing in the preview and another in a file.
+
+**The blend is quantised** to `NOISE_LEVELS` (8) steps per direction and the
+resulting ramp memoised per encoded colour. That is load-bearing, not a
+micro-optimisation: a continuous blend gives nearly every piece its own
+hex, which costs the canvas a `fillStyle` change per piece and costs
+`mergeTrianglesByColor` the ability to merge anything. Eight steps caps a source
+colour at 17 outputs. The cache key includes the *resolved* hex as well as the
+encoded value, so a global hue/saturation shift invalidates it.
+
+**Mixed in RGB, not HSL** — the opposite choice from adjust colour, and
+deliberately. The four custom palettes carry a per-index hue as well as a
+per-index lightness, so adjacent indices can differ in hue and an HSL
+interpolation would swing through colours in neither swatch.
+
+**Clamped at both ends of the ramp**, exactly as `dodgeColor` / `burnColor`
+clamp: a cell in the darkest swatch has nothing darker to blend toward, so its
+grain travels one way only. Same asymmetry dodge and burn already have.
+
+**Under round corners the grain is clipped to the region, not emitted loose**, so
+a rounded corner cuts it back exactly where it cuts the fill. Finding which cells
+belong to a region needs no second connectivity walk: `regionRings` groups by
+*resolved colour* and emits one entry per distinct colour — separate blobs and
+holes fall out as extra rings inside that entry — so "this region's cells" is
+"the cells whose resolved colour is this region's". `stepRegionGeometry` returns
+`base`, the fill *before* `adjust`, for the match; using the filtered value would
+pour one region's grain into another's whenever the filter collapses two colours
+onto one.
+
+**The solid fill goes down first and the grain rides on top — in all four
+backends.** This is not belt-and-braces: the grain covers only the cells the
+artwork was painted in, while the rounded ring *bulges past* them at every reflex
+corner, so a region drawn as the clipped grain alone is unpainted exactly there.
+Both SVG exporters originally emitted the clipped group *instead of* the fill and
+shipped that way; it showed up as a transparent lens along every colour seam,
+bounded by the arc on one side and raw cell edges on the other, and only when
+noise and rounding were on the same layer. The regression check is that a rounded
+layer's region paths are byte-identical with and without noise — the grain must
+never move the silhouette.
+
+**Under an outline the noise is skipped.** That effect leaves the region's
+interior deliberately empty, so there is no fill there to texture.
+
+**The raster overdraw needed a real fix, not just threading.** `drawArtworkPlan`
+skips its seam-closing stroke on flat edges because the caller lands every
+lattice row on an integer pixel boundary, and a stroke centred there straddles it
+and discolours the whole row. Subdivision puts flat edges at `(r + ½)H` too,
+which is *not* pixel-aligned and does need the stroke — so the test became "flat
+**and** on a lattice row" (`onLatticeRow`). Without noise every flat edge is on a
+row, so it reduces to the condition it always was.
 
 ## Rounding in the cutting export
 

@@ -1,4 +1,5 @@
 import { SIDE, H, getTriVertices, type TriType } from "@/lib/grid-math";
+import { isNoPrint } from "@/lib/constants";
 
 /**
  * Rectangular export crop, constrained to the triangular lattice.
@@ -112,7 +113,10 @@ export function fitCropToPainted(painted: Record<string, string>): CropRect | nu
   let maxY = -Infinity;
   let any = false;
 
-  for (const key of Object.keys(painted)) {
+  for (const [key, value] of Object.entries(painted)) {
+    // Auto-fit measures the *visible* artwork; a marker prints nothing, so it
+    // must not pull the crop out to cover itself.
+    if (isNoPrint(value)) continue;
     const parts = key.split(",");
     if (parts.length !== 3) continue;
     const q = parseInt(parts[0]);

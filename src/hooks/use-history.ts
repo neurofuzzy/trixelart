@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
 import { isIdentityAdjustment } from "@/lib/color-adjust";
+import type { SubdivisionMode } from "@/lib/subdivision-noise";
 
 /** What a layer's `painted` values mean. Absent is `"fill"`, so every document
  *  saved before hatch layers existed keeps working with no migration. */
@@ -86,6 +87,28 @@ export interface AdjustColorEffect {
   enabled: boolean;
 }
 
+/**
+ * A dither inside each cell: the trixel splits into pieces — four sub-triangles
+ * at the edge midpoints, or three corner-to-centroid quad fins — each blended
+ * toward a neighbouring palette index.
+ *
+ * The only effect that is texture rather than silhouette. The pieces exactly
+ * retile the cell they came from, so the artwork's boundary, the lattice and
+ * `painted` are all unchanged — see `lib/subdivision-noise.ts`.
+ */
+export interface SubdivisionNoiseEffect {
+  type: "subdivisionNoise";
+  /** 0–100. How far a piece may travel toward the previous / next palette
+   *  index. 0 is "leave alone". */
+  amount: number;
+  /** Re-rolls the grain. Otherwise the pattern is fixed by cell coordinates. */
+  seed: number;
+  /** Absent means `"midpoint"`, the split this effect shipped with. Read via
+   *  `subdivisionMode`, never directly. */
+  mode?: SubdivisionMode;
+  enabled: boolean;
+}
+
 /** A non-destructive per-layer geometry filter. `painted` is never touched —
  *  effects are applied when geometry is built for rendering, so switching one
  *  off restores the artwork exactly. */
@@ -93,7 +116,8 @@ export type LayerEffect =
   | RoundCornersEffect
   | OutlineEffect
   | GlowEffect
-  | AdjustColorEffect;
+  | AdjustColorEffect
+  | SubdivisionNoiseEffect;
 
 /** Reads a layer's effects, defaulting an absent field to none. Use this rather
  *  than touching `.effects` directly, exactly as with `layerKind`. */
@@ -115,6 +139,8 @@ export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
         return e.radius > 0 && e.opacity > 0;
       case "adjustColor":
         return !isIdentityAdjustment(e);
+      case "subdivisionNoise":
+        return e.amount > 0;
     }
   });
 
