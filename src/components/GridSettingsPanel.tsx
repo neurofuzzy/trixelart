@@ -5,9 +5,16 @@ import { Expand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PanelShell } from "@/components/PanelShell";
 import { SpreadHexDialog } from "@/components/SpreadHexDialog";
+import { ColorPickerDialog } from "@/components/ColorPickerDialog";
+import { resolveColor } from "@/lib/constants";
 import type { GridOrientation, HexMode } from "@/components/Footer";
 
 const HEX_CYCLE: HexMode[] = ["world", "honeycomb"];
+
+/** The editor's default canvas backdrop: diagonal stripes, so that transparent
+ *  and white-painted areas are told apart at a glance. */
+export const DEFAULT_EDITOR_BG =
+  "repeating-linear-gradient(30deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 6px, rgba(0,0,0,0.06) 6px, rgba(0,0,0,0.06) 12px)";
 
 /** Grid settings as a right-hand drawer. One of the four `PanelShell` panels;
  *  see `PanelId` for the slot they share. */
@@ -21,6 +28,9 @@ export function GridSettingsPanel({
   onSpreadHexArtwork,
   showNoPrint,
   onShowNoPrintChange,
+  editorBg,
+  onEditorBgChange,
+  palettes,
   onClose,
   onPointerEnter,
 }: {
@@ -35,10 +45,16 @@ export function GridSettingsPanel({
    *  shape corners whether or not they are drawn. */
   showNoPrint?: boolean;
   onShowNoPrintChange?: (v: boolean) => void;
+  /** Encoded canvas backdrop, or `null` for the default stripes. Editor-only:
+   *  it is never drawn into an export, which has its own background setting. */
+  editorBg?: string | null;
+  onEditorBgChange?: (v: string | null) => void;
+  palettes?: { name: string; colors: string[] }[];
   onClose: () => void;
   onPointerEnter: () => void;
 }) {
   const [spreadOpen, setSpreadOpen] = useState(false);
+  const [bgPickerOpen, setBgPickerOpen] = useState(false);
   const modeButtonClass = (mode: HexMode) =>
     cn(
       "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
@@ -122,6 +138,42 @@ export function GridSettingsPanel({
           </div>
         )}
 
+        {onEditorBgChange && palettes && (
+          <div className="flex flex-col gap-2 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Canvas background
+            </span>
+            <div className="flex gap-1 items-center">
+              <button
+                onClick={() => setBgPickerOpen(true)}
+                title={
+                  editorBg
+                    ? `Background: ${resolveColor(editorBg)}`
+                    : "Pick a background colour"
+                }
+                className="w-9 h-8 rounded-md border border-white/20 hover:border-white/60 transition-colors shrink-0"
+                style={{
+                  background: editorBg
+                    ? resolveColor(editorBg)
+                    : DEFAULT_EDITOR_BG,
+                }}
+              />
+              <button
+                onClick={() => onEditorBgChange(null)}
+                disabled={!editorBg}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                Default
+              </button>
+            </div>
+            <span className="text-xs leading-snug text-white/40">
+              Preview only — it never prints. Handy for spotting near-black
+              cells, or for seeing the artwork against the colour it will sit
+              on.
+            </span>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2 shrink-0">
           <div className="flex items-baseline justify-between">
             <span className="text-xs uppercase tracking-wide text-white/60">
@@ -155,6 +207,17 @@ export function GridSettingsPanel({
           Spread hex artwork
         </button>
       </div>
+
+      {onEditorBgChange && palettes && (
+        <ColorPickerDialog
+          open={bgPickerOpen}
+          onClose={() => setBgPickerOpen(false)}
+          value={editorBg ?? ""}
+          onChange={onEditorBgChange}
+          palettes={palettes}
+          title="Canvas background"
+        />
+      )}
 
       <SpreadHexDialog
         key={spreadOpen ? "open" : "closed"}

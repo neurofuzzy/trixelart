@@ -1,8 +1,8 @@
 import { worldToTri, triToString, triEdgeNeighbors, type TriKey } from "@/lib/grid-math";
-import { triToHex } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import { FILL_MAX_RADIUS } from "@/lib/config";
-import type { ToolContext, ToolHandler } from "./types";
+import type { ToolHandler } from "./types";
+import { selectionConstraint } from "./selection-utils";
 
 /**
  * Flood-fill the region edge-connected to `seed`, bounded by `maxRadius`
@@ -21,11 +21,15 @@ import type { ToolContext, ToolHandler } from "./types";
  * not connect. Returns the trixel keys to paint, an empty array for a no-op,
  * or `null` when the region spreads past `maxRadius` (unbounded / not
  * enclosed) and must not be filled.
+ *
+ * `newColor` is only consulted to spot the no-op of repainting a region the
+ * colour it already is. Pass `null` for ALT-fill, which erases the region
+ * instead — there the destination is emptiness and no colour can be a no-op.
  */
 export function computeFillRegion(
   painted: Record<string, string>,
   seed: TriKey,
-  newColor: string,
+  newColor: string | null,
   maxRadius: number,
   constrain?: (t: TriKey) => boolean,
 ): string[] | null {
@@ -35,10 +39,14 @@ export function computeFillRegion(
   const seedKey = triToString(seed);
   const seedRaw = painted[seedKey];
   const targetColor = seedRaw === undefined ? null : resolveColor(seedRaw);
-  const newResolved = resolveColor(newColor);
 
   // Recoloring a same-colored region with the same color changes nothing.
-  if (targetColor !== null && targetColor === newResolved) return [];
+  if (
+    newColor !== null &&
+    targetColor !== null &&
+    targetColor === resolveColor(newColor)
+  )
+    return [];
 
   const matches = (t: TriKey, k: string): boolean => {
     if (constrain && !constrain(t)) return false; // outside constraint = wall
@@ -75,23 +83,21 @@ export function computeFillRegion(
 }
 
 /**
- * Builds a predicate clipping the fill to the active hex selection, or
- * `undefined` when there's no selection to constrain to.
+ * Fill. ALT-click erases the region instead of recolouring it — same region,
+ * same walls, same selection clipping, only the write differs. Seeding on an
+ * empty cell does nothing: that region is already empty, and flooding it would
+ * only be an expensive way to find that out.
  */
-function selectionConstraint(ctx: ToolContext): ((t: TriKey) => boolean) | undefined {
-  const N = ctx.gridDivisions;
-  if (ctx.selectedHexes.length === 0 || N <= 0) return undefined;
-  const hexSet = new Set(ctx.selectedHexes.map((h) => `${h.c},${h.k}`));
-  return (t: TriKey) => {
-    const h = triToHex(t.q, t.r, t.type, N);
-    return hexSet.has(`${h.c},${h.k}`);
-  };
-}
-
 export const fillTool: ToolHandler = {
   onDown(ctx, e, pos) {
     const world = ctx.screenToWorld(pos.x, pos.y);
     const seed = worldToTri(world.x, world.y);
+    const erasing = e.altKey;
+
+    if (erasing && ctx.paintedRef.current[triToString(seed)] === undefined) {
+      ctx.drag.current = { kind: "fill", changed: false };
+      return;
+    }
 
     // A hex selection is a finite boundary that clips the fill, so there's no
     // need to abort on radius when one is active.
@@ -99,7 +105,7 @@ export const fillTool: ToolHandler = {
     const region = computeFillRegion(
       ctx.paintedRef.current,
       seed,
-      ctx.color,
+      erasing ? null : ctx.color,
       constrain ? Infinity : FILL_MAX_RADIUS,
       constrain,
     );
@@ -112,7 +118,10 @@ export const fillTool: ToolHandler = {
 
     ctx.setPainted((prev) => {
       const next = { ...prev };
-      for (const k of region) next[k] = ctx.color;
+      for (const k of region) {
+        if (erasing) delete next[k];
+        else next[k] = ctx.color;
+      }
       return next;
     });
     ctx.drag.current = { kind: "fill", changed: true };

@@ -33,6 +33,7 @@ import {
   isNoPrint,
   NO_PRINT,
   remapGrid,
+  resolveColor,
   shiftGridPalettes,
   setPaletteOffsets,
 } from "@/lib/constants";
@@ -84,7 +85,10 @@ import { Export3DDialog } from "@/components/Export3DDialog";
 import { CutExportDialog } from "@/components/CutExportDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
-import { GridSettingsPanel } from "@/components/GridSettingsPanel";
+import {
+  GridSettingsPanel,
+  DEFAULT_EDITOR_BG,
+} from "@/components/GridSettingsPanel";
 import { panelForTool, type PanelId } from "@/components/PanelShell";
 import {
   ExportPanel,
@@ -188,6 +192,9 @@ export default function TrixelGrid() {
   // settings — deliberately *not* part of ProjectSnapshot, or dragging a crop
   // handle would land in the undo stack and Ctrl+Z would stop undoing paint.
   const [showNoPrint, setShowNoPrint] = useState(true);
+  // Encoded, so the backdrop follows `hueOffset`/`satOffset` like painted
+  // colour does; `null` keeps the default stripes.
+  const [editorBg, setEditorBg] = useState<string | null>(null);
   const [crop, setCrop] = useState<CropRect>(DEFAULT_CROP);
   // Subdivision noise folds its grain onto this so a fabric tile repeats
   // seamlessly. Every backend must receive the same one — the preview, both
@@ -686,6 +693,7 @@ export default function TrixelGrid() {
         if (data.brushSize === "hex") setBrushSize("hex");
         if (typeof data.showNoPrint === "boolean")
           setShowNoPrint(data.showNoPrint);
+        if (typeof data.editorBg === "string") setEditorBg(data.editorBg);
         if (typeof data.projectName === "string" && data.projectName.trim())
           setProjectName(data.projectName);
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
@@ -839,6 +847,7 @@ export default function TrixelGrid() {
         gridOrientation,
         brushSize,
         showNoPrint,
+        editorBg,
         projectName,
         hueOffset,
         saturationOffset: satOffset,
@@ -861,6 +870,7 @@ export default function TrixelGrid() {
     gridOrientation,
     brushSize,
     showNoPrint,
+    editorBg,
     projectName,
     hueOffset,
     satOffset,
@@ -1745,8 +1755,7 @@ export default function TrixelGrid() {
         data-tour="canvas"
         className="flex-1 relative overflow-hidden cursor-crosshair touch-none outline-none"
         style={{
-          background:
-            "repeating-linear-gradient(30deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 6px, rgba(0,0,0,0.06) 6px, rgba(0,0,0,0.06) 12px)",
+          background: editorBg ? resolveColor(editorBg) : DEFAULT_EDITOR_BG,
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -1938,6 +1947,9 @@ export default function TrixelGrid() {
             onSpreadHexArtwork={onSpreadHexArtwork}
             showNoPrint={showNoPrint}
             onShowNoPrintChange={setShowNoPrint}
+            editorBg={editorBg}
+            onEditorBgChange={setEditorBg}
+            palettes={computedPalettes}
             onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />
