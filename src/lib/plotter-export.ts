@@ -14,9 +14,20 @@ import {
   hatchLinesInBox,
   hatchU,
   trisBox,
+  type Seg,
 } from "@/lib/hatch";
 import { WEDGE_DIR } from "@/lib/hatchify";
 import { fmt } from "@/lib/svg-export";
+import { H, triToString } from "@/lib/grid-math";
+import { layersRoundFraction } from "@/lib/hatch-render";
+import { loadClipper, type ClipperApi, type PlotPoly } from "@/lib/clipper-offset";
+import {
+  boundaryStrokes,
+  closeRing,
+  contourFill,
+  regionPolys,
+  type PlotRegion,
+} from "@/lib/plot-geometry";
 import {
   along,
   joinRuns,
@@ -34,9 +45,22 @@ import {
  * continuous strokes, and it must contain **no overdraw**, because a retraced
  * line is a visible blot of doubled ink as well as wasted time.
  *
- * Tone is reproduced as line density, and direction comes from the hex wedges,
- * exactly as `hatchify.ts` does — this is that feature aimed at paper instead of
- * at a layer.
+ * Tone is reproduced as line density under either fill style. **Hatch** takes
+ * its direction from the hex wedges, exactly as `hatchify.ts` does — this is
+ * that feature aimed at paper instead of at a layer. **Contour** fills each
+ * region with concentric insets of its own boundary instead, at the spacing that
+ * density denotes, so the two styles lay down the same ink per unit area and
+ * share the whole tone ladder.
+ *
+ * **Corner rounding is honoured**, and it is what forced the second geometry
+ * path. Everything here used to work in `RawSeg` space — a line family, which
+ * line of it, and an interval along that line — which is what makes `joinRuns`
+ * a one-dimensional interval union rather than a segment-chaining problem, and
+ * is exactly why it cannot express an arc. When there is a radius to honour, or
+ * a contour fill to draw, the export switches to the polygon representation in
+ * `plot-geometry.ts` and joins by welding vertices instead. The plain
+ * square-cornered hatch keeps the original path untouched, so the common case
+ * neither changes nor pays for Clipper.
  *
  * **Deliberately not cropped.** The fabric exports exist to cut a seamless
  * repeat tile out of the artwork; a plot is a drawing on a sheet, so it takes
@@ -92,8 +116,21 @@ export const PAGE_SIZES: { id: PageSizeId; label: string; w: number; h: number }
     { id: "custom", label: "Custom", w: 0, h: 0 },
   ];
 
+/**
+ * How a tone is laid down.
+ *
+ * `hatch` is the original: parallel lines on the lattice's division lines, their
+ * direction taken from the hex wedge each trixel falls in. `contour` fills each
+ * region with concentric insets of its own boundary, which is the fill that
+ * follows a rounded silhouette rather than fighting it — and the only one that
+ * can be drawn without a hex lattice to take a direction from.
+ */
+export type FillStyle = "hatch" | "contour";
+
 export interface PlotterSettings {
   pen: PenMode;
+  /** Parallel lines, or concentric insets. See `FillStyle`. */
+  fillStyle: FillStyle;
   /** The tone ramp's two ends, in divisions per triangle. Every integer between
    *  them is a tone level — the plotter's hatch sits on the lattice's division
    *  lines, where every density already contains the lattice ladder, so there is
@@ -125,6 +162,7 @@ export interface PlotterSettings {
 
 export const DEFAULT_PLOTTER: PlotterSettings = {
   pen: "black-on-white",
+  fillStyle: "hatch",
   minDensity: MIN_DENSITY,
   maxDensity: 10,
   blankLightest: false,
@@ -137,9 +175,9 @@ export const DEFAULT_PLOTTER: PlotterSettings = {
   artWidthIn: 8,
 };
 
-/** A pen-down run. Always two points today — a merged run is collinear by
- *  construction — but kept as a point list so the emitter needs no change if
- *  chaining across directions is ever added. */
+/** A pen-down run. Two points on the `RawSeg` path, where a merged run is
+ *  collinear by construction; an arbitrary polyline on the polygon path, where
+ *  `boundaryStrokes` chains through corners and a contour is a closed loop. */
 export interface PlotterStroke {
   pts: [number, number][];
 }
@@ -194,6 +232,71 @@ function mergeKind(layers: Layer[], kind: "fill" | "hatch") {
 }
 
 /**
+ * The tone ladder rung each **resolved** colour in the artwork plots at.
+ *
+ * Keyed on the resolved hex rather than the encoded value, deliberately breaking
+ * the usual rule for the same reason `region-outline.ts` does: two swatches from
+ * different palettes that resolve to the same colour are one tone on paper and
+ * one region on the sheet, so they must not be able to land on different rungs.
+ * That is also what lets the contour fill look a region's density up by the very
+ * key `regionRings` grouped it under.
+ *
+ * The range is normalised to what is actually painted, so the darkest colour
+ * present always plots at the top of the ladder and the lightest at the bottom.
+ * Absolute lightness wastes most of the ramp: the palettes span roughly 12%–88%,
+ * and four of them top out at 68%, so a piece drawn from one of those would
+ * never reach either end of the density range.
+ */
+export function plotterTones(
+  fills: Record<string, string>,
+  s: PlotterSettings,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const ladder = plotterDensities(s);
+  if (ladder.length === 0) return out;
+
+  // Lightness per *encoded* colour, not per trixel: an artwork uses a handful of
+  // swatches over thousands of cells, and this is two colour-space conversions.
+  const seen = new Map<string, { hex: string; l: number }>();
+  for (const key in fills) {
+    const encoded = fills[key];
+    if (seen.has(encoded)) continue;
+    // Rejects a hatch value structurally — it has pipes and no valid "p,c" —
+    // and a NO_PRINT marker along with it.
+    if (!decodeColor(encoded)) continue;
+    // A cell that cannot be placed cannot be drawn, so it must not widen the
+    // range either; the ramp is normalised to what actually reaches the paper.
+    const tri = stringToTri(key);
+    if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
+    const hex = resolveColor(encoded);
+    seen.set(encoded, { hex, l: oklabLightness(hex) });
+  }
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const { l } of seen.values()) {
+    if (l < lo) lo = l;
+    if (l > hi) hi = l;
+  }
+  if (!Number.isFinite(lo)) return out;
+  const span = hi - lo;
+
+  for (const { hex, l } of seen.values()) {
+    // 1 = the darkest thing in the artwork, 0 = the lightest. A single-tone
+    // piece has no range to normalise against, so it falls back to absolute
+    // lightness rather than dividing by zero and plotting one arbitrary density.
+    const dark = span > 1e-6 ? (hi - l) / span : 1 - l;
+    // Black pen on white paper: dark artwork needs more ink. White on black is
+    // the exact reverse — the paper is already the darkest thing on the page.
+    const a = s.pen === "black-on-white" ? dark : 1 - dark;
+    const j = clamp(Math.round(a * (ladder.length - 1)), 0, ladder.length - 1);
+    out.set(hex, ladder[j]);
+  }
+
+  return out;
+}
+
+/**
  * Turns the whole artwork into hatch marks, all in the pen's colour.
  *
  * Driven by the painted keys rather than by a scan over a region: a plot has no
@@ -216,55 +319,16 @@ export function plotterMarks(
 
   const fills = mergeKind(layers, "fill");
   const ink = PEN_INK[s.pen];
-  const ladder = plotterDensities(s);
-  if (ladder.length === 0) return marks;
+  const tones = plotterTones(fills, s);
+  if (tones.size === 0) return marks;
 
-  // Lightness per *encoded* colour, not per trixel: an artwork uses a handful of
-  // swatches over thousands of cells, and this is two colour-space conversions.
-  const lightness = new Map<string, number>();
-  const lightnessOf = (encoded: string) => {
-    let l = lightness.get(encoded);
-    if (l === undefined) {
-      l = oklabLightness(resolveColor(encoded));
-      lightness.set(encoded, l);
-    }
-    return l;
-  };
-
-  const keys = Object.keys(fills).filter((key) => {
-    // Rejects a hatch value structurally — it has pipes and no valid "p,c".
-    if (!decodeColor(fills[key])) return false;
+  for (const key in fills) {
+    const encoded = fills[key];
+    if (!decodeColor(encoded)) continue;
     const tri = stringToTri(key);
-    return Number.isFinite(tri.q) && Number.isFinite(tri.r);
-  });
+    if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
 
-  // The tone range is normalised to what is actually painted, so the darkest
-  // colour present always plots at the top of the ladder and the lightest at the
-  // bottom. Absolute lightness wastes most of the ramp: the palettes span
-  // roughly 12%–88%, and four of them top out at 68%, so a piece drawn from one
-  // of those would never reach either end of the density range.
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const key of keys) {
-    const l = lightnessOf(fills[key]);
-    if (l < lo) lo = l;
-    if (l > hi) hi = l;
-  }
-  const span = hi - lo;
-
-  for (const key of keys) {
-    const tri = stringToTri(key);
-    const l = lightnessOf(fills[key]);
-    // 1 = the darkest thing in the artwork, 0 = the lightest. A single-tone
-    // piece has no range to normalise against, so it falls back to absolute
-    // lightness rather than dividing by zero and plotting one arbitrary density.
-    const dark = span > 1e-6 ? (hi - l) / span : 1 - l;
-    // Black pen on white paper: dark artwork needs more ink. White on black is
-    // the exact reverse — the paper is already the darkest thing on the page.
-    const a = s.pen === "black-on-white" ? dark : 1 - dark;
-
-    const j = clamp(Math.round(a * (ladder.length - 1)), 0, ladder.length - 1);
-    const density = ladder[j];
+    const density = tones.get(resolveColor(encoded)) ?? 0;
     // Density 0 is the `blankLightest` rung: outlines only, no hatching.
     if (density <= 0) continue;
 
@@ -331,13 +395,50 @@ function rawSegments(marks: Record<string, string>): RawSeg[] {
 const dist = (ax: number, ay: number, bx: number, by: number) =>
   Math.hypot(ax - bx, ay - by);
 
+const isClosed = (pts: [number, number][]) =>
+  pts.length > 2 &&
+  pts[0][0] === pts[pts.length - 1][0] &&
+  pts[0][1] === pts[pts.length - 1][1];
+
+/**
+ * A closed stroke re-cut to start at whichever of its points is nearest the pen.
+ *
+ * A loop has no natural beginning, so leaving it where the geometry happened to
+ * produce one makes the pen fly to an arbitrary point on a contour it may
+ * already be standing next to. Only worth doing once the stroke has been chosen
+ * — this is linear in the stroke, where scoring every point of every candidate
+ * would be quadratic in the whole plot.
+ */
+function rotateClosed(
+  pts: [number, number][],
+  cx: number,
+  cy: number,
+): [number, number][] {
+  const ring = pts.slice(0, -1); // drop the repeated closing point
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const d = dist(cx, cy, ring[i][0], ring[i][1]);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  if (best === 0) return pts;
+  const rotated = [...ring.slice(best), ...ring.slice(0, best)];
+  rotated.push(rotated[0]);
+  return rotated;
+}
+
 /**
  * Greedy nearest-neighbour ordering, reversing a stroke when its far end is the
- * nearer one. Ordering only — it cannot change what is drawn, only how long the
- * pen spends in the air getting there.
+ * nearer one and re-cutting a closed one to start where the pen already is.
+ * Ordering only — it cannot change what is drawn, only how long the pen spends
+ * in the air getting there.
  *
  * O(n^2), and skipped above `MAX_TRAVEL_N` where that would stall the export.
- * A hatched crop runs in the low thousands of strokes, well inside the cap.
+ * A hatched crop runs in the low thousands of strokes, well inside the cap; a
+ * contour fill produces far fewer, since a whole ring is one stroke.
  */
 const MAX_TRAVEL_N = 8000;
 
@@ -372,7 +473,12 @@ function orderForTravel(strokes: PlotterStroke[]): PlotterStroke[] {
     }
     if (best < 0) break;
     used[best] = true;
-    const pts = bestFlip ? [...strokes[best].pts].reverse() : strokes[best].pts;
+    const chosen = strokes[best].pts;
+    const pts = isClosed(chosen)
+      ? rotateClosed(chosen, cx, cy)
+      : bestFlip
+        ? [...chosen].reverse()
+        : chosen;
     out.push({ pts });
     const end = pts[pts.length - 1];
     cx = end[0];
@@ -382,52 +488,203 @@ function orderForTravel(strokes: PlotterStroke[]): PlotterStroke[] {
   return out;
 }
 
-export function buildPlotterPlot(
+/**
+ * The hatch, clipped to the **rounded** regions rather than to bare triangles.
+ *
+ * The lines are generated exactly as `rawSegments` generates them, and still
+ * clipped to their own triangle first — that is what keeps each trixel drawing
+ * the direction its hex wedge asks for. The extra pass is what rounding needs:
+ * at a rounded corner the region's edge has left the lattice, so a
+ * triangle-clipped line pokes straight through the arc the outline is drawing.
+ *
+ * Clipping is batched **per region and line family**, not per segment: Clipper
+ * costs far more to set up than to run, and a region's whole hatch goes through
+ * in one call.
+ *
+ * Clipper drops a line lying exactly *on* the clip boundary, which is why this
+ * path passes no mask to `joinRuns`. The grid-aligned hatch sits on the lattice
+ * and an outline is already drawing every boundary stretch of it; the clip
+ * removes precisely those spans, and it does so against the true rounded
+ * boundary rather than against the straight lattice edge the outline has left.
+ */
+function rawSegmentsInRegions(
+  marks: Record<string, string>,
+  fills: Record<string, string>,
+  regions: PlotRegion[],
+  api: ClipperApi,
+): RawSeg[] {
+  const regionOf = new Map<string, number>();
+  regions.forEach((r, i) => regionOf.set(r.fill, i));
+  const resolved = new Map<string, number | undefined>();
+  const indexFor = (encoded: string | undefined) => {
+    if (encoded === undefined) return undefined;
+    if (!resolved.has(encoded)) {
+      resolved.set(
+        encoded,
+        decodeColor(encoded) ? regionOf.get(resolveColor(encoded)) : undefined,
+      );
+    }
+    return resolved.get(encoded);
+  };
+
+  /** Triangle-clipped lines, bucketed by the region and family they belong to. */
+  const buckets = new Map<string, { dir: RawSeg["dir"]; region: number; segs: Seg[] }>();
+
+  for (const g of groupHatchMarks(marks).groups) {
+    const gen = trisBox(g.tris);
+    if (!gen) continue;
+
+    const lines = hatchLinesInBox(g.dir, g.density, gen, "grid");
+    if (lines.length === 0) continue;
+
+    for (const t of g.tris) {
+      const region = indexFor(fills[triToString(t)]);
+      if (region === undefined) continue;
+      const bk = `${region}|${g.dir}`;
+      let bucket = buckets.get(bk);
+      if (!bucket) {
+        bucket = { dir: g.dir, region, segs: [] };
+        buckets.set(bk, bucket);
+      }
+      for (const line of lines) {
+        const seg = clipSegmentToTriangle(line, t.q, t.r, t.type);
+        if (seg) bucket.segs.push(seg);
+      }
+    }
+  }
+
+  const out: RawSeg[] = [];
+  for (const { dir, region, segs } of buckets.values()) {
+    for (const [x0, y0, x1, y1] of api.clipLines(segs, regions[region].rings)) {
+      const a = along(dir, x0, y0);
+      const b = along(dir, x1, y1);
+      out.push({
+        dir,
+        u: hatchU(dir, x0, y0),
+        t0: Math.min(a, b),
+        t1: Math.max(a, b),
+      });
+    }
+  }
+  return out;
+}
+
+/** A joined run as a two-point polyline, so both geometry paths hand the
+ *  placement stage the same shape. */
+const segPoly = (seg: RawSeg): PlotPoly => {
+  const [a, b] = segToPoints(seg);
+  return [a, b];
+};
+
+/**
+ * The plot: what the pen draws, in world units, with the page's origin at
+ * (0, 0).
+ *
+ * **Async** because the polygon path loads Clipper on demand — see
+ * `clipper-offset.ts`. A square-cornered hatch takes the original `RawSeg` path
+ * and resolves without ever touching it.
+ */
+export async function buildPlotterPlot(
   layers: Layer[],
   gridRotation: number,
   gridDivisions: number,
   s: PlotterSettings,
-): PlotterPlot {
+): Promise<PlotterPlot> {
   const ink = PEN_INK[s.pen];
   const paper = PEN_PAPER[s.pen];
 
-  const marks = plotterMarks(layers, gridDivisions, s);
-  // Joined separately so the two stay separable all the way to the file. It
-  // costs nothing: an outline sits on a grid line and a hatch line never does
-  // (see `edgeDir`), so a shared pass could not have merged them anyway.
-  const rawHatch = rawSegments(marks);
-  // Always drawn: with the hatch on the division lines, the outlines are what
-  // bound each tone — without them the coarse ladder reads as an open field of
-  // parallel lines rather than as shapes.
-  const rawOutline = outlineSegments(mergeKind(layers, "fill"));
-  const joinedOutline = joinRuns(rawOutline);
-  // Masked by the joined outlines: a grid-aligned hatch line lies on the lattice
-  // and an outline may already be drawing part of it.
-  const joinedHatch = joinRuns(rawHatch, joinedOutline);
+  // The merged map is fed to the region walk **with its NO_PRINT markers
+  // intact**: they never draw (every consumer here rejects them through
+  // `decodeColor`), but `boundaryVertexDegrees` deliberately admits them, and
+  // that is the entire mechanism by which a marker forces a corner to stay
+  // sharp. Stripping them would silently round the corners the artist kinked.
+  const fills = mergeKind(layers, "fill");
+  // One radius for the whole plot. This export merges the fill stack before it
+  // looks at any geometry, so a per-layer radius cannot survive — same rule, and
+  // same reasoning, as every other export that takes a merged map.
+  const radius = layersRoundFraction(layers);
+
+  let hatchPolys: PlotPoly[];
+  let outlinePolys: PlotPoly[];
+  let rawCount: number;
+
+  if (radius <= 0 && s.fillStyle === "hatch") {
+    // The original path, untouched: square corners and parallel lines need no
+    // polygons, no welding and no Clipper.
+    const marks = plotterMarks(layers, gridDivisions, s);
+    // Joined separately so the two stay separable all the way to the file. It
+    // costs nothing: an outline sits on a grid line and a hatch line never does
+    // (see `edgeDir`), so a shared pass could not have merged them anyway.
+    const rawHatch = rawSegments(marks);
+    // Always drawn: with the hatch on the division lines, the outlines are what
+    // bound each tone — without them the coarse ladder reads as an open field of
+    // parallel lines rather than as shapes.
+    const rawOutline = outlineSegments(fills);
+    const joinedOutline = joinRuns(rawOutline);
+    // Masked by the joined outlines: a grid-aligned hatch line lies on the
+    // lattice and an outline may already be drawing part of it.
+    const joinedHatch = joinRuns(rawHatch, joinedOutline);
+
+    hatchPolys = joinedHatch.map(segPoly);
+    outlinePolys = joinedOutline.map(segPoly);
+    rawCount = rawHatch.length + rawOutline.length;
+  } else {
+    const api = await loadClipper();
+    const regions = regionPolys(fills, radius);
+    // A region's rings *are* its boundaries — an edge interior to one colour
+    // never appears in one — so this is the same edge set `outlineSegments`
+    // produces, with the shared boundaries drawn once instead of twice.
+    outlinePolys = boundaryStrokes(regions);
+    rawCount = regions.reduce(
+      (n, r) => n + r.rings.reduce((m, ring) => m + ring.length, 0),
+      0,
+    );
+
+    if (s.fillStyle === "contour") {
+      const tones = plotterTones(fills, s);
+      hatchPolys = [];
+      for (const region of regions) {
+        const density = tones.get(region.fill) ?? 0;
+        // Density 0 is the `blankLightest` rung: outlines only, no fill.
+        if (density <= 0) continue;
+        // `H / density` is the perpendicular spacing the hatch would have used
+        // at this rung — the same for all three families — so a contour lays
+        // down the same ink per unit area and the tone ladder carries over.
+        for (const ring of contourFill(region.rings, H / density, api)) {
+          hatchPolys.push(closeRing(ring));
+        }
+      }
+      rawCount += hatchPolys.length;
+    } else {
+      const marks = plotterMarks(layers, gridDivisions, s);
+      const rawHatch = rawSegmentsInRegions(marks, fills, regions, api);
+      hatchPolys = joinRuns(rawHatch).map(segPoly);
+      rawCount += rawHatch.length;
+    }
+  }
 
   // Rotate into display space *first*, then take the bounds there. With no crop
   // to inherit an origin from, the page is exactly the artwork's own extent —
   // and measuring before the rotation would size the page wrongly under a
   // quarter turn, where width and height swap.
-  const rotate = (segs: RawSeg[]) =>
-    segs.map((seg) => {
-      const [a, b] = segToPoints(seg);
-      const [ax, ay] = rotatePoint(a[0], a[1], gridRotation);
-      const [bx, by] = rotatePoint(b[0], b[1], gridRotation);
-      return [ax, ay, bx, by] as [number, number, number, number];
-    });
-  const rotHatch = rotate(joinedHatch);
-  const rotOutline = rotate(joinedOutline);
+  const rotate = (polys: PlotPoly[]) =>
+    polys.map((poly) =>
+      poly.map(([x, y]) => rotatePoint(x, y, gridRotation) as [number, number]),
+    );
+  const rotHatch = rotate(hatchPolys);
+  const rotOutline = rotate(outlinePolys);
 
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const [ax, ay, bx, by] of [...rotHatch, ...rotOutline]) {
-    minX = Math.min(minX, ax, bx);
-    minY = Math.min(minY, ay, by);
-    maxX = Math.max(maxX, ax, bx);
-    maxY = Math.max(maxY, ay, by);
+  for (const poly of [...rotHatch, ...rotOutline]) {
+    for (const [x, y] of poly) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
   }
   if (!Number.isFinite(minX)) {
     minX = 0;
@@ -436,12 +693,9 @@ export function buildPlotterPlot(
     maxY = 0;
   }
 
-  const place = (rot: [number, number, number, number][]): PlotterStroke[] => {
-    const out: PlotterStroke[] = rot.map(([ax, ay, bx, by]) => ({
-      pts: [
-        [ax - minX, ay - minY],
-        [bx - minX, by - minY],
-      ],
+  const place = (polys: PlotPoly[]): PlotterStroke[] => {
+    const out: PlotterStroke[] = polys.map((poly) => ({
+      pts: poly.map(([x, y]) => [x - minX, y - minY] as [number, number]),
     }));
     // Ordered within its own layer: the plotter draws one layer at a time, so
     // interleaving them would only add travel. Unconditional — it cannot change
@@ -477,7 +731,7 @@ export function buildPlotterPlot(
     outlines,
     penDownLength,
     penUpLength,
-    rawSegments: rawHatch.length + rawOutline.length,
+    rawSegments: rawCount,
     width: maxX - minX,
     height: maxY - minY,
     ink,
@@ -727,6 +981,7 @@ export function normalizePlotterSettings(raw: unknown): PlotterSettings {
   );
   return {
     pen: r.pen === "white-on-black" ? "white-on-black" : "black-on-white",
+    fillStyle: r.fillStyle === "contour" ? "contour" : "hatch",
     minDensity,
     maxDensity: Math.round(
       num(

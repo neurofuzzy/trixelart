@@ -4,12 +4,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
 import {
   useHistory,
-  activeEffects,
   layerKind,
   type ProjectSnapshot,
   type Layer,
   type LayerKind,
 } from "@/hooks/use-history";
+import { layersRoundFraction } from "@/lib/hatch-render";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
@@ -410,20 +410,13 @@ export default function TrixelGrid() {
     return out;
   }, [layers]);
 
-  // Corner rounding for the exports that take `mergedFillPainted`. That merge
-  // deliberately throws away layer identity, so a per-layer radius cannot
-  // survive it — the largest enabled one wins. Predictable, and it matches the
-  // intent: if the artwork reads as rounded, the cut should be too.
-  const mergedFillRoundFraction = useMemo(() => {
-    let max = 0;
-    for (const layer of layers) {
-      if (!layer.visible || layerKind(layer) === "hatch") continue;
-      for (const e of activeEffects(layer)) {
-        if (e.type === "roundCorners") max = Math.max(max, e.radius);
-      }
-    }
-    return max;
-  }, [layers]);
+  // Corner rounding for the exports that take `mergedFillPainted`. Shared with
+  // the plotter, which merges the same way but builds its own map from the
+  // layers, so the two cannot drift on what "the artwork's radius" means.
+  const mergedFillRoundFraction = useMemo(
+    () => layersRoundFraction(layers),
+    [layers],
+  );
 
   // What a hatch layer's marks actually sit on: the visible fill layers
   // *strictly below* the active one, merged bottom-to-top so the topmost wins.

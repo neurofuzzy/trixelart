@@ -8,6 +8,7 @@ import { cn, normalizeProjectFilename } from "@/lib/utils";
 import type { Layer } from "@/hooks/use-history";
 import { downloadBlob } from "@/lib/png-export";
 import { MAX_DENSITY, MIN_DENSITY } from "@/lib/hatch";
+import { layersRoundFraction } from "@/lib/hatch-render";
 import {
   MAX_MARGIN_IN,
   MAX_PAGE_IN,
@@ -19,8 +20,10 @@ import {
   plotterLayout,
   plotterSVG,
   renderPlotterPreview,
+  type FillStyle,
   type PageSizeId,
   type PenMode,
+  type PlotterPlot,
   type PlotterSettings,
 } from "@/lib/plotter-export";
 
@@ -161,17 +164,50 @@ export function PlotterDialog({
     return () => window.removeEventListener("keydown", handler);
   }, [open, onOpenChange]);
 
-  // The concentric direction comes from the hex wedges, so without a hex lattice
-  // there is nothing to take a direction from.
-  const canPlot = gridDivisions > 0;
+  // The hatch takes its direction from the hex wedges, so without a hex lattice
+  // there is nothing to take a direction from. A contour fill follows each
+  // region's own boundary and needs no lattice at all.
+  const canPlot = gridDivisions > 0 || settings.fillStyle === "contour";
+  const roundFraction = useMemo(() => layersRoundFraction(layers), [layers]);
 
-  const plot = useMemo(
-    () =>
-      open && canPlot
-        ? buildPlotterPlot(layers, gridRotation, gridDivisions, settings)
-        : null,
-    [open, canPlot, layers, gridRotation, gridDivisions, settings],
-  );
+  /**
+   * The plot is built asynchronously — the polygon path loads Clipper on
+   * demand — so it lands in state rather than in a memo.
+   *
+   * Debounced, and guarded by a request id. Every settings change rebuilds the
+   * whole plot, and a slider drag fires one per frame; without the delay the
+   * heavier contour path would queue a build behind every intermediate value,
+   * and without the id a slow early build could resolve *after* a fast later one
+   * and put a stale preview on screen.
+   */
+  const [plot, setPlot] = useState<PlotterPlot | null>(null);
+  const [building, setBuilding] = useState(false);
+  const requestRef = useRef(0);
+
+  useEffect(() => {
+    if (!open || !canPlot) {
+      setPlot(null);
+      setBuilding(false);
+      return;
+    }
+    const id = ++requestRef.current;
+    setBuilding(true);
+    const timer = setTimeout(() => {
+      buildPlotterPlot(layers, gridRotation, gridDivisions, settings)
+        .then((next) => {
+          if (requestRef.current !== id) return;
+          setPlot(next);
+          setBuilding(false);
+        })
+        .catch(() => {
+          if (requestRef.current !== id) return;
+          setPlot(null);
+          setBuilding(false);
+        });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [open, canPlot, layers, gridRotation, gridDivisions, settings]);
+
   const layout = useMemo(
     () => (plot ? plotterLayout(plot, settings) : null),
     [plot, settings],
@@ -391,6 +427,36 @@ export function PlotterDialog({
             </Section>
 
             <Section title="Tone">
+              <div className="flex rounded-md overflow-hidden border border-white/10">
+                {(
+                  [
+                    ["hatch", "Hatch"],
+                    ["contour", "Contour"],
+                  ] as const
+                ).map(([style, label]) => (
+                  <button
+                    key={style}
+                    onClick={() =>
+                      onSettingsChange({ fillStyle: style as FillStyle })
+                    }
+                    className={cn(
+                      "flex-1 py-2 text-xs transition-colors",
+                      settings.fillStyle === style
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {settings.fillStyle === "contour"
+                  ? "Concentric lines stepped in from each shape's own edge."
+                  : "Parallel lines, angled by the hex wedge each trixel falls in."}
+              </p>
+
               <Slider
                 label="Min density"
                 value={settings.minDensity}
@@ -441,6 +507,15 @@ export function PlotterDialog({
                 {settings.blankLightest ? ", the first blank" : ""} &middot;
                 normalised to the artwork
               </p>
+
+              {/* The radius is the largest one enabled anywhere in the fill
+                  stack — the plot merges the layers, so only one can win. */}
+              {roundFraction > 0 && (
+                <p className="text-[11px] leading-snug text-amber-200/70">
+                  Following the {Math.round(roundFraction * 100)}% corner
+                  rounding on the artwork.
+                </p>
+              )}
             </Section>
           </div>
         </div>
@@ -449,10 +524,15 @@ export function PlotterDialog({
           <span className="text-xs text-muted-foreground tabular-nums flex-1 leading-snug">
             {!canPlot ? (
               <span className="text-red-400">
-                Needs a hex lattice — set grid divisions above 0.
+                The hatch needs a hex lattice — set grid divisions above 0, or
+                switch to a contour fill.
               </span>
             ) : !hasStrokes ? (
-              "Nothing painted to plot."
+              building ? (
+                "Working out the line work…"
+              ) : (
+                "Nothing painted to plot."
+              )
             ) : layout?.invalid ? (
               <span className="text-red-400">
                 The margin leaves no room to draw — reduce it or use a larger

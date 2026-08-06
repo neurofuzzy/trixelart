@@ -112,4 +112,11 @@ both ride `generateTriangles`' optional parameters rather than each emit site,
 which is what lets one change carry the PNG exporter and both SVG exporters at
 once. The fabrication paths (3D, cutting, plotter, apparel cut)
 deliberately do **not** run the plan — see the per-export notes for what each one
-ignores and why.
+ignores and why. They merge the fill stack first, so where one of them *does*
+honour a geometry effect it reads the setting through `layersRoundFraction`
+(`hatch-render.ts`), the shared "largest enabled radius wins" rule. Today the
+plotter is the only one: it honours **round corners** by switching to the polygon
+representation in `plot-geometry.ts` (and loading Clipper on demand, which is why
+`buildPlotterPlot` is async), keeping its original `RawSeg` path byte-for-byte
+for the square-cornered hatch. Reaching for `buildRenderPlan` in a fabrication
+path is still the wrong move; reaching for `stepRegionGeometry` is not.
