@@ -2,7 +2,8 @@
 
 > Detail doc. Index and the rules that apply everywhere: [CLAUDE.md](../CLAUDE.md). Module/symbol map: [CODEMAP.md](../CODEMAP.md).
 
-Non-destructive per-layer filters — three of geometry and one of colour.
+Non-destructive per-layer filters — three of geometry, one of colour, one of
+texture.
 `Layer.effects` is optional and
 **absent means none** — read it through `layerEffects(l)` / `activeEffects(l)`
 (`use-history.ts`), never `l.effects` directly, exactly as with `layerKind`, and
@@ -15,11 +16,11 @@ zero-radius effect produces identical SVG output).
 `trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
 is the reason they live on the layer rather than in `trixel-settings`: they are
 authored content, and putting them there costs nothing to persist. They are a
-list so further effects can be added without re-plumbing; today there are four
-(round corners, outline, glow and adjust colour) and all four may sit on the same
-layer. Hatch layers are excluded — line work has no filled region to reshape, and
-the colour filter follows them out rather than being the one effect with a
-different eligibility rule.
+list so further effects can be added without re-plumbing; today there are five
+(round corners, outline, glow, adjust colour and subdivision noise) and all five
+may sit on the same layer. Hatch layers are excluded — line work has no filled
+region to reshape, and the colour and texture filters follow them out rather than
+being the one effect with a different eligibility rule.
 
 `activeEffects` **switches on the effect type** rather than testing one field.
 It used to be a two-way ternary; a third effect with two scalars broke that, and
@@ -279,6 +280,72 @@ other: it is authored directly in a colour picker rather than being layer
 content. Honoured in the canvas preview and the PNG/SVG (full + cropped) exports,
 i.e. exactly where the other three are, and likewise not in the fabrication
 paths.
+
+## Subdivision noise
+
+A triangular dither *inside* each cell: the trixel splits into four
+sub-triangles at its edge midpoints, and each is blended toward the previous or
+next palette index. Two sliders — **Amount** 0–100 and **Seed** 0–99 — and
+`src/lib/subdivision-noise.ts` is the maths. Verified against the four cases that
+matter: amount 0 exports byte-identically to no effect, the four sub-triangles'
+areas sum exactly to the parent's, the pattern is stable across repeated renders
+and moves with the seed, and rounding clips it.
+
+**The only effect that is texture rather than silhouette**, and the only one that
+changes how many shapes a cell emits. The four sub-triangles exactly retile the
+cell they came from, so the artwork's boundary, its bounding box and `painted`
+are all unchanged — which is why nothing downstream had to learn about it beyond
+the two chokepoints below.
+
+**Fixed at one subdivision.** No depth slider: 16 or 64 sub-triangles per cell
+would multiply an SVG export's element count by the same factor for a grain
+finer than most exports resolve.
+
+**Threaded exactly where `adjust` is**, and for the same reason — it reaches the
+flat-fill path of the PNG exporter and both SVG exporters through the single
+`noise` parameter on `generateTriangles`, so no emit site changed. Only
+`GridCanvas`'s inline grouping loop, which resolves its own fills, gathers its
+own. `stepSubdivisionNoise` returns **`null`** for an absent, disabled or
+zero-amount effect, keeping an unnoised layer on the path it walked before.
+
+**The blend is quantised** to `NOISE_LEVELS` (8) steps per direction and the
+resulting ramp memoised per encoded colour. That is load-bearing, not a
+micro-optimisation: a continuous blend gives nearly every sub-triangle its own
+hex, which costs the canvas a `fillStyle` change per triangle and costs
+`mergeTrianglesByColor` the ability to merge anything. Eight steps caps a source
+colour at 17 outputs. The cache key includes the *resolved* hex as well as the
+encoded value, so a global hue/saturation shift invalidates it.
+
+**Mixed in RGB, not HSL** — the opposite choice from adjust colour, and
+deliberately. The four custom palettes carry a per-index hue as well as a
+per-index lightness, so adjacent indices can differ in hue and an HSL
+interpolation would swing through colours in neither swatch.
+
+**Clamped at both ends of the ramp**, exactly as `dodgeColor` / `burnColor`
+clamp: a cell in the darkest swatch has nothing darker to blend toward, so its
+grain travels one way only. Same asymmetry dodge and burn already have.
+
+**Under round corners the grain is clipped to the region, not emitted loose**, so
+a rounded corner cuts it back exactly where it cuts the fill. Finding which cells
+belong to a region needs no second connectivity walk: `regionRings` groups by
+*resolved colour* and emits one entry per distinct colour — separate blobs and
+holes fall out as extra rings inside that entry — so "this region's cells" is
+"the cells whose resolved colour is this region's". `stepRegionGeometry` returns
+`base`, the fill *before* `adjust`, for the match; using the filtered value would
+pour one region's grain into another's whenever the filter collapses two colours
+onto one. The solid fill still goes down underneath the clip, because the clip is
+antialiased and grain alone would feather the region's edge.
+
+**Under an outline the noise is skipped.** That effect leaves the region's
+interior deliberately empty, so there is no fill there to texture.
+
+**The raster overdraw needed a real fix, not just threading.** `drawArtworkPlan`
+skips its seam-closing stroke on flat edges because the caller lands every
+lattice row on an integer pixel boundary, and a stroke centred there straddles it
+and discolours the whole row. Subdivision puts flat edges at `(r + ½)H` too,
+which is *not* pixel-aligned and does need the stroke — so the test became "flat
+**and** on a lattice row" (`onLatticeRow`). Without noise every flat edge is on a
+row, so it reduces to the condition it always was.
 
 ## Rounding in the cutting export
 

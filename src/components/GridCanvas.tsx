@@ -16,8 +16,15 @@ import {
   stepGlow,
   stepRoundRadius,
   stepOutlineWeight,
+  stepSubdivisionNoise,
 } from "@/lib/hatch-render";
 import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import {
+  drawSubFills,
+  noiseRegionFills,
+  noiseSubFills,
+  type SubFill,
+} from "@/lib/subdivision-noise";
 import { drawGlow, silhouetteGeometry } from "@/lib/glow";
 
 export function GridCanvas({
@@ -109,14 +116,21 @@ export function GridCanvas({
         const radius = stepRoundRadius(step);
         const outline = stepOutlineWeight(step);
         if (radius <= 0 && outline <= 0) return null;
+        const adjust = stepColorAdjust(step);
+        const noise = stepSubdivisionNoise(step);
         return {
           radius,
           outline,
-          regions: stepRegionGeometry(
-            step.painted,
-            radius,
-            stepColorAdjust(step),
-          ),
+          adjust,
+          // Memoised here rather than rebuilt per frame for the same reason the
+          // rings are: this path cannot be viewport-culled, so it must not land
+          // on a pan or a hover. An outline has no interior to texture, so it
+          // takes none.
+          regionFills:
+            noise && outline <= 0
+              ? noiseRegionFills(step.painted, noise)
+              : null,
+          regions: stepRegionGeometry(step.painted, radius, adjust),
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,7 +242,21 @@ export function GridCanvas({
       // and hover redraw.
       const eff = effectPlan[si];
       if (eff) {
-        for (const { fill, rings } of eff.regions) {
+        for (const { fill, base, rings } of eff.regions) {
+          const grain = eff.regionFills?.get(base);
+          if (grain?.length) {
+            // Solid first, grain clipped over it: the clip is antialiased, so
+            // painting only the sub-triangles would feather the region's edge.
+            ctx.save();
+            ctx.beginPath();
+            for (const ring of rings) traceRoundedRing(ctx, ring);
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.clip();
+            drawSubFills(ctx, grain, eff.adjust);
+            ctx.restore();
+            continue;
+          }
           ctx.beginPath();
           for (const ring of rings) traceRoundedRing(ctx, ring);
           if (eff.outline > 0) {
@@ -254,6 +282,28 @@ export function GridCanvas({
       // path it has always taken. The rounded/outlined branch above needs no
       // equivalent — `stepRegionGeometry` has already applied it.
       const adjust = stepColorAdjust(step);
+      const noise = stepSubdivisionNoise(step);
+
+      // Subdivision noise emits four fills per cell instead of one, so it gets
+      // its own gather rather than widening the plain one. Still viewport-culled
+      // — the sub-triangles live inside the cell that produced them, so the
+      // same bounds hold — which is why this is not memoised the way the
+      // rounded path above has to be.
+      if (noise) {
+        const fills: SubFill[] = [];
+        for (let r = minR; r <= maxR; r++) {
+          for (let q = minQ; q <= maxQ; q++) {
+            for (const type of ["up", "down"] as const) {
+              const encoded = step.painted[`${q},${r},${type}`];
+              if (encoded) {
+                fills.push(...noiseSubFills(q, r, type, encoded, noise));
+              }
+            }
+          }
+        }
+        drawSubFills(ctx, fills, adjust);
+        continue;
+      }
 
       const colorGroups = new Map<string, TriKey[]>();
       for (let r = minR; r <= maxR; r++) {

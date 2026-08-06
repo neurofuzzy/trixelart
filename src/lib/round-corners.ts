@@ -619,12 +619,18 @@ export const OUTLINE_WEIGHT_AT_FULL = SIDE;
  * regions the filter collapses onto one colour therefore stay two rings — which
  * is invisible for a fill, and for an outline just means the shared edge is
  * stroked twice in that one colour.
+ *
+ * `base` is the same colour *before* the filter — the value `regionRings`
+ * actually grouped on. Subdivision noise needs it to find which cells belong to
+ * a region without a second connectivity walk; matching on the filtered `fill`
+ * instead would pour one region's grain into another's whenever the filter
+ * collapses two colours onto one.
  */
 export function stepRegionGeometry(
   painted: Record<string, string>,
   radius: number,
   adjust?: (hex: string) => string,
-): { fill: string; rings: RoundedRing[] }[] {
+): { fill: string; base: string; rings: RoundedRing[] }[] {
   const regions =
     radius > 0
       ? roundedRegions(painted, radius)
@@ -634,8 +640,12 @@ export function stepRegionGeometry(
             r.map((p) => ({ x: p.x, y: p.y, radius: 0 })),
           ),
         }));
-  if (!adjust) return regions;
-  return regions.map(({ fill, rings }) => ({ fill: adjust(fill), rings }));
+  if (!adjust) return regions.map(({ fill, rings }) => ({ fill, base: fill, rings }));
+  return regions.map(({ fill, rings }) => ({
+    fill: adjust(fill),
+    base: fill,
+    rings,
+  }));
 }
 
 /** Where a corner's arc leaves the incoming edge and rejoins the outgoing one,

@@ -1,6 +1,7 @@
 import { getTriVertices } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { colorAdjuster } from "@/lib/color-adjust";
+import type { SubdivisionNoiseSpec } from "@/lib/subdivision-noise";
 import { activeEffects, layerKind, type Layer, type LayerEffect } from "@/hooks/use-history";
 import { OUTLINE_WEIGHT_AT_FULL, type RoundedRing } from "@/lib/round-corners";
 import {
@@ -88,6 +89,28 @@ export function stepColorAdjust(
     if (e.type === "adjustColor" && e.enabled) return colorAdjuster(e);
   }
   return undefined;
+}
+
+/**
+ * The dither a fill step's cells are subdivided with, or `null` for none.
+ *
+ * Reads like `stepGlow`, but what it describes is neither geometry nor colour on
+ * its own: it turns one painted cell into four fills. It rides the same two
+ * chokepoints `stepColorAdjust` uses — `generateTriangles` for the flat path,
+ * and a clip against `stepRegionGeometry`'s rings for the rounded one — so a
+ * backend gets it by passing the spec along rather than by growing a fifth
+ * branch of its own.
+ */
+export function stepSubdivisionNoise(
+  step: RenderStep,
+): SubdivisionNoiseSpec | null {
+  if (step.kind !== "fill") return null;
+  for (const e of step.effects) {
+    if (e.type === "subdivisionNoise" && e.enabled && e.amount > 0) {
+      return { amount: e.amount, seed: e.seed };
+    }
+  }
+  return null;
 }
 
 /**

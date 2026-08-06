@@ -17,8 +17,14 @@ import {
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
+  stepSubdivisionNoise,
   type HatchStroke,
 } from "@/lib/hatch-render";
+import {
+  noiseRegionFills,
+  noiseSubFills,
+  type SubdivisionNoiseSpec,
+} from "@/lib/subdivision-noise";
 import {
   flattenRoundedRing,
   roundedRingToPath,
@@ -82,13 +88,27 @@ function ensureCW(points: [number, number][]): [number, number][] {
   return points;
 }
 
-/** `adjust` is the colour-adjust effect's filter (`stepColorAdjust`), applied to
- *  each resolved fill. Doing it here rather than at the emit sites means the
- *  merge, per-triangle and cropped paths all get it, and `mergeTrianglesByColor`
- *  keys on the colour the file will actually carry. */
+/**
+ * `adjust` is the colour-adjust effect's filter (`stepColorAdjust`), applied to
+ * each resolved fill. Doing it here rather than at the emit sites means the
+ * merge, per-triangle and cropped paths all get it, and `mergeTrianglesByColor`
+ * keys on the colour the file will actually carry.
+ *
+ * `noise` is the subdivision-noise spec (`stepSubdivisionNoise`), which emits
+ * four sub-triangles per cell instead of one. Same reasoning, and the same
+ * payoff: this one function is the flat-fill path of the PNG exporter and both
+ * SVG exporters, so none of them had to learn about the effect. `adjust` is
+ * applied *over* the dithered colour, so stacking the two filters the grain
+ * rather than flattening it.
+ *
+ * `mergeTrianglesByColor` needs nothing new: it counts edges by rounded world
+ * coordinate, and a midpoint shared by two neighbouring cells is computed from
+ * identical vertices on both sides, so it rounds identically and cancels.
+ */
 export function generateTriangles(
   painted: Record<string, string>,
   adjust?: (hex: string) => string,
+  noise?: SubdivisionNoiseSpec | null,
 ): TriangleData[] {
   const entries = Object.entries(painted);
   const triangles: TriangleData[] = [];
@@ -99,6 +119,21 @@ export function generateTriangles(
     const q = parseInt(parts[0]);
     const r = parseInt(parts[1]);
     const type = parts[2] as "up" | "down";
+
+    if (noise) {
+      for (const { points, hex } of noiseSubFills(q, r, type, encoded, noise)) {
+        triangles.push({
+          points: ensureCW([
+            [roundNum(points[0].x), roundNum(points[0].y)],
+            [roundNum(points[1].x), roundNum(points[1].y)],
+            [roundNum(points[2].x), roundNum(points[2].y)],
+          ]),
+          fill: adjust ? adjust(hex) : hex,
+        });
+      }
+      continue;
+    }
+
     const verts = getTriVertices(q, r, type);
     const resolved = resolveColor(encoded);
     const fill = adjust ? adjust(resolved) : resolved;
@@ -309,13 +344,17 @@ export function generateSVG(
     // Built once per step and reused by both the triangle and the region path,
     // so the memo inside it stays warm across the whole layer.
     const adjust = stepColorAdjust(step);
+    const noise = stepSubdivisionNoise(step);
     return {
       kind: "fill" as const,
-      tris: generateTriangles(step.painted, adjust),
+      // Sub-triangles retile the cell exactly, so noise leaves the bounding box
+      // this is also measured for alone.
+      tris: generateTriangles(step.painted, adjust, noise),
       painted: step.painted,
       radius: stepRoundRadius(step),
       outline: stepOutlineWeight(step),
       adjust,
+      noise,
     };
   });
 
@@ -388,8 +427,16 @@ export function generateSVG(
       // defined on whole regions — so they ignore the `merge` option rather
       // than offering a per-triangle variant that could not express an arc.
       if (step.radius > 0 || step.outline > 0) {
+        // The grain is clipped to the region rather than emitted loose, so a
+        // rounded corner cuts it back exactly where it cuts the fill. Skipped
+        // under an outline: that effect leaves the interior deliberately empty,
+        // so there is no fill there to texture.
+        const regionFills =
+          step.noise && step.outline === 0
+            ? noiseRegionFills(step.painted, step.noise)
+            : null;
         const fills = stepRegionGeometry(step.painted, step.radius, step.adjust)
-          .map(({ fill, rings }) => {
+          .map(({ fill, base, rings }, ri) => {
             const d = rings
               .map((r) => roundedRingToPath(r, fmt, ox, oy))
               .filter(Boolean)
@@ -397,6 +444,20 @@ export function generateSVG(
             if (!d) return "";
             if (step.outline > 0) {
               return `  <path d="${d}" fill="none" stroke="${fill}" stroke-width="${fmt(step.outline)}" stroke-linejoin="round"/>`;
+            }
+            const grain = regionFills?.get(base);
+            if (grain?.length) {
+              const id = `noise-${si}-${ri}`;
+              defs.push(`    <clipPath id="${id}"><path d="${d}"/></clipPath>`);
+              const polys = grain
+                .map(
+                  ({ points, hex }) =>
+                    `    <polygon points="${points.map((p) => `${fmt(p.x + ox)},${fmt(p.y + oy)}`).join(" ")}" fill="${
+                      step.adjust ? step.adjust(hex) : hex
+                    }"/>`,
+                )
+                .join("\n");
+              return `  <g clip-path="url(#${id})">\n${polys}\n  </g>`;
             }
             return `  <path d="${d}" fill="${fill}"${
               options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
@@ -627,6 +688,7 @@ export function generateCroppedSVG(
       const radius = stepRoundRadius(step);
       const outline = stepOutlineWeight(step);
       const adjust = stepColorAdjust(step);
+      const noise = stepSubdivisionNoise(step);
 
       // Rotated into display space and shifted to the crop origin like every
       // other shape here, but never cut — see the note on `cropClip` above.
@@ -654,11 +716,18 @@ export function generateCroppedSVG(
 
       if (radius > 0 || outline > 0) {
         const out: string[] = [];
-        for (const { fill, rings } of stepRegionGeometry(
+        // Same rule as the full exporter: the grain rides inside the region's
+        // clip so rounding cuts it back with the fill, and an outline skips it
+        // because its interior is meant to stay empty.
+        const regionFills =
+          noise && outline === 0 ? noiseRegionFills(step.painted, noise) : null;
+        let ri = -1;
+        for (const { fill, base, rings } of stepRegionGeometry(
           step.painted,
           radius,
           adjust,
         )) {
+          ri++;
           const ds: string[] = [];
           for (const ring of rings) {
             const poly = clipPolygonToRect(flattenRoundedRing(ring), world);
@@ -680,13 +749,48 @@ export function generateCroppedSVG(
             out.push(
               `  <path d="${ds.join(" ")}" fill="none" stroke="${fill}" stroke-width="${fmt(outline)}" stroke-linejoin="round"/>`,
             );
-          } else {
-            out.push(
-              `  <path d="${ds.join(" ")}" fill="${fill}"${
-                options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-              }/>`,
-            );
+            continue;
           }
+          const grain = regionFills?.get(base);
+          if (grain?.length) {
+            const polys: string[] = [];
+            for (const { points, hex } of grain) {
+              // Cut in world space and rotated into display space, exactly as
+              // the loose triangles below are — the region's clip path has
+              // already been through the same treatment, so the two agree.
+              const poly = clipPolygonToRect(
+                points.map((p) => [p.x, p.y] as [number, number]),
+                world,
+              );
+              if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
+              const pts = dedupeRing(
+                poly.map((p) => {
+                  const [rx, ry] = rotatePoint(p[0], p[1], gridRotation);
+                  return [roundNum(rx - display.x), roundNum(ry - display.y)] as [number, number];
+                }),
+                0,
+              );
+              if (pts.length < 3) continue;
+              polys.push(
+                `    <polygon points="${pts.map((p) => `${fmt(p[0])},${fmt(p[1])}`).join(" ")}" fill="${
+                  adjust ? adjust(hex) : hex
+                }"/>`,
+              );
+            }
+            if (polys.length) {
+              const id = `noise-${si}-${ri}`;
+              defs.push(
+                `    <clipPath id="${id}"><path d="${ds.join(" ")}"/></clipPath>`,
+              );
+              out.push(`  <g clip-path="url(#${id})">\n${polys.join("\n")}\n  </g>`);
+              continue;
+            }
+          }
+          out.push(
+            `  <path d="${ds.join(" ")}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`,
+          );
         }
         return out.length ? before + out.join("\n") : before.trimEnd();
       }
@@ -695,7 +799,7 @@ export function generateCroppedSVG(
       // the survivors into display space and shift the crop origin to (0,0).
       // The only rotations used are 0 and 90 degrees, so this stays exact.
       const clipped: TriangleData[] = [];
-      for (const tri of generateTriangles(step.painted, adjust)) {
+      for (const tri of generateTriangles(step.painted, adjust, noise)) {
         const poly = clipPolygonToRect(tri.points, world);
         if (poly.length < 3 || polygonArea(poly) < 1e-6) continue;
         // Rounding can merge two distinct vertices, so dedupe again afterwards
