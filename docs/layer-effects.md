@@ -354,6 +354,41 @@ it belongs to the export rectangle, not the layer — and **every** backend must
 pass the same one (preview, both SVG exports, the fabric PNG, the apparel PNG and
 the project thumbnail) or the grain on screen is not the grain in the file.
 
+### Vector export states the grain once, as a `<pattern>`
+
+Because the grain is periodic, one repeat *is* the whole of it — so both SVG
+exporters emit `noiseTile` as a `<pattern>` and every region simply references it
+in its `fill`. A noised layer therefore exports as its **own region geometry**
+with a texture reference, not as confetti: the compositional shape stays in the
+file and stays editable, which is the right structure for something that honours
+the topology without being part of it.
+
+Measured on 2,400 trixels: loose polygons 858 KB, pattern with an `m4 n2` crop
+115 KB, with `m8 n4` 308 KB. The win scales with artwork ÷ crop area, since the
+tile *is* the crop — a large crop is a large tile and buys less.
+
+Three things that are load-bearing:
+
+- **The tile opens with a solid `<rect>` of the region's colour**, so a region is
+  a single path with nothing layered under it. That is also what makes the reflex-
+  corner hole impossible here: there is no seam between a fill and a grain layer
+  for the background to come through.
+- **Rows tile the height exactly; columns do not.** A cell spans `[r·H, (r+1)·H]`
+  so `2n` rows cover the tile with no overhang, but each row is sheared half a
+  cell right of the one above, so the `q` range runs wide and the tile clips.
+  Seamless rather than lossy: a piece cut off the right edge has a
+  period-translate hanging over the left edge with identical grain.
+- **The pattern is an optimisation, never a precondition.** Without a period
+  there is no repeat to state, and `generateSVG` falls back to loose polygons
+  clipped to the region. Emitting nothing would silently drop the texture for any
+  caller that forgot the argument — which happened once during development.
+  `generateCroppedSVG` needs no fallback: it is handed a crop, and `m`/`n` are
+  clamped to at least 1 wherever they are produced.
+
+`patternTransform` carries the world → display map in the cropped exporter
+(`translate(-display) rotate(θ)`, applied right to left), which is what keeps the
+pattern locked to the lattice so the fabric tile stays seamless.
+
 **Threaded exactly where `adjust` is**, and for the same reason — it reaches the
 flat-fill path of the PNG exporter and both SVG exporters through the single
 `noise` parameter on `generateTriangles`, so no emit site changed. Only
