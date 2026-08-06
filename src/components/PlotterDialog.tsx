@@ -10,6 +10,7 @@ import { downloadBlob } from "@/lib/png-export";
 import { MAX_DENSITY, MIN_DENSITY } from "@/lib/hatch";
 import { layersRoundFraction } from "@/lib/hatch-render";
 import {
+  MAX_HATCH_INSET_MM,
   MAX_MARGIN_IN,
   MAX_PAGE_IN,
   MIN_PAGE_IN,
@@ -485,6 +486,29 @@ export function PlotterDialog({
                   })
                 }
               />
+
+              {/* Hatch only: a contour's rings are closed loops a full spacing
+                  in from the edge, so they have no ends to blot. */}
+              {settings.fillStyle === "hatch" && (
+                <>
+                  <Slider
+                    label="Edge gap"
+                    value={settings.hatchInsetMm}
+                    min={0}
+                    max={MAX_HATCH_INSET_MM}
+                    step={0.05}
+                    display={settings.hatchInsetMm.toFixed(2)}
+                    onChange={(hatchInsetMm) =>
+                      onSettingsChange({ hatchInsetMm })
+                    }
+                  />
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {settings.hatchInsetMm > 0
+                      ? `Hatch held ${settings.hatchInsetMm.toFixed(2)}mm clear of every outline, so the pen doesn't blot where the two meet.`
+                      : "Hatch runs to the outline. Raise this if the pen blots where a line ends."}
+                  </p>
+                </>
+              )}
 
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <input

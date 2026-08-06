@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-06 07:00:06
+# Last updated: 2026-08-06 16:51:54
 # Files: 92
-# Lines of code: ~23368
+# Lines of code: ~23649
 ```
 - **/app**
   - **/lib**
@@ -437,6 +437,7 @@
     - Variable: `PAGE_SIZES`
     - Type: `FillStyle` - How a tone is laid down. `hatch` is the origina...
     - Interface: `PlotterSettings`
+    - Variable: `MAX_HATCH_INSET_MM` - Ceiling on the hatch inset, millimetres. Well p...
     - Variable: `DEFAULT_PLOTTER`
     - Interface: `PlotterStroke` - A pen-down run. Two points on the `RawSeg` path...
     - Interface: `PlotterPlot`

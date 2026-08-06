@@ -147,6 +147,14 @@ export interface PlotterSettings {
   /** The physical nib, in millimetres. Drives the SVG `stroke-width` only — it
    *  never changes which lines are drawn. */
   strokeWidthMm: number;
+  /** Clearance held between the hatch and every outline, **millimetres on the
+   *  page**. A plotter blots where it dwells, and every hatch line ends on a
+   *  boundary an outline is already drawing, so the two bleed together; this
+   *  buys a gap. Physical, hence millimetres like the nib rather than world
+   *  units that would change size with the sheet. `0` disables it and means the
+   *  original geometry exactly. Contour fills ignore it — their rings are closed
+   *  loops one spacing in, with no ends to blot. */
+  hatchInsetMm: number;
   /** Which sheet the plot is laid out on. */
   pageSize: PageSizeId;
   /** The `custom` sheet, portrait inches. */
@@ -163,6 +171,16 @@ export interface PlotterSettings {
   artWidthIn: number;
 }
 
+/**
+ * Ceiling on the hatch inset, millimetres.
+ *
+ * Well past the bleed of any pen this export is aimed at — the point of the cap
+ * is that an inset larger than the hatch spacing erodes a region's fill away
+ * entirely, and 2 mm is already generous enough to show that in the preview
+ * before it can be reached by accident.
+ */
+export const MAX_HATCH_INSET_MM = 2;
+
 export const DEFAULT_PLOTTER: PlotterSettings = {
   pen: "black-on-white",
   fillStyle: "hatch",
@@ -170,6 +188,7 @@ export const DEFAULT_PLOTTER: PlotterSettings = {
   maxDensity: 10,
   blankLightest: false,
   strokeWidthMm: 0.3,
+  hatchInsetMm: 0,
   pageSize: "letter",
   customWidthIn: 8,
   customHeightIn: 10,
@@ -744,6 +763,61 @@ const segPoly = (seg: RawSeg): PlotPoly => {
 };
 
 /**
+ * Into display space. Bounds are always taken *after* this, never before: with
+ * no crop to inherit an origin from the page is exactly the artwork's own
+ * extent, and measuring first would size it wrongly under a quarter turn, where
+ * width and height swap.
+ */
+const rotate = (polys: PlotPoly[], gridRotation: number): PlotPoly[] =>
+  polys.map((poly) =>
+    poly.map(([x, y]) => rotatePoint(x, y, gridRotation) as [number, number]),
+  );
+
+/** World extent of a set of polylines; the zero box when there are none. */
+function boundsOf(polys: PlotPoly[]) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const poly of polys) {
+    for (const [x, y] of poly) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return Number.isFinite(minX)
+    ? { minX, minY, maxX, maxY }
+    : { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+}
+
+/**
+ * The hatch inset in world units, from the setting's millimetres on the page.
+ *
+ * The conversion needs `PlotterLayout.scale`, which is inches per world unit
+ * and is normally read off a finished plot — but the inset has to be known
+ * *while* the hatch is being built. It can be: `plotterLayout` reads nothing
+ * but the extent, and on this path the hatch is clipped inside the region rings
+ * while the outlines **are** those rings, so the outlines alone bound the plot
+ * and give the identical figure. An invalid layout (the margin has eaten the
+ * page) yields no scale and no inset; nothing can be exported there anyway.
+ */
+function hatchInsetWorld(
+  outlinePolys: PlotPoly[],
+  gridRotation: number,
+  s: PlotterSettings,
+): number {
+  if (!(s.hatchInsetMm > 0)) return 0;
+  const b = boundsOf(rotate(outlinePolys, gridRotation));
+  const { scale } = plotterLayout(
+    { width: b.maxX - b.minX, height: b.maxY - b.minY },
+    s,
+  );
+  return scale > 0 ? s.hatchInsetMm / 25.4 / scale : 0;
+}
+
+/**
  * The plot: what the pen draws, in world units, with the page's origin at
  * (0, 0).
  *
@@ -775,9 +849,12 @@ export async function buildPlotterPlot(
   let outlinePolys: PlotPoly[];
   let rawCount: number;
 
-  if (radius <= 0 && s.fillStyle === "hatch") {
+  if (radius <= 0 && s.fillStyle === "hatch" && s.hatchInsetMm <= 0) {
     // The original path, untouched: square corners and parallel lines need no
-    // polygons, no welding and no Clipper.
+    // polygons, no welding and no Clipper. An inset does need them — it is a
+    // polygon erosion — so a square-cornered plot that asks for one goes the
+    // other way, where `regionPolys(fills, 0)` hands back the plain lattice
+    // rings. With the inset off this is the condition it has always been.
     const marks = plotterMarks(layers, gridDivisions, s);
     // Joined separately so the two stay separable all the way to the file. It
     // costs nothing: an outline sits on a grid line and a hatch line never does
@@ -828,11 +905,28 @@ export async function buildPlotterPlot(
       });
       rawCount += hatchPolys.length;
     } else {
+      // Holding the hatch clear of the outline is an **erosion of the region**,
+      // not a trim off each line's ends. That is what makes the clearance
+      // perpendicular: every line stops the same distance from the boundary
+      // whatever angle it meets it at, which is the distance ink actually
+      // bleeds across. Trimming a fixed length along each line would leave a
+      // shallow crossing far closer to the outline than a square one — exactly
+      // the case that blots.
+      //
+      // `api.offset` is the primitive `contourFill` insets with, and it returns
+      // empty when a shape is consumed: a region thinner than the gap simply
+      // plots as its own outline, which is the honest answer.
+      const inset = hatchInsetWorld(outlinePolys, gridRotation, s);
+      const hatchRegions =
+        inset > 0
+          ? regions.map((r) => ({ ...r, rings: api.offset(r.rings, -inset) }))
+          : regions;
+
       const marks = plotterMarks(layers, gridDivisions, s);
       const rawHatch = rawSegmentsInRegions(
         marks,
         fills,
-        regions,
+        hatchRegions,
         densities,
         radius,
         gridDivisions,
@@ -843,35 +937,9 @@ export async function buildPlotterPlot(
     }
   }
 
-  // Rotate into display space *first*, then take the bounds there. With no crop
-  // to inherit an origin from, the page is exactly the artwork's own extent —
-  // and measuring before the rotation would size the page wrongly under a
-  // quarter turn, where width and height swap.
-  const rotate = (polys: PlotPoly[]) =>
-    polys.map((poly) =>
-      poly.map(([x, y]) => rotatePoint(x, y, gridRotation) as [number, number]),
-    );
-  const rotHatch = rotate(hatchPolys);
-  const rotOutline = rotate(outlinePolys);
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const poly of [...rotHatch, ...rotOutline]) {
-    for (const [x, y] of poly) {
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  }
-  if (!Number.isFinite(minX)) {
-    minX = 0;
-    minY = 0;
-    maxX = 0;
-    maxY = 0;
-  }
+  const rotHatch = rotate(hatchPolys, gridRotation);
+  const rotOutline = rotate(outlinePolys, gridRotation);
+  const { minX, minY, maxX, maxY } = boundsOf([...rotHatch, ...rotOutline]);
 
   const place = (polys: PlotPoly[]): PlotterStroke[] => {
     const out: PlotterStroke[] = polys.map((poly) => ({
@@ -974,7 +1042,10 @@ export function pageSizeInches(s: PlotterSettings): { w: number; h: number } {
  * their own to preserve.
  */
 export function plotterLayout(
-  plot: PlotterPlot,
+  // Only the extent is read, and `buildPlotterPlot` needs the scale *before* it
+  // has a finished plot to hand — the hatch inset is set in millimetres on the
+  // page, so it cannot be resolved to world units until the scale is known.
+  plot: { width: number; height: number },
   s: PlotterSettings,
 ): PlotterLayout {
   const nib = s.strokeWidthMm / 25.4;
@@ -1176,6 +1247,12 @@ export function normalizePlotterSettings(raw: unknown): PlotterSettings {
         ? r.blankLightest
         : DEFAULT_PLOTTER.blankLightest,
     strokeWidthMm: num(r.strokeWidthMm, 0.05, 5, DEFAULT_PLOTTER.strokeWidthMm),
+    hatchInsetMm: num(
+      r.hatchInsetMm,
+      0,
+      MAX_HATCH_INSET_MM,
+      DEFAULT_PLOTTER.hatchInsetMm,
+    ),
     pageSize: PAGE_SIZES.some((p) => p.id === r.pageSize)
       ? (r.pageSize as PageSizeId)
       : DEFAULT_PLOTTER.pageSize,
