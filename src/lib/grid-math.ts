@@ -200,6 +200,14 @@ export function getTriVertices(
   }
 }
 
+/** World-space position of the lattice point (q, r): the corner an up triangle
+ *  starts from, and — for the (qc, rc) of `hexCenterTriAxial` — the same point
+ *  `hexCenterWorld` returns. Anything that has to place geometry *around* a
+ *  tri-axial anchor rather than on a triangle needs this. */
+export function latticePoint(q: number, r: number): { x: number; y: number } {
+  return { x: q * SIDE + r * (SIDE / 2), y: r * H };
+}
+
 /** Returns the world-space center of a triangle (centroid) */
 export function triCenter(q: number, r: number, type: TriType): { x: number; y: number } {
   const bx = q * SIDE + r * (SIDE / 2);

@@ -2,6 +2,40 @@
 
 > Detail doc. Index and the rules that apply everywhere: [CLAUDE.md](../CLAUDE.md). Module/symbol map: [CODEMAP.md](../CODEMAP.md).
 
+## Grid orientation applies to every export
+
+`gridRotation` (`0` flat-top, `π/2` pointy-top) is a **view** transform: the
+tri-axial lattice has no 90° symmetry, so a pointy-top grid cannot be a rotation
+of `painted` — only the geometry the artwork produces can turn. Every backend
+that writes a file therefore has to apply it, and each does it at the one seam
+that suits it:
+
+| Export | Where the turn happens |
+|---|---|
+| Canvas preview | `ctx.rotate(gridRotation)` in `GridCanvas`'s world transform |
+| Crop PNG / cropped SVG | `rotatePoint` per point, into display space (see "Rotation" below) |
+| Whole-artwork SVG, project file | `SVGExportOptions.rotation` → one `<g transform>` in `wrap` |
+| 3D model, cut stack model | `computeModelTransform(painted, widthMm, gridRotation)` |
+| Cut SVG | the traced loops, before the sheet is measured |
+| Plotter, apparel | already took `gridRotation` |
+
+Two of those deserve the detail:
+
+- **`generateSVG` turns the assembled document, not each point.** One group
+  transform carries the fills, the hatch lines, the noise `<pattern>`s and the
+  glow filters together, because all of them live in the user space it
+  establishes — rotating at the emit sites would mean rotating `patternTransform`
+  and every filter region separately. `rotatedPage(w, h, θ)` rotates the page's
+  corners and translates the box back to the origin, so the viewBox is the turned
+  artwork's own. The background rect stays *outside* the group: the page is the
+  page whichever way the artwork faces. With no rotation the output is byte-identical
+  to before.
+- **The fabrication paths turn at `computeModelTransform`**, the shared world →
+  model seam, which means the bounds are measured *after* the turn — so `widthMm`
+  keeps meaning the width of the piece the user sees, and the cut sheet lays its
+  tiles out for the turned design instead of its flat-top twin. `buildCutSVG`
+  needs its own rotation on top because its loops never pass through `toModel`.
+
 ## Crop & export
 
 Rectangular export region for print-on-demand (Spoonflower et al.) and for handing vector work to Inkscape. Separate from the whole-artwork `ExportDialog` in the hamburger menu, which is untouched.

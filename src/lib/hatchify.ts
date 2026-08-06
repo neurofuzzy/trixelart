@@ -1,8 +1,8 @@
 import { triToString } from "@/lib/grid-math";
 import {
-  enumerateHexTrixels,
-  hexWedgeIndex,
-  type HexCoord,
+  regionTrixels,
+  regionWedgeIndex,
+  type HexRegion,
 } from "@/lib/hex-flower";
 import { COLOR_COUNT, decodeColor, encodeColor } from "@/lib/constants";
 import {
@@ -152,12 +152,12 @@ function densityFor(a: number, s: HatchifySettings): number {
 
 /**
  * @param source merged fills from the visible layers *below* the hatch layer
- * @param hexes  the current hex selection
+ * @param hexes  the current hex selection; each region carries its own size
  * @param N      grid divisions; must be > 0 for a hex lattice to exist
  */
 export function hatchify(
   source: Record<string, string>,
-  hexes: HexCoord[],
+  hexes: HexRegion[],
   N: number,
   s: HatchifySettings,
 ): HatchifyResult {
@@ -171,7 +171,7 @@ export function hatchify(
   const last = COLOR_COUNT - 1;
 
   for (const hex of hexes) {
-    for (const tri of enumerateHexTrixels(hex.c, hex.k, N)) {
+    for (const tri of regionTrixels(hex)) {
       const key = triToString(tri);
       covered.push(key);
 
@@ -183,7 +183,7 @@ export function hatchify(
       if (!src) continue;
       const colorIdx = clamp(Math.round(src.colorIdx), 0, last);
 
-      const dir = WEDGE_DIR[hexWedgeIndex(tri, hex.c, hex.k, N)];
+      const dir = WEDGE_DIR[regionWedgeIndex(tri, hex)];
 
       let a: number;
       let color: string;

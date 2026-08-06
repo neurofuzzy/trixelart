@@ -1,5 +1,5 @@
 import { SIDE, H, triCenter, getTrianglesOnLine, type TriKey } from "@/lib/grid-math";
-import { triToHex } from "@/lib/hex-flower";
+import { regionMembership, type HexRegion } from "@/lib/hex-flower";
 
 export function bestAxisClosest(
   origin: { x: number; y: number },
@@ -31,7 +31,7 @@ export function bestAxisClosest(
 export function clippedLine(
   fromTri: TriKey,
   toTri: TriKey,
-  selectedHexes: { c: number; k: number }[],
+  selectedHexes: HexRegion[],
   N: number,
 ): TriKey[] {
   const origin = triCenter(fromTri.q, fromTri.r, fromTri.type);
@@ -39,12 +39,7 @@ export function clippedLine(
   const closest = bestAxisClosest(origin, target);
   if (!closest) return [];
   let lineTris = getTrianglesOnLine(origin.x, origin.y, closest.x, closest.y);
-  if (selectedHexes.length > 0 && N > 0) {
-    const hexSet = new Set(selectedHexes.map((h) => `${h.c},${h.k}`));
-    lineTris = lineTris.filter((t) => {
-      const h = triToHex(t.q, t.r, t.type, N);
-      return hexSet.has(`${h.c},${h.k}`);
-    });
-  }
+  const inSelection = N > 0 ? regionMembership(selectedHexes) : null;
+  if (inSelection) lineTris = lineTris.filter(inSelection);
   return lineTris;
 }

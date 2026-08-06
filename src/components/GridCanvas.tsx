@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useMemo, useState } from "react";
 import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "@/lib/grid-math";
-import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
+import { hexCenterWorld, enumerateHexTrixels, triToHex, placementAnchor, regionContaining, regionCorners, regionKey, regionTrixels, hexWedgeIndex, type HexRegion, type SelectionSnapshot } from "@/lib/hex-flower";
 import { isNoPrint, resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 import { type Layer } from "@/hooks/use-history";
@@ -26,6 +26,58 @@ import {
   type SubFill,
 } from "@/lib/subdivision-noise";
 import { drawGlow, silhouetteGeometry } from "@/lib/glow";
+
+/**
+ * The hexagon the stamp and select hover cues outline: the region their next
+ * click would act on, or null when there is nothing hex-shaped to show.
+ *
+ * It exists because "the hex under the cursor" stopped being one thing. Each
+ * case picks its own anchor, and each has to match the tool it previews:
+ *  - **stamp, placing** — `placementAnchor`, sized by the snapshot it would
+ *    lay down. Free of the honeycomb in world mode, exactly as the commit is;
+ *  - **stamp, capturing** — a honeycomb hex, because capture still reads one;
+ *  - **select, over the current selection** — that region, which is what a
+ *    drag would pick up, placed on the selection's own (possibly shifted)
+ *    lattice;
+ *  - **select, anywhere else** — where a fresh selection would land.
+ */
+function stampSelectHoverRegion(a: {
+  tool: Tool;
+  tri: TriKey;
+  gridDivisions: number;
+  hexLatticeOn: boolean;
+  captureMode: boolean;
+  activeSelection: SelectionSnapshot | null;
+  selectedHexes: HexRegion[];
+  selAnchor: HexRegion | null;
+}): HexRegion | null {
+  const N = a.gridDivisions;
+  if (N <= 0) return null;
+
+  if (a.tool === "stamp") {
+    if (a.captureMode) return regionContaining(a.tri, N, null);
+    // World mode places a snapshot of any size, and the outline has to be the
+    // size of the thing being placed, not of the current lattice.
+    const size = a.hexLatticeOn ? N : (a.activeSelection?.N ?? N);
+    return { ...placementAnchor(a.tri, N, a.hexLatticeOn), N: size };
+  }
+
+  if (a.tool === "select") {
+    const onLattice =
+      a.selAnchor && a.selAnchor.N === N
+        ? regionContaining(a.tri, N, a.selAnchor)
+        : null;
+    if (
+      onLattice &&
+      a.selectedHexes.some((h) => regionKey(h) === regionKey(onLattice))
+    ) {
+      return onLattice;
+    }
+    return { ...placementAnchor(a.tri, N, a.hexLatticeOn), N };
+  }
+
+  return null;
+}
 
 export function GridCanvas({
   size,
@@ -61,7 +113,7 @@ export function GridCanvas({
   screenToWorld: (sx: number, sy: number) => { x: number; y: number };
   gridDivisions: number;
   hexMode: HexMode;
-  selectedHexes: { c: number; k: number }[];
+  selectedHexes: HexRegion[];
   tool: Tool;
   activeSelection: SelectionSnapshot | null;
   stampFlash: { c: number; k: number; opacity: number; seq: number } | null;
@@ -555,26 +607,18 @@ export function GridCanvas({
     ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
     ctx.fill();
 
-    // Selection overlay — cyan/blue tint on each selected hex's trixels,
-    // with a marching-ants hex outline. Only shown when hex lattice is active.
+    // Selection overlay — cyan/blue tint on each selected hex's trixels, with a
+    // marching-ants hex outline. Drawn from each region's own anchor and size
+    // rather than from the lattice, so a selection that was anchored freely is
+    // outlined where it actually is.
     if (selectedHexes.length > 0 && gridDivisions > 0) {
-      const s = gridDivisions * SIDE;
-      const vHalf = gridDivisions * H;
-
       for (const sel of selectedHexes) {
-        const { x: cx, y: cy } = hexCenterWorld(
-          sel.c,
-          sel.k,
-          gridDivisions,
-        );
-
         // Cyan tint on the selected trixels.
         ctx.save();
         ctx.globalAlpha = 0.25;
         ctx.fillStyle = "rgb(34, 211, 238)"; // cyan-400
-        const tris = enumerateHexTrixels(sel.c, sel.k, gridDivisions);
         ctx.beginPath();
-        for (const t of tris) {
+        for (const t of regionTrixels(sel)) {
           const [a, b, c] = getTriVertices(t.q, t.r, t.type);
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
@@ -591,12 +635,11 @@ export function GridCanvas({
         ctx.setLineDash([8, 6]);
         ctx.lineDashOffset = -antPhase / view.zoom;
         ctx.beginPath();
-        ctx.moveTo(cx + s, cy);
-        ctx.lineTo(cx + s / 2, cy + vHalf);
-        ctx.lineTo(cx - s / 2, cy + vHalf);
-        ctx.lineTo(cx - s, cy);
-        ctx.lineTo(cx - s / 2, cy - vHalf);
-        ctx.lineTo(cx + s / 2, cy - vHalf);
+        const corners = regionCorners(sel);
+        ctx.moveTo(corners[0].x, corners[0].y);
+        for (let i = 1; i < corners.length; i++) {
+          ctx.lineTo(corners[i].x, corners[i].y);
+        }
         ctx.closePath();
         ctx.stroke();
         ctx.restore();
@@ -667,14 +710,24 @@ export function GridCanvas({
       ctx.restore();
     }
 
-    // Stamp preview: render the active selection's trixels translated to
-    // the hovered hex, using their real colors so the user sees exactly
-    // what a stamp would land there. Skip when in capture mode.
-    if (tool === "stamp" && !captureMode && hoverTargets.length > 0 && activeSelection && gridDivisions > 0 && gridDivisions === activeSelection.N) {
+    // Stamp preview: render the active selection's trixels translated to where
+    // a stamp would land — the hovered hex in honeycomb mode, the hovered
+    // trixel in world mode — using their real colors. Skip in capture mode.
+    const hexLatticeOn = hexMode !== "world" && gridDivisions > 0;
+    // The selection's own lattice, which a free-anchored selection shifts off
+    // the honeycomb. Hover cues for select are placed on it so they line up
+    // with what is already selected.
+    const selAnchor = selectedHexes[0] ?? null;
+    if (
+      tool === "stamp" &&
+      !captureMode &&
+      hoverTargets.length > 0 &&
+      activeSelection &&
+      (!hexLatticeOn || gridDivisions === activeSelection.N)
+    ) {
       const N = gridDivisions;
       const hov = hoverTargets[0];
-      const tgt = triToHex(hov.q, hov.r, hov.type, N);
-      const { qc, rc } = hexCenterTriAxial(tgt.c, tgt.k, N);
+      const { qc, rc } = placementAnchor(hov, N, hexLatticeOn);
 
       // Group snapshot trixels by resolved color so we batch fills.
       const previewGroups = new Map<string, typeof activeSelection.trixels>();
@@ -762,19 +815,28 @@ export function GridCanvas({
 
       const hoverColor = tool === "clone" && !cloneSource ? "rgb(239, 68, 68)" : "white";
 
-      if ((tool === "stamp" || tool === "select") && gridDivisions > 0) {
-        const hov = hoverTargets[0];
-        const { c, k } = triToHex(hov.q, hov.r, hov.type, gridDivisions);
-        const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
-        const hs = gridDivisions * SIDE;
-        const hv = gridDivisions * H;
+      // The hexagon frames what is about to happen, so it is drawn on the
+      // region the gesture would actually act on — `hoverRegion` below — not on
+      // the hex of the global honeycomb the cursor happens to be over. In
+      // honeycomb mode the two are the same and nothing here changes.
+      const hoverRegion = stampSelectHoverRegion({
+        tool,
+        tri: hoverTargets[0],
+        gridDivisions,
+        hexLatticeOn,
+        captureMode: !!captureMode,
+        activeSelection,
+        selectedHexes,
+        selAnchor,
+      });
+
+      if (hoverRegion) {
+        const corners = regionCorners(hoverRegion);
         ctx.beginPath();
-        ctx.moveTo(hx + hs, hy);
-        ctx.lineTo(hx + hs / 2, hy + hv);
-        ctx.lineTo(hx - hs / 2, hy + hv);
-        ctx.lineTo(hx - hs, hy);
-        ctx.lineTo(hx - hs / 2, hy - hv);
-        ctx.lineTo(hx + hs / 2, hy - hv);
+        ctx.moveTo(corners[0].x, corners[0].y);
+        for (let i = 1; i < corners.length; i++) {
+          ctx.lineTo(corners[i].x, corners[i].y);
+        }
         ctx.closePath();
         if (tool === "stamp") {
           if (captureMode) {

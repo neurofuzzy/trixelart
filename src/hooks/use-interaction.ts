@@ -8,6 +8,8 @@ import {
   triToHex,
   getHexWedgeTrixels,
   enumerateHexTrixels,
+  regionMembership,
+  type HexRegion,
   type Symmetry,
   type SelectionSnapshot,
 } from "@/lib/hex-flower";
@@ -51,8 +53,8 @@ interface UseInteractionArgs {
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;
-  selectedHexes: { c: number; k: number }[];
-  setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
+  selectedHexes: HexRegion[];
+  setSelectedHexes: React.Dispatch<React.SetStateAction<HexRegion[]>>;
   activeSelection: SelectionSnapshot | null;
   setActiveSelection: (s: SelectionSnapshot | null) => void;
   selections: SelectionSnapshot[];
@@ -291,15 +293,9 @@ export function useInteraction(args: UseInteractionArgs) {
       let targets = [...out.values()];
       // selectedHex clipping: selection is a stronger constraint than brush
       // size — painting outside selected hexes yields nothing.
-      if (selectedHexesRef.current.length > 0 && N > 0) {
-        const hexSet = new Set(
-          selectedHexesRef.current.map((h) => `${h.c},${h.k}`),
-        );
-        targets = targets.filter((t) => {
-          const h = triToHex(t.q, t.r, t.type, N);
-          return hexSet.has(`${h.c},${h.k}`);
-        });
-      }
+      const inSelection =
+        N > 0 ? regionMembership(selectedHexesRef.current) : null;
+      if (inSelection) targets = targets.filter(inSelection);
       return targets;
     },
     [],

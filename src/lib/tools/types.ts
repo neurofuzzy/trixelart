@@ -1,6 +1,6 @@
 import type React from "react";
 import type { TriKey } from "@/lib/grid-math";
-import type { Symmetry, SelectionSnapshot } from "@/lib/hex-flower";
+import type { Symmetry, SelectionSnapshot, HexRegion } from "@/lib/hex-flower";
 import type { Layer } from "@/hooks/use-history";
 import type { PatternLayer, QuantizeTarget } from "@/lib/tri-pattern";
 import type { CropHandle, CropRect } from "@/lib/crop";
@@ -51,7 +51,7 @@ export function isToolAllowed(t: Tool, kind: "fill" | "hatch"): boolean {
 /** One selected hex's contents, captured at pointer-down so a drag can cut and
  *  paste it without re-reading the map it is mutating. */
 export interface SelectItem {
-  sourceHex: { c: number; k: number };
+  sourceHex: HexRegion;
   snapshot: Array<{ dq: number; dr: number; type: TriKey["type"]; color: string }>;
 }
 
@@ -127,10 +127,10 @@ export type DragState =
       layerItems: SelectItem[][];
       /** The selection as it was at pointer-down. Kept whole rather than
        *  derived from `items`, which drops hexes that happened to be empty. */
-      hexes: Array<{ c: number; k: number }>;
+      hexes: HexRegion[];
       /** The hex ALT was pressed on, if any. A press that never moves is a
        *  deselect; one that moves is an all-layer drag. */
-      altHex: { c: number; k: number } | null;
+      altHex: HexRegion | null;
       /** Whether the last write moved every layer, so releasing ALT knows there
        *  is something to put back. */
       movedAll: boolean;
@@ -164,7 +164,7 @@ export interface ToolContext {
   flowerRadius: number;
   gridDivisions: number;
   symmetry: Symmetry;
-  selectedHexes: { c: number; k: number }[];
+  selectedHexes: HexRegion[];
   hexEnabled: boolean;
   layers: Layer[];
   activeLayerIdx: number;
@@ -186,7 +186,7 @@ export interface ToolContext {
   onCloneOffset?: (o: { x: number; y: number } | null) => void;
   captureMode: boolean;
   setCaptureMode: (v: boolean) => void;
-  setSelectedHexes: React.Dispatch<React.SetStateAction<{ c: number; k: number }[]>>;
+  setSelectedHexes: React.Dispatch<React.SetStateAction<HexRegion[]>>;
   /** Export crop region. View state, not authored content — it never enters the
    *  undo stack, so the crop tool deliberately does not call `onCommit`. */
   crop: CropRect;

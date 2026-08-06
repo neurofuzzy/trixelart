@@ -4,6 +4,7 @@ import {
   countComponents,
 } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
+import { rotatePoint } from "@/lib/crop";
 import { zipSync, strToU8 } from "fflate";
 
 // ---------------------------------------------------------------------------
@@ -99,10 +100,20 @@ export interface ModelTransform {
   toModel: (v: Pt) => Pt;
 }
 
-/** Computes the shared model transform from a painted grid. Null if empty. */
+/**
+ * Computes the shared model transform from a painted grid. Null if empty.
+ *
+ * `gridRotation` is the lattice's quarter turn. It is applied here, at the one
+ * world → model seam every fabrication path goes through, rather than at each
+ * of them: the tri-axial lattice has no 90° symmetry, so a pointy-top grid
+ * cannot be expressed by rotating `painted` — only the geometry it produces can
+ * turn. Measuring the bounds *after* the turn is what also makes `widthMm` mean
+ * the width of the piece the user sees, not of its flat-top twin.
+ */
 export function computeModelTransform(
   painted: Record<string, string>,
   widthMm: number,
+  gridRotation = 0,
 ): ModelTransform | null {
   const keys = Object.keys(painted);
   if (keys.length === 0) return null;
@@ -112,11 +123,12 @@ export function computeModelTransform(
     maxY = -Infinity;
   for (const key of keys) {
     const t = stringToTri(key);
-    for (const v of getTriVertices(t.q, t.r, t.type)) {
-      if (v.x < minX) minX = v.x;
-      if (v.x > maxX) maxX = v.x;
-      if (v.y < minY) minY = v.y;
-      if (v.y > maxY) maxY = v.y;
+    for (const raw of getTriVertices(t.q, t.r, t.type)) {
+      const [x, y] = rotatePoint(raw.x, raw.y, gridRotation);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
   const worldW = maxX - minX || 1;
@@ -127,10 +139,13 @@ export function computeModelTransform(
     scale,
     widthMm: w,
     heightMm: h,
-    toModel: (v) => ({
-      x: (v.x - minX) * scale - w / 2,
-      y: (maxY - v.y) * scale - h / 2,
-    }),
+    toModel: (v) => {
+      const [x, y] = rotatePoint(v.x, v.y, gridRotation);
+      return {
+        x: (x - minX) * scale - w / 2,
+        y: (maxY - y) * scale - h / 2,
+      };
+    },
   };
 }
 
@@ -203,12 +218,13 @@ export function signedArea(p: Pt[]): number {
 export function buildTrixelModel(
   painted: Record<string, string>,
   options: MeshExportOptions,
+  gridRotation = 0,
 ): TrixelModel | null {
   const entries = Object.entries(painted);
   if (entries.length === 0) return null;
 
   // Shared world → centered, Y-up model transform (matches on-screen orientation).
-  const transform = computeModelTransform(painted, options.widthMm);
+  const transform = computeModelTransform(painted, options.widthMm, gridRotation);
   if (!transform) return null;
   const { widthMm, heightMm, toModel } = transform;
 

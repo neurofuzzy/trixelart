@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { resolveColor } from "@/lib/constants";
 import { triToString, type TriKey } from "@/lib/grid-math";
-import { enumerateHexTrixels, type HexCoord } from "@/lib/hex-flower";
+import { regionTrixels, type HexRegion } from "@/lib/hex-flower";
 import { MAX_DENSITY, MAX_WEIGHT, MIN_DENSITY, MIN_WEIGHT } from "@/lib/hatch";
 import {
   MAX_LEVELS,
@@ -94,7 +94,7 @@ export function HatchifyDialog({
   onSettingsChange: (patch: Partial<HatchifySettings>) => void;
   /** Merged fills from the visible layers below the hatch layer. */
   source: Record<string, string>;
-  hexes: HexCoord[];
+  hexes: HexRegion[];
   gridDivisions: number;
   palettes: { name: string; colors: string[] }[];
 }) {
@@ -120,7 +120,7 @@ export function HatchifyDialog({
     if (!open || gridDivisions <= 0) return [];
     const out: TriKey[] = [];
     for (const hex of hexes) {
-      out.push(...enumerateHexTrixels(hex.c, hex.k, gridDivisions));
+      out.push(...regionTrixels(hex));
     }
     return out;
   }, [open, hexes, gridDivisions]);

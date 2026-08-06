@@ -96,18 +96,21 @@ export function Export3DDialog({
   onOpenChange,
   painted,
   projectName,
+  gridRotation = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
   projectName: string;
+  /** The lattice's quarter turn, so a pointy-top design prints the way it is drawn. */
+  gridRotation?: number;
 }) {
   const [options, setOptions] = useState<MeshExportOptions>(DEFAULT_MESH_OPTIONS);
   const [copied, setCopied] = useState(false);
 
   const model = useMemo(
-    () => (open ? buildTrixelModel(painted, options) : null),
-    [open, painted, options],
+    () => (open ? buildTrixelModel(painted, options, gridRotation) : null),
+    [open, painted, options, gridRotation],
   );
 
   const set = (patch: Partial<MeshExportOptions>) =>

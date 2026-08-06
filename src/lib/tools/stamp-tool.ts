@@ -1,9 +1,9 @@
-import { worldToTri, triToString } from "@/lib/grid-math";
+import { worldToTri, triToString, type TriKey } from "@/lib/grid-math";
 import {
   triToHex,
   captureHexSnapshot,
   enumerateHexTrixels,
-  hexCenterTriAxial,
+  placementAnchor,
 } from "@/lib/hex-flower";
 import type { ToolHandler } from "./types";
 import { upsertSelectionSnapshot } from "./selection-utils";
@@ -39,14 +39,25 @@ export const stampTool: ToolHandler = {
         ctx.onStampCapture?.(hex.c, hex.k);
         ctx.setCaptureMode(false);
       }
-    } else if (snap && N === snap.N) {
-      const destHex = triToHex(tri.q, tri.r, tri.type, N);
-      const { qc, rc } = hexCenterTriAxial(destHex.c, destHex.k, N);
+      // The lattice-spacing match is a honeycomb constraint: it is what keeps a
+      // stamp filling the hex it snaps to. In world mode the stamp is
+      // free-floating, so a snapshot captured at any N is placeable — its
+      // offsets are plain tri-axial deltas.
+    } else if (snap && (!ctx.hexEnabled || N === snap.N)) {
+      const { qc, rc } = placementAnchor(tri, N, ctx.hexEnabled);
+      // Clearing the destination hex first is what makes a honeycomb stamp
+      // *replace* a tile rather than composite onto it. There is no tile to
+      // replace in world mode, so there the stamp only writes its own cells.
+      let clear: TriKey[] = [];
+      if (ctx.hexEnabled && N > 0) {
+        const destHex = triToHex(tri.q, tri.r, tri.type, N);
+        clear = enumerateHexTrixels(destHex.c, destHex.k, N);
+      }
 
       ctx.setPainted((prev) => {
         const next = { ...prev };
         let changed = false;
-        for (const t of enumerateHexTrixels(destHex.c, destHex.k, N)) {
+        for (const t of clear) {
           const key = triToString(t);
           if (key in next) {
             delete next[key];

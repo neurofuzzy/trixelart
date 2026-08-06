@@ -3,6 +3,7 @@ import { signedArea, computeModelTransform, type Pt } from "@/lib/mesh-export";
 import { cutLayers, type CutFrame } from "@/lib/cut-mesh";
 import type { CutPlan } from "@/lib/cut-export";
 import { flattenRoundedRing, roundPolygon } from "@/lib/round-corners";
+import { rotatePoint } from "@/lib/crop";
 
 // ---------------------------------------------------------------------------
 // Cut plan → one layered SVG for cutting machines (see docs/fabrication-export
@@ -305,8 +306,9 @@ export function buildCutSVG(
   plan: CutPlan,
   painted: Record<string, string>,
   options: CutSVGOptions,
+  gridRotation = 0,
 ): string | null {
-  const transform = computeModelTransform(painted, options.widthMm);
+  const transform = computeModelTransform(painted, options.widthMm, gridRotation);
   if (!transform) return null;
   const layers = cutLayers(plan, painted, options.frame);
   if (layers.length === 0) return null;
@@ -314,8 +316,18 @@ export function buildCutSVG(
   const merge = options.mergeIslands ?? false;
   const neck = options.neck ?? 0;
 
+  // Turned before the tile is measured, not after: the sheet layout sizes its
+  // tiles from these bounds, so a pointy-top design has to be the right way
+  // round *here* or the tiles are laid out to the flat-top box. The loops are
+  // traced in world space, so this is the one place the turn can happen —
+  // unlike the mesh paths, nothing here goes through `toModel`.
   const traced = layers.map((l) =>
-    traceUnionLoops(l.keys, merge, neck, options.round ?? 0),
+    traceUnionLoops(l.keys, merge, neck, options.round ?? 0).map((loop) =>
+      loop.map((p) => {
+        const [x, y] = rotatePoint(p.x, p.y, gridRotation);
+        return { x, y };
+      }),
+    ),
   );
   let minX = Infinity,
     minY = Infinity,

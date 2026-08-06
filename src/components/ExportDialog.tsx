@@ -31,6 +31,7 @@ export function ExportDialog({
   settings,
   onSettingsChange,
   noisePeriod,
+  gridRotation,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -42,13 +43,22 @@ export function ExportDialog({
   /** The crop's repeat, so subdivision noise matches the preview and the
    *  fabric tile rather than growing its own grain here. */
   noisePeriod?: NoisePeriod;
+  /** The lattice's quarter turn, so a pointy-top grid exports the way the
+   *  editor draws it. */
+  gridRotation?: number;
 }) {
   const stroke = settings.stroke ?? false;
   const merge = settings.merge ?? false;
 
   const svg = useMemo(
-    () => generateSVG(layers, { stroke, merge, period: noisePeriod }),
-    [layers, stroke, merge, noisePeriod],
+    () =>
+      generateSVG(layers, {
+        stroke,
+        merge,
+        period: noisePeriod,
+        rotation: gridRotation,
+      }),
+    [layers, stroke, merge, noisePeriod, gridRotation],
   );
 
   const previewSvg = useMemo(() => stripSvgDimensions(svg), [svg]);

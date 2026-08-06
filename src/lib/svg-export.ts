@@ -61,6 +61,10 @@ export interface SVGExportOptions {
    *  its own, but the grain still has to match the preview and the tile, so the
    *  caller passes the document's crop. Omitted only where there is none. */
   period?: NoisePeriod;
+  /** `gridRotation` — the quarter turn that makes the lattice pointy-top. World
+   *  space is always flat-top, so a file written without this shows the artwork
+   *  turned 90° from what the editor shows. Omitted → 0, the flat-top case. */
+  rotation?: number;
 }
 
 export const PRECISION = 3;
@@ -432,19 +436,62 @@ function wrap(
   options?: SVGExportOptions,
   defs = "",
 ): string {
-  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"`;
+  // The lattice's quarter turn is applied to the assembled document rather than
+  // to every emitted point: one group transform turns the fills, the hatch
+  // lines, the noise patterns and the glow filters together, because all of
+  // them live in the user space it establishes. Rotating each emit site instead
+  // would have to rotate `patternTransform` and the filter regions separately —
+  // which is exactly what `generateCroppedSVG` does, and it is only worth it
+  // there because that path has to clip in world space first.
+  const page = rotatedPage(w, h, options?.rotation ?? 0);
+  const drawing = page.transform
+    ? `  <g transform="${page.transform}">\n${body}\n  </g>`
+    : body;
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${page.w} ${page.h}" width="${page.w}" height="${page.h}"`;
   const parts = [
     options?.metadata ?? "",
     defs ? `  <defs>\n${defs}\n  </defs>` : "",
     // Percentages resolve against the viewport the viewBox establishes, so this
-    // covers the page exactly without restating its dimensions.
+    // covers the page exactly without restating its dimensions. Outside the
+    // rotation group: the page is the page whichever way the artwork faces.
     options?.background
       ? `  <rect x="0" y="0" width="100%" height="100%" fill="${options.background}"/>`
       : "",
-    body,
+    drawing,
   ].filter(Boolean);
   if (parts.length === 0) return `${open}/>`;
   return `${open}>\n${parts.join("\n")}\n</svg>`;
+}
+
+/**
+ * The page a `w`×`h` drawing needs once turned by `theta`, and the transform
+ * that puts it there.
+ *
+ * Rotating about the origin sends the box off the page, so the corners are
+ * rotated, the new box measured, and the whole thing translated back to (0, 0).
+ * Exact for the quarter turns the grid actually uses, and correct for any angle.
+ */
+export function rotatedPage(
+  w: number,
+  h: number,
+  theta: number,
+): { w: number; h: number; transform: string | null } {
+  if (!theta) return { w, h, transform: null };
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const [x, y] of [[0, 0], [w, 0], [w, h], [0, h]]) {
+    xs.push(x * cos - y * sin);
+    ys.push(x * sin + y * cos);
+  }
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return {
+    w: roundNum(Math.max(...xs) - minX),
+    h: roundNum(Math.max(...ys) - minY),
+    transform: `translate(${fmt(-minX)},${fmt(-minY)}) rotate(${fmt((theta * 180) / Math.PI)})`,
+  };
 }
 
 export function generateSVG(
