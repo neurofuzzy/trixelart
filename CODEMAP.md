@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-06 02:55:08
+# Last updated: 2026-08-06 06:05:21
 # Files: 90
-# Lines of code: ~22322
+# Lines of code: ~22546
 ```
 - **/app**
   - **/lib**
@@ -69,6 +69,7 @@
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
   - [GridSettingsPanel.tsx](../src/components/GridSettingsPanel.tsx)
+    - Variable: `DEFAULT_EDITOR_BG` - The editor's default canvas backdrop: diagonal ...
     - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer. One of th...
   - [HatchBar.tsx](../src/components/HatchBar.tsx)
     - Function: `HatchGlyph` - Lines at the family's true angle. Used both for...
@@ -138,12 +139,12 @@
     - [edit-tool.ts](../src/lib/tools/edit-tool.ts)
       - Function: `makeEditTool` - Shared shell for paint / erase / dodge / burn. ...
     - [erase-tool.ts](../src/lib/tools/erase-tool.ts)
-      - Variable: `eraseTool`
+      - Variable: `eraseTool` - Erase. ALT-click erases every cell of the click...
     - [eyedropper-tool.ts](../src/lib/tools/eyedropper-tool.ts)
       - Variable: `eyedropperTool`
     - [fill-tool.ts](../src/lib/tools/fill-tool.ts)
       - Function: `computeFillRegion` - Flood-fill the region edge-connected to `seed`,...
-      - Variable: `fillTool`
+      - Variable: `fillTool` - Fill. ALT-click erases the region instead of re...
     - [hatch-tool.ts](../src/lib/tools/hatch-tool.ts)
       - Variable: `hatchTool` - Hatch brush. Rides on {@link makeEditTool}, so ...
     - [index.ts](../src/lib/tools/index.ts)
@@ -164,6 +165,7 @@
     - [select-tool.ts](../src/lib/tools/select-tool.ts)
       - Variable: `selectTool` - Hex selection, and dragging what is inside it. ...
     - [selection-utils.ts](../src/lib/tools/selection-utils.ts)
+      - Function: `selectionConstraint` - Builds a predicate clipping an operation to the...
       - Function: `snapshotKey`
       - Function: `upsertSelectionSnapshot`
     - [stamp-tool.ts](../src/lib/tools/stamp-tool.ts)
@@ -218,6 +220,7 @@
     - Variable: `WHEEL_DIVISOR`
     - Variable: `PINCH_SENSITIVITY`
     - Variable: `FILL_MAX_RADIUS` - // reaches this radius it is treated as unbound...
+    - Variable: `REPO_URL` - Public source repository, linked from the header.
   - [constants.ts](../src/lib/constants.ts)
     - Function: `hslToHex`
     - Variable: `PALETTE_LIGHTNESSES`

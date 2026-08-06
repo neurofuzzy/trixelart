@@ -7,7 +7,7 @@
 | Key | Stores | Hook/Component |
 |---|---|---|
 | `trixel-save` | The `ProjectSnapshot` (see below) | `useHistory` |
-| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter`, `apparel` | `TrixelGrid` |
+| `trixel-settings` | View/tool settings: `gridDivisions`, `hexMode`, `flowerRadius`, `symmetry`, `gridOrientation`, `brushSize`, `showNoPrint`, `editorBg`, `projectName`, `hueOffset`, `saturationOffset`, `svgExport`, `patternLayers`, `patternPaletteIdx`, `crop`, `exportSettings`, `hatchBrush`, `hatchify`, `plotter`, `apparel` | `TrixelGrid` |
 | `trixel-selections` | Array of `SelectionSnapshot` | `TrixelGrid` |
 
 `ProjectSnapshot` — the unit of undo, of `trixel-save`, and of the saved project file (see "Project file") — is `{ layers, activeLayerIdx, gridDivisions, hexMode, flowerRadius, symmetry, selections, patternPresets, lastPaintTri }`. Adding a field means updating **every** literal that builds one (TypeScript finds them) *and* the dependency array of the effect that writes `trixel-save`, or the value will live in memory and never persist.

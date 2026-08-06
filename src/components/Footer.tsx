@@ -87,7 +87,11 @@ export function Footer({
           </span>
         ) : tool === "erase" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
-            click to erase
+            click to erase &mdash; ALT-click erases every cell of that colour
+          </span>
+        ) : tool === "fill" ? (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">
+            click to fill a region &mdash; ALT-click erases it
           </span>
         ) : tool === "pan" ? (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground truncate">

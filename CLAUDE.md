@@ -68,8 +68,8 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Tool | Shortcut | Description |
 |---|---|---|
 | Paint | `P` | Paint triangles with selected color |
-| Erase | `E` | Erase (clear) triangles |
-| Fill | `F` | Edge-connected flood fill (`computeFillRegion`), bounded by `FILL_MAX_RADIUS` or clipped to the hex selection |
+| Erase | `E` | Erase (clear) triangles. **ALT-click erases every cell of the clicked colour** on the layer, clipped to the hex selection when there is one |
+| Fill | `F` | Edge-connected flood fill (`computeFillRegion`), bounded by `FILL_MAX_RADIUS` or clipped to the hex selection. **ALT-click erases that region** instead of recolouring it |
 | Pattern | `N` | Procedural pattern brush; paints whole hexes |
 | Hatch | `G` | Line-work brush; only on a hatch layer |
 | Dodge / Burn | `D` / `B` | Step the palette index lighter/darker |
@@ -83,6 +83,7 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 - Right-click on a painted triangle acts as a color picker (eyedropper)
 - Clicking a triangle with the same color clears it (except during drag)
 - Stroke painting: `getTrianglesOnLine` samples along pointer moves for continuous strokes
+- **ALT is per-tool.** On the two dragging tools (move, and dragging a hex selection) it means "all layers"; on erase and fill it means "erase wholesale" — every cell of that colour, or the whole flood region. There is no single global meaning to rely on
 - **ALT means "all layers" on both dragging tools** (move, and dragging a hex selection), read live on every pointer move so it can be pressed or released mid-drag. On the select tool it shares a target with the older ALT-click-to-deselect, and the two are split by gesture: a press that never travels a whole lattice step is a click
 - **The move tool does not compensate the view after a drag.** It used to: the artwork's world position changed and the view shifted the same amount the other way, so on release the piece snapped back to exactly where it started on screen and the drag appeared to do nothing. The *click* branch still compensates, and there it is right — that gesture re-indexes the lattice origin and is meant to leave the picture where it is
 - `setAllPainted` (`useHistory`, on `ToolContext`) writes every layer's map at once; `setPainted` can only address the active layer. Only the move tool's ALT path needs it, and it stays off the common path deliberately — writing the whole stack on every pointer move gives every layer a new identity and rebuilds all their effect geometry

@@ -7,11 +7,11 @@
 | Key | Action |
 |---|---|
 | `P` | Paint tool |
-| `E` | Erase tool |
+| `E` | Erase tool (ALT-click erases every cell of that colour) |
 | `H` | Move tool (ALT-drag moves all layers) |
 | `S` | Select tool (ALT-drag a selection moves all layers; ALT-click deselects a hex) |
 | `T` | Stamp tool |
-| `F` | Fill tool |
+| `F` | Fill tool (ALT-click erases the region instead) |
 | `N` | Pattern brush |
 | `G` | Hatch brush (hatch layers only) |
 | `D` / `B` | Dodge / Burn |
@@ -53,6 +53,20 @@ That only works because **`changeTool` is now the sole caller of `setTool`** —
 `tool === "crop"` therefore implies `panel === "export"`, which is what lets the footer's toggle exit crop mode without reading the current panel at all.
 
 Verified in a browser across the whole matrix — footer toggles, tool switches, close-and-reopen, and a tool change out of a tool-owned drawer: never more than one `<aside>` on screen, and no path that leaves a drawer stranded.
+
+## Canvas background
+
+The canvas backdrop defaults to faint diagonal stripes (`DEFAULT_EDITOR_BG` in
+`GridSettingsPanel`), which is what tells transparent apart from white-painted.
+Grid Settings can swap it for any palette colour through the shared
+`ColorPickerDialog` — useful for finding near-black cells, or for judging the
+piece against the colour it will be printed on.
+
+It is stored **encoded**, like painted colour, so it follows `hueOffset` /
+`satOffset`; `null` means the stripes. It lives in `trixel-settings`, not in
+`ProjectSnapshot` — it is workspace state, not the document, and it is
+deliberately unrelated to the *export* background in `exportSettings.bgColor`,
+which is the one that actually prints.
 
 ## Transient popovers
 
