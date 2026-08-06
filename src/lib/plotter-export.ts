@@ -12,13 +12,16 @@ import {
   encodeHatch,
   groupHatchMarks,
   hatchLinesInBox,
+  hatchStep,
   hatchU,
   trisBox,
+  type HatchDir,
   type Seg,
 } from "@/lib/hatch";
 import { WEDGE_DIR } from "@/lib/hatchify";
 import { fmt } from "@/lib/svg-export";
-import { H, triToString } from "@/lib/grid-math";
+import { H, triEdgeNeighbors, triToString, type TriKey } from "@/lib/grid-math";
+import { ROUND_RADIUS_AT_FULL } from "@/lib/round-corners";
 import { layersRoundFraction } from "@/lib/hatch-render";
 import { loadClipper, type ClipperApi, type PlotPoly } from "@/lib/clipper-offset";
 import {
@@ -297,6 +300,18 @@ export function plotterTones(
 }
 
 /**
+ * The hatch direction a trixel takes, from the hex wedge it falls in.
+ *
+ * Purely geometric — it never consults `painted` — which is what lets the
+ * overhang fringe (`fringeCells`) ask the same question of an *empty* cell and
+ * get the answer the artwork would have given if that cell had been painted.
+ */
+function wedgeDir(tri: TriKey, gridDivisions: number): HatchDir {
+  const { c, k } = triToHex(tri.q, tri.r, tri.type, gridDivisions);
+  return WEDGE_DIR[hexWedgeIndex(tri, c, k, gridDivisions)];
+}
+
+/**
  * Turns the whole artwork into hatch marks, all in the pen's colour.
  *
  * Driven by the painted keys rather than by a scan over a region: a plot has no
@@ -332,11 +347,8 @@ export function plotterMarks(
     // Density 0 is the `blankLightest` rung: outlines only, no hatching.
     if (density <= 0) continue;
 
-    const { c, k } = triToHex(tri.q, tri.r, tri.type, gridDivisions);
-    const dir = WEDGE_DIR[hexWedgeIndex(tri, c, k, gridDivisions)];
-
     marks[key] = encodeHatch({
-      dirMask: DIR_BIT[dir],
+      dirMask: DIR_BIT[wedgeDir(tri, gridDivisions)],
       density,
       weight: 1,
       color: ink,
@@ -488,6 +500,108 @@ function orderForTravel(strokes: PlotterStroke[]): PlotterStroke[] {
   return out;
 }
 
+/** One trixel emitting hatch for one region: either a painted cell, or a fringe
+ *  cell the region's rounded ring bulges into. */
+interface HatchCell {
+  tri: TriKey;
+  dir: HatchDir;
+  density: number;
+  region: number;
+}
+
+/**
+ * The trixels a region's rounded ring can reach that the region does not own.
+ *
+ * A rounded corner leaves the lattice in **two** directions. Where it is convex
+ * it cuts into the region's own trixels, and clipping the hatch to the ring is
+ * the whole fix. Where it is **reflex** it does the opposite: the ring bulges
+ * *past* the trixels into a neighbouring cell, which no painted cell hatches —
+ * so the outline drew an arc around blank paper. The excursion is not small: at
+ * a 60° reflex wedge the arc stands a full `r` clear of the vertex, and `r`
+ * runs to one cell stride (`ROUND_RADIUS_AT_FULL`).
+ *
+ * So give the overhang a source cell. Every neighbour within reach emits hatch
+ * at **the region's** density and **its own** wedge direction — the same
+ * `wedgeDir` painted cells use, which needs no paint to answer — and the region
+ * clip in `rawSegmentsInRegions` then trims it to exactly the crescent.
+ *
+ * Whole cells, not a dilated triangle. Inflating a painted triangle's clip
+ * half-planes is a smaller change but spills into same-region neighbours whose
+ * wedge direction differs, cross-hatching along every wedge seam inside a
+ * region; and the two cells flanking a reflex wedge both reach into it, with
+ * different directions, so they overlap. A lattice cell has exactly one wedge,
+ * so cell-sized extensions are disjoint by construction.
+ *
+ * The extension costs no strokes. `hatchLinesInBox(…, "grid")` places lines at
+ * absolute `n·step`, so a fringe cell's lines are collinear continuations of
+ * the ones they abut and `joinRuns` merges the two into a single run.
+ *
+ * Cells of *another* colour are candidates too: where A is reflex, B is convex
+ * and cut back by the same arc (`cornerAt` takes `acos(dot)`, which is
+ * orientation-independent), so the two abut rather than overlap. A `NO_PRINT`
+ * marker is a candidate for the same reason, and forces its corner sharp
+ * upstream anyway, so it produces no bulge to fill.
+ */
+function fringeCells(
+  fills: Record<string, string>,
+  indexFor: (encoded: string | undefined) => number | undefined,
+  densities: number[],
+  radius: number,
+  gridDivisions: number,
+): HatchCell[] {
+  const world = radius * ROUND_RADIUS_AT_FULL;
+  if (!(world > 0) || gridDivisions <= 0) return [];
+  // How far the bulge can reach, in edge steps: the arc stands at most `world`
+  // clear of the vertex and one step advances at least `H`, so this covers it
+  // whatever the corner. Over-reaching costs Clipper time and nothing else —
+  // a cell the ring does not actually cover clips away to nothing.
+  const depth = 1 + Math.ceil(world / H);
+
+  const own = new Map<number, TriKey[]>();
+  for (const key in fills) {
+    const region = indexFor(fills[key]);
+    if (region === undefined) continue;
+    const tri = stringToTri(key);
+    if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
+    const list = own.get(region);
+    if (list) list.push(tri);
+    else own.set(region, [tri]);
+  }
+
+  const out: HatchCell[] = [];
+  for (const [region, cells] of own) {
+    const density = densities[region] ?? 0;
+    // Density 0 is the `blankLightest` rung: outlines only, so nothing to
+    // extend. Same test `plotterMarks` applies to a painted cell.
+    if (density <= 0) continue;
+
+    // Seeding `seen` with the region's own cells is what makes every trixel the
+    // walk reaches a cell the region does not own — unpainted, NO_PRINT, or
+    // another colour.
+    const seen = new Set(cells.map(triToString));
+    let frontier = cells;
+    for (let step = 0; step < depth; step++) {
+      const next: TriKey[] = [];
+      for (const t of frontier) {
+        for (const n of triEdgeNeighbors(t)) {
+          const k = triToString(n);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          next.push(n);
+          out.push({
+            tri: n,
+            dir: wedgeDir(n, gridDivisions),
+            density,
+            region,
+          });
+        }
+      }
+      frontier = next;
+    }
+  }
+  return out;
+}
+
 /**
  * The hatch, clipped to the **rounded** regions rather than to bare triangles.
  *
@@ -497,9 +611,16 @@ function orderForTravel(strokes: PlotterStroke[]): PlotterStroke[] {
  * at a rounded corner the region's edge has left the lattice, so a
  * triangle-clipped line pokes straight through the arc the outline is drawing.
  *
+ * The emitting cells are the painted trixels **plus** `fringeCells` — the ones
+ * a reflex corner bulges into, which no painted trixel would otherwise hatch.
+ * Both kinds go through the same clip, so the region ring decides the extent of
+ * every line in both directions.
+ *
  * Clipping is batched **per region and line family**, not per segment: Clipper
  * costs far more to set up than to run, and a region's whole hatch goes through
- * in one call.
+ * in one call. Lines are generated per **(family, density)** rather than per
+ * mark group, because a fringe cell carries its region's density and its own
+ * direction and so need not match any group the marks produced.
  *
  * Clipper drops a line lying exactly *on* the clip boundary, which is why this
  * path passes no mask to `joinRuns`. The grid-aligned hatch sits on the lattice
@@ -511,6 +632,9 @@ function rawSegmentsInRegions(
   marks: Record<string, string>,
   fills: Record<string, string>,
   regions: PlotRegion[],
+  densities: number[],
+  radius: number,
+  gridDivisions: number,
   api: ClipperApi,
 ): RawSeg[] {
   const regionOf = new Map<string, number>();
@@ -527,40 +651,83 @@ function rawSegmentsInRegions(
     return resolved.get(encoded);
   };
 
-  /** Triangle-clipped lines, bucketed by the region and family they belong to. */
-  const buckets = new Map<string, { dir: RawSeg["dir"]; region: number; segs: Seg[] }>();
-
+  const cells: HatchCell[] = [];
   for (const g of groupHatchMarks(marks).groups) {
-    const gen = trisBox(g.tris);
-    if (!gen) continue;
-
-    const lines = hatchLinesInBox(g.dir, g.density, gen, "grid");
-    if (lines.length === 0) continue;
-
     for (const t of g.tris) {
       const region = indexFor(fills[triToString(t)]);
       if (region === undefined) continue;
-      const bk = `${region}|${g.dir}`;
+      cells.push({ tri: t, dir: g.dir, density: g.density, region });
+    }
+  }
+  cells.push(
+    ...fringeCells(fills, indexFor, densities, radius, gridDivisions),
+  );
+
+  /** Emitting cells bucketed by the line geometry they share. */
+  const families = new Map<
+    string,
+    { dir: HatchDir; density: number; cells: HatchCell[] }
+  >();
+  for (const cell of cells) {
+    const fk = `${cell.dir}|${cell.density}`;
+    const family = families.get(fk);
+    if (family) family.cells.push(cell);
+    else families.set(fk, { dir: cell.dir, density: cell.density, cells: [cell] });
+  }
+
+  /** Triangle-clipped lines, bucketed by the region and family they belong to.
+   *  A region is one resolved colour, so `density` is the same for every cell
+   *  in a bucket — which is what lets the emit loop below snap `u`. */
+  const buckets = new Map<
+    string,
+    { dir: RawSeg["dir"]; density: number; region: number; segs: Seg[] }
+  >();
+
+  for (const f of families.values()) {
+    const gen = trisBox(f.cells.map((c) => c.tri));
+    if (!gen) continue;
+
+    const lines = hatchLinesInBox(f.dir, f.density, gen, "grid");
+    if (lines.length === 0) continue;
+
+    for (const { tri, region } of f.cells) {
+      const bk = `${region}|${f.dir}`;
       let bucket = buckets.get(bk);
       if (!bucket) {
-        bucket = { dir: g.dir, region, segs: [] };
+        bucket = { dir: f.dir, density: f.density, region, segs: [] };
         buckets.set(bk, bucket);
       }
       for (const line of lines) {
-        const seg = clipSegmentToTriangle(line, t.q, t.r, t.type);
+        const seg = clipSegmentToTriangle(line, tri.q, tri.r, tri.type);
         if (seg) bucket.segs.push(seg);
       }
     }
   }
 
   const out: RawSeg[] = [];
-  for (const { dir, region, segs } of buckets.values()) {
+  for (const { dir, density, region, segs } of buckets.values()) {
+    // `u` is snapped back onto the ladder it was generated on. Clipper is an
+    // integer library and rounds every coordinate to `1/CLIPPER_SCALE`; for the
+    // horizontal family `u` is `y` and that rounding is shared by every point
+    // on the line, but for the two diagonals `u` is `x ∓ y·SKEW` — a
+    // *combination* of two independently rounded coordinates, read at a
+    // different point on each piece. Measured spread: 1.5e-3, against
+    // `joinRuns`' `U_TOL` of 1e-4. So a diagonal line arrived as fifteen
+    // different lines and `joinRuns` could not merge any of it — not the
+    // fringe's continuations, and not the pieces every arc had already split.
+    //
+    // Exact, not a widened tolerance: every line here was generated at `n·step`
+    // by `hatchLinesInBox(…, "grid")`, and `step` is at least `H/MAX_DENSITY`
+    // ≈ 2.7 world units, so the snap is unambiguous by three orders of
+    // magnitude.
+    const step = hatchStep(dir, density);
     for (const [x0, y0, x1, y1] of api.clipLines(segs, regions[region].rings)) {
       const a = along(dir, x0, y0);
       const b = along(dir, x1, y1);
+      const u = hatchU(dir, x0, y0);
       out.push({
         dir,
-        u: hatchU(dir, x0, y0),
+        u: step > 0 ? Math.round(u / step) * step : u,
         t0: Math.min(a, b),
         t1: Math.max(a, b),
       });
@@ -640,24 +807,37 @@ export async function buildPlotterPlot(
       0,
     );
 
+    // The ladder, indexed the way both fills want it. A region *is* a resolved
+    // colour, so its density is uniform — which is what lets the hatch fringe
+    // give an unpainted cell the density of the region overhanging it.
+    const tones = plotterTones(fills, s);
+    const densities = regions.map((r) => tones.get(r.fill) ?? 0);
+
     if (s.fillStyle === "contour") {
-      const tones = plotterTones(fills, s);
       hatchPolys = [];
-      for (const region of regions) {
-        const density = tones.get(region.fill) ?? 0;
+      regions.forEach((region, i) => {
+        const density = densities[i];
         // Density 0 is the `blankLightest` rung: outlines only, no fill.
-        if (density <= 0) continue;
+        if (density <= 0) return;
         // `H / density` is the perpendicular spacing the hatch would have used
         // at this rung — the same for all three families — so a contour lays
         // down the same ink per unit area and the tone ladder carries over.
         for (const ring of contourFill(region.rings, H / density, api)) {
           hatchPolys.push(closeRing(ring));
         }
-      }
+      });
       rawCount += hatchPolys.length;
     } else {
       const marks = plotterMarks(layers, gridDivisions, s);
-      const rawHatch = rawSegmentsInRegions(marks, fills, regions, api);
+      const rawHatch = rawSegmentsInRegions(
+        marks,
+        fills,
+        regions,
+        densities,
+        radius,
+        gridDivisions,
+        api,
+      );
       hatchPolys = joinRuns(rawHatch).map(segPoly);
       rawCount += rawHatch.length;
     }
