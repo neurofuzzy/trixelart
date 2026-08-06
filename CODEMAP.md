@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-06 05:59:39
+# Last updated: 2026-08-06 06:05:21
 # Files: 90
-# Lines of code: ~22524
+# Lines of code: ~22546
 ```
 - **/app**
   - **/lib**
@@ -220,6 +220,7 @@
     - Variable: `WHEEL_DIVISOR`
     - Variable: `PINCH_SENSITIVITY`
     - Variable: `FILL_MAX_RADIUS` - // reaches this radius it is treated as unbound...
+    - Variable: `REPO_URL` - Public source repository, linked from the header.
   - [constants.ts](../src/lib/constants.ts)
     - Function: `hslToHex`
     - Variable: `PALETTE_LIGHTNESSES`
