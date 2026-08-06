@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-06 05:45:47
+# Last updated: 2026-08-06 05:59:39
 # Files: 90
-# Lines of code: ~22426
+# Lines of code: ~22524
 ```
 - **/app**
   - **/lib**
@@ -69,6 +69,7 @@
   - [GridCanvas.tsx](../src/components/GridCanvas.tsx)
     - Function: `GridCanvas`
   - [GridSettingsPanel.tsx](../src/components/GridSettingsPanel.tsx)
+    - Variable: `DEFAULT_EDITOR_BG` - The editor's default canvas backdrop: diagonal ...
     - Function: `GridSettingsPanel` - Grid settings as a right-hand drawer. One of th...
   - [HatchBar.tsx](../src/components/HatchBar.tsx)
     - Function: `HatchGlyph` - Lines at the family's true angle. Used both for...

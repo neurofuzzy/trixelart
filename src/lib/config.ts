@@ -7,3 +7,6 @@ export const PINCH_SENSITIVITY = 2.5;
 // is infinite, so an un-enclosed region would spread forever — if the fill
 // reaches this radius it is treated as unbounded and aborted.
 export const FILL_MAX_RADIUS = 24;
+
+/** Public source repository, linked from the header. */
+export const REPO_URL = "https://github.com/neurofuzzy/trixelart";

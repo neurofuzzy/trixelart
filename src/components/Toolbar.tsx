@@ -8,6 +8,7 @@ import {
   Download,
   Upload,
   Crosshair,
+  Github,
   Maximize,
   Minimize,
   SquareDashed,
@@ -51,6 +52,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { REPO_URL } from "@/lib/config";
 import { isToolAllowed, type Tool } from "@/lib/tools";
 import type { LayerKind } from "@/hooks/use-history";
 import type { Symmetry, BrushSize, HexMode } from "@/components/Footer";
@@ -483,6 +485,23 @@ export function Toolbar({
           title="Center view"
         >
           <Crosshair className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          title="Source on GitHub"
+        >
+          {/* `noreferrer` alongside `noopener`: the new tab must not be handed
+              a `window.opener` back into the editor. */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Source on GitHub"
+          >
+            <Github className="w-4 h-4" />
+          </a>
         </Button>
         <Button
           variant="ghost"
