@@ -155,6 +155,11 @@ export interface PlotterSettings {
    *  original geometry exactly. Contour fills ignore it — their rings are closed
    *  loops one spacing in, with no ends to blot. */
   hatchInsetMm: number;
+  /** Chain adjacent hatch lines into one pen-down, connecting them at
+   *  alternating ends — a boustrophedon. Trades a little ink for a lot of pen
+   *  travel. Unlike `orderForTravel` this **does** change what is drawn: a
+   *  connector is a stroke. Hatch only; a contour ring is already one stroke. */
+  linkHatchEnds: boolean;
   /** Which sheet the plot is laid out on. */
   pageSize: PageSizeId;
   /** The `custom` sheet, portrait inches. */
@@ -189,6 +194,7 @@ export const DEFAULT_PLOTTER: PlotterSettings = {
   blankLightest: false,
   strokeWidthMm: 0.3,
   hatchInsetMm: 0,
+  linkHatchEnds: false,
   pageSize: "letter",
   customWidthIn: 8,
   customHeightIn: 10,
@@ -647,7 +653,17 @@ function fringeCells(
  * removes precisely those spans, and it does so against the true rounded
  * boundary rather than against the straight lattice edge the outline has left.
  */
-function rawSegmentsInRegions(
+/** One region's hatch in one line family, still as intervals on their lines.
+ *  `density` is the region's, so it is the same for every segment here — which
+ *  is what gives the family a single line spacing to reason about. */
+interface HatchBucket {
+  dir: RawSeg["dir"];
+  density: number;
+  region: number;
+  segs: RawSeg[];
+}
+
+function hatchBuckets(
   marks: Record<string, string>,
   fills: Record<string, string>,
   regions: PlotRegion[],
@@ -655,7 +671,7 @@ function rawSegmentsInRegions(
   radius: number,
   gridDivisions: number,
   api: ClipperApi,
-): RawSeg[] {
+): HatchBucket[] {
   const regionOf = new Map<string, number>();
   regions.forEach((r, i) => regionOf.set(r.fill, i));
   const resolved = new Map<string, number | undefined>();
@@ -723,7 +739,7 @@ function rawSegmentsInRegions(
     }
   }
 
-  const out: RawSeg[] = [];
+  const out: HatchBucket[] = [];
   for (const { dir, density, region, segs } of buckets.values()) {
     // `u` is snapped back onto the ladder it was generated on. Clipper is an
     // integer library and rounds every coordinate to `1/CLIPPER_SCALE`; for the
@@ -740,17 +756,19 @@ function rawSegmentsInRegions(
     // ≈ 2.7 world units, so the snap is unambiguous by three orders of
     // magnitude.
     const step = hatchStep(dir, density);
+    const clipped: RawSeg[] = [];
     for (const [x0, y0, x1, y1] of api.clipLines(segs, regions[region].rings)) {
       const a = along(dir, x0, y0);
       const b = along(dir, x1, y1);
       const u = hatchU(dir, x0, y0);
-      out.push({
+      clipped.push({
         dir,
         u: step > 0 ? Math.round(u / step) * step : u,
         t0: Math.min(a, b),
         t1: Math.max(a, b),
       });
     }
+    if (clipped.length > 0) out.push({ dir, density, region, segs: clipped });
   }
   return out;
 }
@@ -761,6 +779,298 @@ const segPoly = (seg: RawSeg): PlotPoly => {
   const [a, b] = segToPoints(seg);
   return [a, b];
 };
+
+/**
+ * How far apart two adjacent line ends may be and still be linked, as a
+ * multiple of the perpendicular line spacing.
+ *
+ * Adjacent lines are one spacing apart by construction, so a connector across a
+ * boundary running square to the hatch is one spacing long and a shallow one is
+ * longer. Two spacings admits every ordinary end-to-end hop and refuses the one
+ * that matters: a leap across a notch or a hole, which is inside the region and
+ * would pass the containment test but reads as a drawn line rather than a join.
+ */
+const LINK_MAX_SPACINGS = 2;
+
+/**
+ * How far inside its region a connector must sit, as a fraction of the line
+ * spacing.
+ *
+ * "Inside the region" is not a strict enough test on its own. Clipper drops a
+ * connector lying *exactly* on the boundary, but two regions sharing an edge
+ * both link along it from their own side, and with no edge gap their line ends
+ * sit **on** that edge — so the two sets of connectors crowd the same stretch
+ * and retrace each other and the hatch around them. Measured on mandala at gap
+ * 0, with only the on-the-boundary case rejected: 54k world units of doubled
+ * ink, near a tenth of the drawing.
+ *
+ * This is why **linking wants an edge gap**: a gap puts every line end `inset`
+ * inside the outline, clearing this by a wide margin, while at gap 0 the ends
+ * are on the boundary and far less can link. A hundredth of a cell stride is
+ * far below any gap worth setting, so it never interferes with a deliberate
+ * one — measured, it costs nothing at a 0.2 mm gap and removes 15k world units
+ * of doubled ink at no gap. Tying it to the line spacing instead was tried and
+ * is worse: it refuses legitimate links in coarse tones (basketweave 458 →
+ * 1402 strokes) without removing any more overdraw.
+ */
+const LINK_CLEARANCE = H / 100;
+
+/**
+ * How close two hatch line ends must be to count as already joined, world
+ * units.
+ *
+ * Well above Clipper's `1/CLIPPER_SCALE` quantum and the arithmetic that
+ * rebuilds an endpoint from its snapped `(u, t)`, and two orders of magnitude
+ * below the tightest line spacing (`H/MAX_DENSITY` ≈ 2.7), so it can neither
+ * miss a real junction nor invent one between neighbouring lines.
+ */
+const WELD_TOL = 0.05;
+
+/**
+ * Adjacent hatch lines chained into one pen-down, joined at alternating ends.
+ *
+ * The saving is in pen-up travel, and it is large: a hatch band of *n* lines is
+ * *n* strokes and *n* lifts, and comes out as one stroke and none. It also cuts
+ * the stroke count, which is what `MAX_TRAVEL_N` gates the travel ordering on,
+ * so a piece over that cap can drop back under it and get its ordering back.
+ *
+ * **A connector is drawn ink**, which makes this the one option here that
+ * changes the picture rather than just the route — `orderForTravel` cannot, and
+ * says so. Two rules keep that honest:
+ *
+ * - **The connector must lie inside the region**, tested against the region's
+ *   *own* rings with `api.clipLines`, batched per bucket. Clipper hands a
+ *   segment back unchanged when it is wholly inside and drops one lying exactly
+ *   **on** the boundary, so the test also rejects — for free — the case that
+ *   would otherwise retrace an outline: along a straight edge the connector
+ *   between two line ends is collinear with the edge itself. That is why the
+ *   rings passed here are the **un-eroded** ones even when the hatch was
+ *   clipped to an inset copy: measured against the eroded ring a connector
+ *   sitting on it would be dropped too, and the whole point of an edge gap is
+ *   that it gives the connector room to sit inside the outline.
+ * - **The hop is capped** at `LINK_MAX_SPACINGS`, so a link is always a short
+ *   step to the neighbouring line and never a traverse of the region.
+ *
+ * Links are taken shortest-first and each line end hosts at most one, so a run
+ * has degree ≤ 2 and the accepted set is a union of simple paths. A union-find
+ * refuses the closing link of a cycle, which would otherwise strand a ring of
+ * runs with no end to start the pen at.
+ */
+function linkHatchRuns(
+  buckets: HatchBucket[],
+  regions: PlotRegion[],
+  api: ClipperApi,
+): PlotPoly[] {
+  const out: PlotPoly[] = [];
+
+  // A region at a time, across **all** its line families: a natural junction is
+  // where two families meet, so it is invisible from inside one of them.
+  const byRegion = new Map<number, HatchBucket[]>();
+  for (const b of buckets) {
+    const list = byRegion.get(b.region);
+    if (list) list.push(b);
+    else byRegion.set(b.region, [b]);
+  }
+
+  for (const [region, rbs] of byRegion) {
+    /** A joined run, tagged with the family and the line of it that it sits on
+     *  — only runs on neighbouring lines of one family can be connected. */
+    interface Run {
+      ends: [[number, number], [number, number]];
+      fam: number;
+      line: number;
+    }
+    const runs: Run[] = [];
+    rbs.forEach((b, fam) => {
+      const step = hatchStep(b.dir, b.density);
+      // Joined **within the bucket**, not across the whole plot as the unlinked
+      // path does: a link only means anything between runs of one region at one
+      // density, since that is what fixes the line spacing.
+      for (const seg of joinRuns(b.segs)) {
+        const [a, c] = segToPoints(seg);
+        runs.push({
+          ends: [a, c],
+          fam,
+          line: step > 0 ? Math.round(seg.u / step) : 0,
+        });
+      }
+    });
+    if (runs.length === 0) continue;
+
+    // ---- Weld the endpoints, to find where lines already meet -------------
+    //
+    // Two hatch lines that already share a point are already joined: the pen
+    // can run through the junction and out the other side for free. Drawing a
+    // connector there instead lays a bar across a join that exists — which is
+    // what this used to do for 20-44% of its connectors, and it reads as
+    // clutter exactly where the artwork is at its tidiest.
+    const nEnds = runs.length * 2;
+    const at = (id: number) => runs[id >> 1].ends[id & 1];
+    const parentE = new Array<number>(nEnds);
+    for (let i = 0; i < nEnds; i++) parentE[i] = i;
+    const findE = (i: number): number =>
+      parentE[i] === i ? i : (parentE[i] = findE(parentE[i]));
+
+    const cells = new Map<string, number[]>();
+    for (let id = 0; id < nEnds; id++) {
+      const [x, y] = at(id);
+      const gx = Math.round(x / WELD_TOL);
+      const gy = Math.round(y / WELD_TOL);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (const other of cells.get(`${gx + dx},${gy + dy}`) ?? []) {
+            const [ox, oy] = at(other);
+            if (Math.hypot(x - ox, y - oy) <= WELD_TOL) {
+              parentE[findE(id)] = findE(other);
+            }
+          }
+        }
+      }
+      const key = `${gx},${gy}`;
+      const list = cells.get(key);
+      if (list) list.push(id);
+      else cells.set(key, [id]);
+    }
+    const welded = new Map<number, number[]>();
+    for (let id = 0; id < nEnds; id++) {
+      const r = findE(id);
+      const list = welded.get(r);
+      if (list) list.push(id);
+      else welded.set(r, [id]);
+    }
+
+    // ---- Selection: free joins first, then connectors ---------------------
+    const parent = runs.map((_, i) => i);
+    const find = (i: number): number =>
+      parent[i] === i ? i : (parent[i] = find(parent[i]));
+    const taken = runs.map(() => [false, false]);
+    const nbr: ({ j: number; je: number } | null)[][] = runs.map(() => [
+      null,
+      null,
+    ]);
+    const join = (i: number, ie: number, j: number, je: number) => {
+      if (taken[i][ie] || taken[j][je]) return false;
+      const ri = find(i);
+      const rj = find(j);
+      if (ri === rj) return false; // would close a loop
+      parent[ri] = rj;
+      taken[i][ie] = true;
+      taken[j][je] = true;
+      nbr[i][ie] = { j, je };
+      nbr[j][je] = { j: i, je: ie };
+      return true;
+    };
+
+    // A junction of exactly two ends is an unambiguous continuation, and it
+    // costs nothing — the two points are the same point. Three or more is a
+    // crossing with no obvious way through, so it is left alone: it already
+    // reads as joined, which is the whole reason not to touch it.
+    for (const group of welded.values()) {
+      if (group.length !== 2) continue;
+      const [a, b] = group;
+      if ((a >> 1) === (b >> 1)) continue; // a run meeting itself
+      join(a >> 1, a & 1, b >> 1, b & 1);
+    }
+
+    // Connectors, only between ends that are genuinely free — an end welded to
+    // anything else is spoken for, whether or not the join above took it.
+    const isFree = (id: number) => (welded.get(findE(id)) ?? []).length === 1;
+    const byLine = new Map<string, number[]>();
+    runs.forEach((r, i) => {
+      const key = `${r.fam}|${r.line}`;
+      const list = byLine.get(key);
+      if (list) list.push(i);
+      else byLine.set(key, [i]);
+    });
+
+    type Cand = { i: number; ie: number; j: number; je: number; len: number };
+    const cands: Cand[] = [];
+    for (const [key, here] of byLine) {
+      const [famStr, lineStr] = key.split("|");
+      const next = byLine.get(`${famStr}|${Number(lineStr) + 1}`);
+      if (!next) continue;
+      const maxHop =
+        LINK_MAX_SPACINGS * (H / Math.max(1, rbs[Number(famStr)].density));
+      for (const i of here) {
+        for (const j of next) {
+          for (let ie = 0; ie < 2; ie++) {
+            if (!isFree(i * 2 + ie)) continue;
+            for (let je = 0; je < 2; je++) {
+              if (!isFree(j * 2 + je)) continue;
+              const p = runs[i].ends[ie];
+              const q = runs[j].ends[je];
+              const len = Math.hypot(p[0] - q[0], p[1] - q[1]);
+              if (len <= maxHop) cands.push({ i, ie, j, je, len });
+            }
+          }
+        }
+      }
+    }
+
+    if (cands.length > 0) {
+      // One Clipper call for the whole region: setup dominates, the run does
+      // not. The rings are eroded by `LINK_CLEARANCE` — see its note.
+      const key = (p: [number, number], q: [number, number]) => {
+        const a = `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
+        const b = `${q[0].toFixed(3)},${q[1].toFixed(3)}`;
+        return a < b ? `${a}|${b}` : `${b}|${a}`;
+      };
+      const inside = new Set<string>();
+      for (const [x0, y0, x1, y1] of api.clipLines(
+        cands.map((c) => {
+          const p = runs[c.i].ends[c.ie];
+          const q = runs[c.j].ends[c.je];
+          return [p[0], p[1], q[0], q[1]] as Seg;
+        }),
+        api.offset(regions[region].rings, -LINK_CLEARANCE),
+      )) {
+        // Survived whole and unshortened, so its endpoints come back
+        // untouched; one that was clipped, split or dropped has no entry.
+        inside.add(key([x0, y0], [x1, y1]));
+      }
+      for (const c of cands.sort((a, b) => a.len - b.len)) {
+        if (!inside.has(key(runs[c.i].ends[c.ie], runs[c.j].ends[c.je]))) continue;
+        join(c.i, c.ie, c.j, c.je);
+      }
+    }
+
+    // ---- Walk each path from an end nothing links into --------------------
+    const done = runs.map(() => false);
+    const emit = (start: number, startEnd: number) => {
+      const pts: PlotPoly = [];
+      const push = (p: [number, number]) => {
+        const last = pts[pts.length - 1];
+        // A free join is two names for one point; emitting both would leave a
+        // zero-length segment in the file.
+        if (last && Math.hypot(last[0] - p[0], last[1] - p[1]) <= WELD_TOL) return;
+        pts.push(p);
+      };
+      let i = start;
+      let entry = startEnd;
+      for (;;) {
+        done[i] = true;
+        const exit = 1 - entry;
+        push(runs[i].ends[entry]);
+        push(runs[i].ends[exit]);
+        const link = nbr[i][exit];
+        if (!link || done[link.j]) break;
+        i = link.j;
+        entry = link.je;
+      }
+      if (pts.length >= 2) out.push(pts);
+    };
+    for (let i = 0; i < runs.length; i++) {
+      if (done[i]) continue;
+      if (!taken[i][0]) emit(i, 0);
+      else if (!taken[i][1]) emit(i, 1);
+    }
+    // Nothing should be left — the accepted set is acyclic, so every path has a
+    // free end — but a run stranded by a future change must still be drawn.
+    for (let i = 0; i < runs.length; i++) if (!done[i]) emit(i, 0);
+  }
+
+  return out;
+}
 
 /**
  * Into display space. Bounds are always taken *after* this, never before: with
@@ -849,7 +1159,12 @@ export async function buildPlotterPlot(
   let outlinePolys: PlotPoly[];
   let rawCount: number;
 
-  if (radius <= 0 && s.fillStyle === "hatch" && s.hatchInsetMm <= 0) {
+  if (
+    radius <= 0 &&
+    s.fillStyle === "hatch" &&
+    s.hatchInsetMm <= 0 &&
+    !s.linkHatchEnds
+  ) {
     // The original path, untouched: square corners and parallel lines need no
     // polygons, no welding and no Clipper. An inset does need them — it is a
     // polygon erosion — so a square-cornered plot that asks for one goes the
@@ -923,7 +1238,7 @@ export async function buildPlotterPlot(
           : regions;
 
       const marks = plotterMarks(layers, gridDivisions, s);
-      const rawHatch = rawSegmentsInRegions(
+      const buckets = hatchBuckets(
         marks,
         fills,
         hatchRegions,
@@ -932,8 +1247,13 @@ export async function buildPlotterPlot(
         gridDivisions,
         api,
       );
-      hatchPolys = joinRuns(rawHatch).map(segPoly);
-      rawCount += rawHatch.length;
+      rawCount += buckets.reduce((n, b) => n + b.segs.length, 0);
+
+      // The containment test for a link reads the **un-eroded** rings — see
+      // `linkHatchRuns`. The hatch itself was clipped to `hatchRegions`.
+      hatchPolys = s.linkHatchEnds
+        ? linkHatchRuns(buckets, regions, api)
+        : joinRuns(buckets.flatMap((b) => b.segs)).map(segPoly);
     }
   }
 
@@ -1253,6 +1573,10 @@ export function normalizePlotterSettings(raw: unknown): PlotterSettings {
       MAX_HATCH_INSET_MM,
       DEFAULT_PLOTTER.hatchInsetMm,
     ),
+    linkHatchEnds:
+      typeof r.linkHatchEnds === "boolean"
+        ? r.linkHatchEnds
+        : DEFAULT_PLOTTER.linkHatchEnds,
     pageSize: PAGE_SIZES.some((p) => p.id === r.pageSize)
       ? (r.pageSize as PageSizeId)
       : DEFAULT_PLOTTER.pageSize,

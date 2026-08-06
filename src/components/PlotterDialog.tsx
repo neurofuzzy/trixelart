@@ -507,6 +507,38 @@ export function PlotterDialog({
                       ? `Hatch held ${settings.hatchInsetMm.toFixed(2)}mm clear of every outline, so the pen doesn't blot where the two meet.`
                       : "Hatch runs to the outline. Raise this if the pen blots where a line ends."}
                   </p>
+
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.linkHatchEnds}
+                      onChange={(e) =>
+                        onSettingsChange({ linkHatchEnds: e.target.checked })
+                      }
+                      className="size-4 rounded accent-amber-400"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Link hatch ends into one stroke
+                    </span>
+                  </label>
+
+                  {/* A connector needs room inside the outline to sit in. With
+                      no gap the line ends are on the boundary, so most links
+                      are refused and the ones left crowd the outline. */}
+                  {settings.linkHatchEnds && (
+                    <p
+                      className={cn(
+                        "text-[11px] leading-snug",
+                        settings.hatchInsetMm > 0
+                          ? "text-muted-foreground"
+                          : "text-amber-200/70",
+                      )}
+                    >
+                      {settings.hatchInsetMm > 0
+                        ? "Adjacent lines joined at alternating ends — far less pen lift, at the cost of the connectors' ink."
+                        : "Needs an edge gap to work: with none, the connectors have no room inside the outline and most links are refused."}
+                    </p>
+                  )}
                 </>
               )}
 
