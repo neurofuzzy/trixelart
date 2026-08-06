@@ -80,10 +80,17 @@ function signedArea([ax, ay]: [number, number], [bx, by]: [number, number], [cx,
   return ax * (by - cy) + bx * (cy - ay) + cx * (ay - by);
 }
 
-/** Ensures triangle vertices wind clockwise in screen space (y-down). */
+/**
+ * Ensures polygon vertices wind clockwise in screen space (y-down).
+ *
+ * The orientation test reads the first three vertices, which is exact for a
+ * triangle and correct for the convex quads subdivision noise emits. The
+ * reversal keeps the first vertex fixed and flips the rest, so a triangle comes
+ * back as `[p0, p2, p1]` exactly as it always did, and a quad keeps all four.
+ */
 function ensureCW(points: [number, number][]): [number, number][] {
   if (signedArea(points[0], points[1], points[2]) < 0) {
-    return [points[0], points[2], points[1]];
+    return [points[0], ...points.slice(1).reverse()];
   }
   return points;
 }
@@ -123,11 +130,14 @@ export function generateTriangles(
     if (noise) {
       for (const { points, hex } of noiseSubFills(q, r, type, encoded, noise)) {
         triangles.push({
-          points: ensureCW([
-            [roundNum(points[0].x), roundNum(points[0].y)],
-            [roundNum(points[1].x), roundNum(points[1].y)],
-            [roundNum(points[2].x), roundNum(points[2].y)],
-          ]),
+          // Three points under `"midpoint"`, four under `"centroid"` — the
+          // emit sites downstream all walk `points.length`, so a fin needs no
+          // separate path.
+          points: ensureCW(
+            points.map(
+              (p) => [roundNum(p.x), roundNum(p.y)] as [number, number],
+            ),
+          ),
           fill: adjust ? adjust(hex) : hex,
         });
       }
@@ -445,6 +455,9 @@ export function generateSVG(
             if (step.outline > 0) {
               return `  <path d="${d}" fill="none" stroke="${fill}" stroke-width="${fmt(step.outline)}" stroke-linejoin="round"/>`;
             }
+            const solid = `  <path d="${d}" fill="${fill}"${
+              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+            }/>`;
             const grain = regionFills?.get(base);
             if (grain?.length) {
               const id = `noise-${si}-${ri}`;
@@ -457,11 +470,17 @@ export function generateSVG(
                     }"/>`,
                 )
                 .join("\n");
-              return `  <g clip-path="url(#${id})">\n${polys}\n  </g>`;
+              // **The solid fill goes down first and the grain rides on top.**
+              // The grain only covers the cells the artwork was painted in,
+              // while the rounded ring bulges *past* them at every reflex
+              // corner — so emitting the clipped group alone leaves that bulge
+              // uncovered, as a transparent lens bounded by the arc on one side
+              // and raw cell edges on the other. The canvas and PNG backends
+              // always layered it this way; this is what keeps the file
+              // matching them.
+              return `${solid}\n  <g clip-path="url(#${id})">\n${polys}\n  </g>`;
             }
-            return `  <path d="${d}" fill="${fill}"${
-              options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
-            }/>`;
+            return solid;
           })
           .filter(Boolean)
           .join("\n");
@@ -781,6 +800,14 @@ export function generateCroppedSVG(
               const id = `noise-${si}-${ri}`;
               defs.push(
                 `    <clipPath id="${id}"><path d="${ds.join(" ")}"/></clipPath>`,
+              );
+              // Solid fill first, grain over it — see the note in `generateSVG`.
+              // The grain covers only the painted cells, so the ring's bulge at
+              // a reflex corner would otherwise export as a transparent lens.
+              out.push(
+                `  <path d="${ds.join(" ")}" fill="${fill}"${
+                  options?.stroke ? ` stroke="${fill}" stroke-width="0.5"` : ""
+                }/>`,
               );
               out.push(`  <g clip-path="url(#${id})">\n${polys.join("\n")}\n  </g>`);
               continue;

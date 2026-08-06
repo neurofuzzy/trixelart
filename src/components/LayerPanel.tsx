@@ -13,6 +13,10 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { encodeColor, resolveColor } from "@/lib/constants";
+import {
+  subdivisionMode,
+  type SubdivisionMode,
+} from "@/lib/subdivision-noise";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
 import {
   DropdownMenu,
@@ -118,6 +122,25 @@ const DEFAULT_GLOW_COLOR = encodeColor(0, 0);
  *  the colour it was painted in. */
 const DEFAULT_NOISE_AMOUNT = 50;
 const DEFAULT_NOISE_SEED = 0;
+
+/** The split modes, in the order they are offered. Labelled by the shape each
+ *  one cuts rather than by its name, since that is what the user is picking. */
+const SUBDIVISION_MODES: {
+  mode: SubdivisionMode;
+  label: string;
+  title: string;
+}[] = [
+  {
+    mode: "midpoint",
+    label: "4 tris",
+    title: "Four sub-triangles at the edge midpoints",
+  },
+  {
+    mode: "centroid",
+    label: "3 fins",
+    title: "Three quad fins, corner to centroid",
+  },
+];
 
 const EFFECT_LABEL: Record<LayerEffect["type"], string> = {
   roundCorners: "Round corners",
@@ -577,6 +600,32 @@ export function LayerPanel({
                     </span>
                   </label>
                 ),
+              )}
+
+              {effect.type === "subdivisionNoise" && (
+                <label className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wide text-white/60 shrink-0 w-20">
+                    Split
+                  </span>
+                  <div className="flex-1 min-w-0 flex gap-1">
+                    {SUBDIVISION_MODES.map(({ mode, label, title }) => (
+                      <button
+                        key={mode}
+                        className={cn(
+                          "flex-1 min-w-0 h-6 rounded border text-xs transition-colors disabled:opacity-40",
+                          subdivisionMode(effect) === mode
+                            ? "border-cyan-500 bg-cyan-500/20 text-white"
+                            : "border-border/60 text-muted-foreground hover:bg-accent",
+                        )}
+                        disabled={!effect.enabled}
+                        onClick={() => commit(() => patchEffect(i, { mode }))}
+                        title={title}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </label>
               )}
 
               {effect.type === "glow" && (

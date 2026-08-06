@@ -283,22 +283,44 @@ paths.
 
 ## Subdivision noise
 
-A triangular dither *inside* each cell: the trixel splits into four
-sub-triangles at its edge midpoints, and each is blended toward the previous or
-next palette index. Two sliders — **Amount** 0–100 and **Seed** 0–99 — and
-`src/lib/subdivision-noise.ts` is the maths. Verified against the four cases that
-matter: amount 0 exports byte-identically to no effect, the four sub-triangles'
-areas sum exactly to the parent's, the pattern is stable across repeated renders
-and moves with the seed, and rounding clips it.
+A dither *inside* each cell: the trixel splits into pieces and each is blended
+toward the previous or next palette index. Two sliders — **Amount** 0–100 and
+**Seed** 0–99 — a **Split** toggle, and `src/lib/subdivision-noise.ts` is the
+maths. Verified against the cases that matter: amount 0 exports byte-identically
+to no effect, each mode's pieces retile the parent exactly, the pattern is stable
+across repeated renders and moves with the seed, and rounding clips it.
 
 **The only effect that is texture rather than silhouette**, and the only one that
-changes how many shapes a cell emits. The four sub-triangles exactly retile the
-cell they came from, so the artwork's boundary, its bounding box and `painted`
-are all unchanged — which is why nothing downstream had to learn about it beyond
-the two chokepoints below.
+changes how many shapes a cell emits. The pieces exactly retile the cell they
+came from, so the artwork's boundary, its bounding box and `painted` are all
+unchanged — which is why nothing downstream had to learn about it beyond the two
+chokepoints below.
 
-**Fixed at one subdivision.** No depth slider: 16 or 64 sub-triangles per cell
-would multiply an SVG export's element count by the same factor for a grain
+### The two splits
+
+`"midpoint"` cuts four sub-triangles at the edge midpoints. Every piece is a
+triangle pointing the same way as the lattice, so the grain reads as a finer
+version of the grid.
+
+`"centroid"` cuts three quad **fins**, each owned by one corner and running
+corner → edge midpoint → centroid → the other edge midpoint. Borrowed from
+nemoworlds' `terrain_surface.frag.wgsl`, which makes the same cut barycentrically
+to facet a rendered surface. Coarser and off-lattice, so it reads as faceting
+rather than as a finer grid.
+
+`mode` is **optional and absent means `"midpoint"`** — read through
+`subdivisionMode(spec)`, never directly, exactly as with `layerKind`. Verified:
+an explicit `"midpoint"` and an absent mode produce identical SVG.
+
+**A fin is a quad, which is the one thing that rippled outward.** `SubFill.points`
+is an open-ended `Pt[]` rather than a triple, and `ensureCW` had a latent bug for
+anything but a triangle — its reversal was `[p0, p2, p1]`, which silently *drops*
+a quad's fourth vertex. It now keeps the first vertex and reverses the rest,
+which is the same result for a triangle and correct for a fin. Every other emit
+site already walked `points.length`.
+
+**Fixed at one subdivision** in both modes. No depth slider: 16 or 64 pieces per
+cell would multiply an SVG export's element count by the same factor for a grain
 finer than most exports resolve.
 
 **Threaded exactly where `adjust` is**, and for the same reason — it reaches the
@@ -307,11 +329,13 @@ flat-fill path of the PNG exporter and both SVG exporters through the single
 `GridCanvas`'s inline grouping loop, which resolves its own fills, gathers its
 own. `stepSubdivisionNoise` returns **`null`** for an absent, disabled or
 zero-amount effect, keeping an unnoised layer on the path it walked before.
+`subdivideCell` is the one definition of how a cell splits, so a mode cannot mean
+one thing in the preview and another in a file.
 
 **The blend is quantised** to `NOISE_LEVELS` (8) steps per direction and the
 resulting ramp memoised per encoded colour. That is load-bearing, not a
-micro-optimisation: a continuous blend gives nearly every sub-triangle its own
-hex, which costs the canvas a `fillStyle` change per triangle and costs
+micro-optimisation: a continuous blend gives nearly every piece its own
+hex, which costs the canvas a `fillStyle` change per piece and costs
 `mergeTrianglesByColor` the ability to merge anything. Eight steps caps a source
 colour at 17 outputs. The cache key includes the *resolved* hex as well as the
 encoded value, so a global hue/saturation shift invalidates it.
@@ -333,8 +357,18 @@ holes fall out as extra rings inside that entry — so "this region's cells" is
 "the cells whose resolved colour is this region's". `stepRegionGeometry` returns
 `base`, the fill *before* `adjust`, for the match; using the filtered value would
 pour one region's grain into another's whenever the filter collapses two colours
-onto one. The solid fill still goes down underneath the clip, because the clip is
-antialiased and grain alone would feather the region's edge.
+onto one.
+
+**The solid fill goes down first and the grain rides on top — in all four
+backends.** This is not belt-and-braces: the grain covers only the cells the
+artwork was painted in, while the rounded ring *bulges past* them at every reflex
+corner, so a region drawn as the clipped grain alone is unpainted exactly there.
+Both SVG exporters originally emitted the clipped group *instead of* the fill and
+shipped that way; it showed up as a transparent lens along every colour seam,
+bounded by the arc on one side and raw cell edges on the other, and only when
+noise and rounding were on the same layer. The regression check is that a rounded
+layer's region paths are byte-identical with and without noise — the grain must
+never move the silhouette.
 
 **Under an outline the noise is skipped.** That effect leaves the region's
 interior deliberately empty, so there is no fill there to texture.

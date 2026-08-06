@@ -6,10 +6,10 @@ import { COLOR_COUNT, decodeColor, encodeColor, resolveColor } from "@/lib/const
  *
  * Every other layer effect works on the silhouette — where an edge falls, what
  * lands under it, what colour the whole region resolves to. This one is the only
- * texture: each trixel splits into four sub-triangles at its edge midpoints, and
- * each of those is filled with a blend between the cell's own colour and its
- * neighbouring palette indices. The lattice, the boundary and `painted` itself
- * are all untouched — the four fills exactly retile the cell they came from.
+ * texture: each trixel splits into a handful of pieces, and each piece is filled
+ * with a blend between the cell's own colour and its neighbouring palette
+ * indices. The lattice, the boundary and `painted` itself are all untouched —
+ * the pieces exactly retile the cell they came from, whichever split is chosen.
  *
  * Mostly pure maths, with one canvas drawer at the bottom — the same split
  * `round-corners.ts` makes, and for the same reason: the preview and the raster
@@ -22,20 +22,46 @@ export interface Pt {
   y: number;
 }
 
-/** One sub-triangle of a cell, ready for a backend to emit. */
+/** One piece of a subdivided cell, ready for a backend to emit. A triangle
+ *  under `"midpoint"`, a quad under `"centroid"` — hence the open-ended array
+ *  rather than a fixed triple. */
 export interface SubFill {
-  points: [Pt, Pt, Pt];
+  points: Pt[];
   hex: string;
 }
 
+/**
+ * How a cell is cut up.
+ *
+ * `"midpoint"` — four sub-triangles at the edge midpoints. Keeps every piece a
+ * triangle pointing the same way as the lattice, so the grain reads as a finer
+ * version of the grid itself.
+ *
+ * `"centroid"` — three quad "fins", each owned by one corner and running corner
+ * → edge midpoint → centroid → the other edge midpoint. Coarser (three pieces,
+ * not four) and off-lattice, so it reads as faceting rather than as a finer
+ * grid. Borrowed from the terrain shader in nemoworlds, which uses the same cut
+ * barycentrically to facet a rendered surface.
+ */
+export type SubdivisionMode = "midpoint" | "centroid";
+
 export interface SubdivisionNoiseSpec {
-  /** 0–100. How far a sub-triangle may travel toward the neighbouring palette
-   *  index. 0 is a no-op and `activeEffects` drops it. */
+  /** 0–100. How far a piece may travel toward the neighbouring palette index.
+   *  0 is a no-op and `activeEffects` drops it. */
   amount: number;
   /** Re-rolls the grain. Any integer; the pattern is otherwise fixed by the
    *  cell's coordinates, so the same artwork always dithers the same way. */
   seed: number;
+  /** Absent means `"midpoint"` — the split this effect shipped with, so a
+   *  document saved before the mode existed keeps its grain. Read it through
+   *  `subdivisionMode`, never directly, exactly as with `layerKind`. */
+  mode?: SubdivisionMode;
 }
+
+/** Reads a spec's mode, defaulting an absent field to the original split. */
+export const subdivisionMode = (s: {
+  mode?: SubdivisionMode;
+}): SubdivisionMode => s.mode ?? "midpoint";
 
 /**
  * Blend steps per direction.
@@ -49,23 +75,59 @@ export interface SubdivisionNoiseSpec {
  */
 export const NOISE_LEVELS = 8;
 
+const mid = (p: Pt, q: Pt): Pt => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+
 /**
  * The four sub-triangles of a cell, in a fixed order: the three corner
  * triangles in the winding `getTriVertices` returned, then the middle one.
  *
- * The one definition of the subdivision. Order matters because it indexes the
- * noise — reordering these re-rolls every saved document's grain.
+ * Order matters because it indexes the noise — reordering these re-rolls every
+ * saved document's grain.
  */
-export function subdivideTri(a: Pt, b: Pt, c: Pt): [Pt, Pt, Pt][] {
-  const ab = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  const bc = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
-  const ca = { x: (c.x + a.x) / 2, y: (c.y + a.y) / 2 };
+export function subdivideTri(a: Pt, b: Pt, c: Pt): Pt[][] {
+  const ab = mid(a, b);
+  const bc = mid(b, c);
+  const ca = mid(c, a);
   return [
     [a, ab, ca],
     [ab, b, bc],
     [ca, bc, c],
     [ab, bc, ca],
   ];
+}
+
+/**
+ * The three centroid "fins" of a cell: one quad per corner, running corner →
+ * edge midpoint → centroid → the other edge midpoint.
+ *
+ * Each is exactly a third of the cell, and the three meet at the centroid with
+ * no interior vertex left over — which is what makes this a retiling rather than
+ * an overlay. The winding follows the corner order, so it inherits whatever
+ * `getTriVertices` produced and needs no separate orientation fix.
+ */
+export function subdivideTriCentroid(a: Pt, b: Pt, c: Pt): Pt[][] {
+  const ab = mid(a, b);
+  const bc = mid(b, c);
+  const ca = mid(c, a);
+  const g = { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 };
+  return [
+    [a, ab, g, ca],
+    [b, bc, g, ab],
+    [c, ca, g, bc],
+  ];
+}
+
+/** The one definition of how a cell splits, per mode. Every backend reaches the
+ *  geometry through this rather than picking a function itself. */
+export function subdivideCell(
+  a: Pt,
+  b: Pt,
+  c: Pt,
+  mode: SubdivisionMode,
+): Pt[][] {
+  return mode === "centroid"
+    ? subdivideTriCentroid(a, b, c)
+    : subdivideTri(a, b, c);
 }
 
 /**
@@ -166,7 +228,8 @@ function colorRamp(encoded: string): string[] {
 }
 
 /**
- * One painted cell as its four dithered sub-triangles.
+ * One painted cell as its dithered pieces — four sub-triangles or three fins,
+ * depending on the spec's mode.
  *
  * Falls back to the single undivided triangle for a value that does not decode
  * to a palette colour — a hatch value, or a raw string from an old document —
@@ -185,7 +248,7 @@ export function noiseSubFills(
   }
   const ramp = colorRamp(encoded);
   const scale = Math.max(0, Math.min(100, spec.amount)) / 100;
-  return subdivideTri(a, b, c).map((points, sub) => {
+  return subdivideCell(a, b, c, subdivisionMode(spec)).map((points, sub) => {
     const n = noiseAt(q, r, type, sub, spec.seed) * scale;
     const level = Math.max(
       -NOISE_LEVELS,
@@ -201,8 +264,9 @@ export function noiseSubFills(
  * The raster exporter skips its seam-closing overdraw on flat edges, because the
  * caller lands every lattice row on an integer pixel boundary and a stroke
  * centred there straddles it and discolours the whole row. Subdivision breaks
- * that assumption: half of a sub-triangle's flat edges sit at `(r + ½)H`, which
- * is *not* pixel-aligned and does need the stroke. So "is it flat" is no longer
+ * that assumption: a piece's flat edges can sit between rows — at `(r + ½)H`
+ * under `"midpoint"`, at a third of the way up under `"centroid"` — and those
+ * are *not* pixel-aligned and do need the stroke. So "is it flat" is no longer
  * the right question — "is it flat *and* on a row" is.
  *
  * The tolerance is generous next to the 3-decimal rounding the coordinates have
@@ -233,8 +297,9 @@ export function drawSubFills(
     ctx.beginPath();
     for (const { points } of list) {
       ctx.moveTo(points[0].x, points[0].y);
-      ctx.lineTo(points[1].x, points[1].y);
-      ctx.lineTo(points[2].x, points[2].y);
+      for (let k = 1; k < points.length; k++) {
+        ctx.lineTo(points[k].x, points[k].y);
+      }
       ctx.closePath();
     }
     ctx.fillStyle = hex;
@@ -248,9 +313,9 @@ export function drawSubFills(
       ctx.lineCap = "butt";
       ctx.beginPath();
       for (const { points } of list) {
-        for (let k = 0; k < 3; k++) {
+        for (let k = 0; k < points.length; k++) {
           const p = points[k];
-          const n = points[(k + 1) % 3];
+          const n = points[(k + 1) % points.length];
           if (p.y === n.y && onLatticeRow(p.y)) continue;
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(n.x, n.y);

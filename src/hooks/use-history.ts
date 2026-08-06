@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
 import { isIdentityAdjustment } from "@/lib/color-adjust";
+import type { SubdivisionMode } from "@/lib/subdivision-noise";
 
 /** What a layer's `painted` values mean. Absent is `"fill"`, so every document
  *  saved before hatch layers existed keeps working with no migration. */
@@ -87,21 +88,24 @@ export interface AdjustColorEffect {
 }
 
 /**
- * A triangular dither inside each cell: the trixel splits into four
- * sub-triangles at its edge midpoints, each blended toward a neighbouring
- * palette index.
+ * A dither inside each cell: the trixel splits into pieces — four sub-triangles
+ * at the edge midpoints, or three corner-to-centroid quad fins — each blended
+ * toward a neighbouring palette index.
  *
- * The only effect that is texture rather than silhouette. The four sub-triangles
- * exactly retile the cell they came from, so the artwork's boundary, the
- * lattice and `painted` are all unchanged — see `lib/subdivision-noise.ts`.
+ * The only effect that is texture rather than silhouette. The pieces exactly
+ * retile the cell they came from, so the artwork's boundary, the lattice and
+ * `painted` are all unchanged — see `lib/subdivision-noise.ts`.
  */
 export interface SubdivisionNoiseEffect {
   type: "subdivisionNoise";
-  /** 0–100. How far a sub-triangle may travel toward the previous / next
-   *  palette index. 0 is "leave alone". */
+  /** 0–100. How far a piece may travel toward the previous / next palette
+   *  index. 0 is "leave alone". */
   amount: number;
   /** Re-rolls the grain. Otherwise the pattern is fixed by cell coordinates. */
   seed: number;
+  /** Absent means `"midpoint"`, the split this effect shipped with. Read via
+   *  `subdivisionMode`, never directly. */
+  mode?: SubdivisionMode;
   enabled: boolean;
 }
 

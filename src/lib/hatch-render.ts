@@ -107,7 +107,7 @@ export function stepSubdivisionNoise(
   if (step.kind !== "fill") return null;
   for (const e of step.effects) {
     if (e.type === "subdivisionNoise" && e.enabled && e.amount > 0) {
-      return { amount: e.amount, seed: e.seed };
+      return { amount: e.amount, seed: e.seed, mode: e.mode };
     }
   }
   return null;

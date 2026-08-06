@@ -257,7 +257,19 @@ export default function TrixelGrid() {
     [hueOffset, satOffset],
   );
 
-  useEffect(() => {
+  // **Written during render, not in an effect.** `resolveColor` reads these off
+  // module state rather than taking them as arguments, so every descendant that
+  // resolves a colour needs them current *before* it renders. As an effect this
+  // was a frame late in a way that never corrected itself: React runs child
+  // effects before parent ones, so `GridCanvas` painted the canvas with the
+  // previous offsets and this ran afterwards, and since nothing else changed no
+  // further draw was scheduled. On first load — where the saved offsets arrive
+  // in a single restore and then never change again — the artwork simply kept
+  // the unshifted palette until the next edit happened to redraw it.
+  //
+  // `useMemo` is the sync-external-state-during-render idiom here; the value is
+  // unused and the offsets are the dependency.
+  useMemo(() => {
     setPaletteOffsets(hueOffset, satOffset);
   }, [hueOffset, satOffset]);
 

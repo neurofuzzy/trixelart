@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 165 126.60200000000002" width="165" height="126.60200000000002">
+  <metadata>
+    <trixel:project xmlns:trixel="https://neurofuzzy.github.io/trixelart/ns/project" version="1"><![CDATA[
+{
+  "layers": [
+    {
+      "id": "1785976526315-lryl1s",
+      "name": "Layer 1",
+      "kind": "fill",
+      "painted": {
+        "-10,3,down": "5,6",
+        "-10,3,up": "5,6",
+        "-10,2,down": "5,6",
+        "-9,2,up": "5,6",
+        "-8,2,up": "5,4",
+        "-9,2,down": "5,4",
+        "-9,3,up": "5,4",
+        "-9,3,down": "5,4"
+      },
+      "visible": true,
+      "effects": [
+        {
+          "type": "roundCorners",
+          "radius": 1,
+          "enabled": true
+        },
+        {
+          "type": "subdivisionNoise",
+          "amount": 50,
+          "seed": 0,
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "activeLayerIdx": 0,
+  "gridDivisions": 3,
+  "hexMode": "honeycomb",
+  "flowerRadius": 0,
+  "symmetry": "off",
+  "selections": [],
+  "patternPresets": [],
+  "lastPaintTri": "-7,1,up",
+  "name": "noise-rounded-layer-test",
+  "svgExport": {
+    "stroke": false,
+    "merge": true
+  },
+  "hueOffset": -13,
+  "saturationOffset": -21,
+  "gridOrientation": "flat-top",
+  "version": 1
+}
+]]></trixel:project>
+  </metadata>
+  <defs>
+    <clipPath id="noise-0-0"><path d="M95.000,20.000 L107.500,20.000 A21.651,21.651 0 0 1 126.250,52.475 L126.250,52.475 A21.651,21.651 0 0 0 126.250,74.126 L126.250,74.126 A21.651,21.651 0 0 1 107.500,106.602 L95.000,106.602 L82.500,84.951 A43.301,43.301 0 0 1 82.500,41.650 Z"/></clipPath>
+    <clipPath id="noise-0-1"><path d="M84.434,38.301 A50.000,50.000 0 0 0 84.434,88.301 L95.000,106.602 L70.000,106.602 A43.301,43.301 0 0 1 32.500,84.951 L32.500,84.951 A43.301,43.301 0 0 1 32.500,41.650 L32.500,41.650 A43.301,43.301 0 0 1 70.000,20.000 L95.000,20.000 Z"/></clipPath>
+  </defs>
+  <rect x="0" y="0" width="100%" height="100%" fill="#09090b"/>
+  <g clip-path="url(#noise-0-0)">
+    <polygon points="95.000,20.000 120.000,20.000 107.500,41.650" fill="#527548"/>
+    <polygon points="120.000,20.000 145.000,20.000 132.500,41.650" fill="#638c57"/>
+    <polygon points="107.500,41.650 132.500,41.650 120.000,63.301" fill="#638c57"/>
+    <polygon points="120.000,20.000 132.500,41.650 107.500,41.650" fill="#5a814f"/>
+    <polygon points="70.000,63.301 95.000,63.301 82.500,41.650" fill="#527548"/>
+    <polygon points="95.000,63.301 120.000,63.301 107.500,41.650" fill="#669059"/>
+    <polygon points="82.500,41.650 107.500,41.650 95.000,20.000" fill="#5a814f"/>
+    <polygon points="95.000,63.301 107.500,41.650 82.500,41.650" fill="#587d4c"/>
+    <polygon points="70.000,63.301 95.000,63.301 82.500,84.951" fill="#638c57"/>
+    <polygon points="95.000,63.301 120.000,63.301 107.500,84.951" fill="#638c57"/>
+    <polygon points="82.500,84.951 107.500,84.951 95.000,106.602" fill="#5d8551"/>
+    <polygon points="95.000,63.301 107.500,84.951 82.500,84.951" fill="#587d4c"/>
+    <polygon points="95.000,106.602 120.000,106.602 107.500,84.951" fill="#669059"/>
+    <polygon points="120.000,106.602 145.000,106.602 132.500,84.951" fill="#5a814f"/>
+    <polygon points="107.500,84.951 132.500,84.951 120.000,63.301" fill="#55794a"/>
+    <polygon points="120.000,106.602 132.500,84.951 107.500,84.951" fill="#587d4c"/>
+  </g>
+  <g clip-path="url(#noise-0-1)">
+    <polygon points="45.000,106.602 70.000,106.602 57.500,84.951" fill="#95b88c"/>
+    <polygon points="70.000,106.602 95.000,106.602 82.500,84.951" fill="#9ebe95"/>
+    <polygon points="57.500,84.951 82.500,84.951 70.000,63.301" fill="#95b88c"/>
+    <polygon points="70.000,106.602 82.500,84.951 57.500,84.951" fill="#95b88c"/>
+    <polygon points="20.000,63.301 45.000,63.301 32.500,84.951" fill="#8db383"/>
+    <polygon points="45.000,63.301 70.000,63.301 57.500,84.951" fill="#9abb91"/>
+    <polygon points="32.500,84.951 57.500,84.951 45.000,106.602" fill="#91b587"/>
+    <polygon points="45.000,63.301 57.500,84.951 32.500,84.951" fill="#9ebe95"/>
+    <polygon points="20.000,63.301 45.000,63.301 32.500,41.650" fill="#91b587"/>
+    <polygon points="45.000,63.301 70.000,63.301 57.500,41.650" fill="#8db383"/>
+    <polygon points="32.500,41.650 57.500,41.650 45.000,20.000" fill="#95b88c"/>
+    <polygon points="45.000,63.301 57.500,41.650 32.500,41.650" fill="#83ac77"/>
+    <polygon points="45.000,20.000 70.000,20.000 57.500,41.650" fill="#86ae7b"/>
+    <polygon points="70.000,20.000 95.000,20.000 82.500,41.650" fill="#8db383"/>
+    <polygon points="57.500,41.650 82.500,41.650 70.000,63.301" fill="#95b88c"/>
+    <polygon points="70.000,20.000 82.500,41.650 57.500,41.650" fill="#8db383"/>
+  </g>
+</svg>
