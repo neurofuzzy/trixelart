@@ -1621,6 +1621,7 @@ export function renderPlotterPreview(
   layout: PlotterLayout,
   pxW: number,
   pxH: number,
+  strokeWidthMm: number = DEFAULT_PLOTTER.strokeWidthMm,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -1666,11 +1667,22 @@ export function renderPlotterPreview(
     ctx.translate(layout.offsetX * ppi, layout.offsetY * ppi);
     ctx.scale(s, s);
     ctx.strokeStyle = plot.ink;
-    // A hairline at preview scale: the nib is a fraction of a millimetre and
-    // would otherwise vanish, hiding exactly the density differences being
-    // judged.
-    ctx.lineWidth = Math.max(0.4, 0.9 / s);
+    // **The real nib**, converted the same way the SVG converts it: millimetres
+    // → inches → world units through `layout.scale`. The preview is the only
+    // place the nib can be judged before plotting, and it used to be a fixed
+    // hairline here, so widening the pen changed the file and nothing on
+    // screen.
+    //
+    // Floored, not replaced, at a hairline: a fine nib on a large sheet lands
+    // well under a pixel, and letting it render that thin hides the density
+    // differences the preview exists to judge. So the floor still applies, and
+    // above it the stroke tracks the setting.
+    const nibWorld = layout.scale > 0 ? strokeWidthMm / 25.4 / layout.scale : 0;
+    ctx.lineWidth = Math.max(0.4, 0.9 / s, nibWorld);
     ctx.lineCap = "round";
+    // A pen has no mitres. Matters only once the nib is wide enough to see,
+    // which is exactly when it started being drawn at its true width.
+    ctx.lineJoin = "round";
     ctx.beginPath();
     for (const st of allStrokes(plot)) {
       ctx.moveTo(st.pts[0][0], st.pts[0][1]);

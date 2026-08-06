@@ -226,7 +226,7 @@ export function PlotterDialog({
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, Math.round(wrap.clientWidth * dpr));
       const h = Math.max(1, Math.round(wrap.clientHeight * dpr));
-      renderPlotterPreview(c, plot, layout, w, h);
+      renderPlotterPreview(c, plot, layout, w, h, settings.strokeWidthMm);
       c.style.width = `${wrap.clientWidth}px`;
       c.style.height = `${wrap.clientHeight}px`;
     };
@@ -234,7 +234,9 @@ export function PlotterDialog({
     const ro = new ResizeObserver(draw);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [open, plot, layout]);
+    // `layout` already changes identity with the settings, but the nib is read
+    // straight out of `settings` here, so it has to be named for itself.
+  }, [open, plot, layout, settings.strokeWidthMm]);
 
   const handleExport = useCallback(() => {
     if (!plot || !layout || layout.invalid || allStrokes(plot).length === 0) {
@@ -420,11 +422,6 @@ export function PlotterDialog({
                 onChange={(marginIn) => onSettingsChange({ marginIn })}
               />
 
-              <p className="text-[11px] leading-snug text-muted-foreground">
-                {fitPage
-                  ? "The page is cut to the artwork at the width you set."
-                  : "The artwork is scaled to fit the margins and centred on the sheet."}
-              </p>
             </Section>
 
             <Section title="Tone">
@@ -451,12 +448,6 @@ export function PlotterDialog({
                   </button>
                 ))}
               </div>
-
-              <p className="text-[11px] leading-snug text-muted-foreground">
-                {settings.fillStyle === "contour"
-                  ? "Concentric lines stepped in from each shape's own edge."
-                  : "Parallel lines, angled by the hex wedge each trixel falls in."}
-              </p>
 
               <Slider
                 label="Min density"
@@ -502,12 +493,6 @@ export function PlotterDialog({
                       onSettingsChange({ hatchInsetMm })
                     }
                   />
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {settings.hatchInsetMm > 0
-                      ? `Hatch held ${settings.hatchInsetMm.toFixed(2)}mm clear of every outline, so the pen doesn't blot where the two meet.`
-                      : "Hatch runs to the outline. Raise this if the pen blots where a line ends."}
-                  </p>
-
                   <label className="flex items-center gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
@@ -522,21 +507,12 @@ export function PlotterDialog({
                     </span>
                   </label>
 
-                  {/* A connector needs room inside the outline to sit in. With
-                      no gap the line ends are on the boundary, so most links
-                      are refused and the ones left crowd the outline. */}
-                  {settings.linkHatchEnds && (
-                    <p
-                      className={cn(
-                        "text-[11px] leading-snug",
-                        settings.hatchInsetMm > 0
-                          ? "text-muted-foreground"
-                          : "text-amber-200/70",
-                      )}
-                    >
-                      {settings.hatchInsetMm > 0
-                        ? "Adjacent lines joined at alternating ends — far less pen lift, at the cost of the connectors' ink."
-                        : "Needs an edge gap to work: with none, the connectors have no room inside the outline and most links are refused."}
+                  {/* Kept because it is a state nothing else reveals: with no
+                      gap the line ends sit on the boundary, the connectors have
+                      nowhere to go, and most links are silently refused. */}
+                  {settings.linkHatchEnds && settings.hatchInsetMm <= 0 && (
+                    <p className="text-[11px] leading-snug text-amber-200/70">
+                      Needs an edge gap — connectors have no room otherwise.
                     </p>
                   )}
                 </>
@@ -560,8 +536,7 @@ export function PlotterDialog({
 
               <p className="text-xs text-muted-foreground tabular-nums">
                 {ladder.length} tone level{ladder.length === 1 ? "" : "s"}
-                {settings.blankLightest ? ", the first blank" : ""} &middot;
-                normalised to the artwork
+                {settings.blankLightest ? ", the first blank" : ""}
               </p>
 
               {/* The radius is the largest one enabled anywhere in the fill
