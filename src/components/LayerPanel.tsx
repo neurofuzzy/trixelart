@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { encodeColor, resolveColor } from "@/lib/constants";
+import { encodeColor, isNoPrint, resolveColor } from "@/lib/constants";
 import {
   subdivisionMode,
   type SubdivisionMode,
@@ -271,7 +271,10 @@ export function LayerPanel({
       (l) =>
         l.visible &&
         layerKind(l) === "fill" &&
-        Object.keys(l.painted).length > 0,
+        // A no-print marker renders nothing, so it is no surface for a glow to
+        // land on — a layer holding only markers has to read as empty here or
+        // the warning goes quiet when it should be shown.
+        Object.values(l.painted).some((v) => !isNoPrint(v)),
     );
 
   const patchEffect = (i: number, patch: Record<string, unknown>) => {

@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-06 02:24:49
+# Last updated: 2026-08-06 02:55:08
 # Files: 90
-# Lines of code: ~22133
+# Lines of code: ~22322
 ```
 - **/app**
   - **/lib**
@@ -226,6 +226,8 @@
     - Variable: `PALETTE_DEFS`
     - Function: `setPaletteOffsets`
     - Function: `computePaletteColors`
+    - Variable: `NO_PRINT` - The no-print marker: a construction mark that s...
+    - Function: `isNoPrint`
     - Function: `encodeColor`
     - Function: `decodeColor`
     - Function: `resolveColor`

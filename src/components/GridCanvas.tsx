@@ -3,7 +3,7 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { SIDE, H, getTriVertices, worldToTri, type TriKey, type TriType } from "@/lib/grid-math";
 import { hexCenterWorld, enumerateHexTrixels, triToHex, hexCenterTriAxial, hexWedgeIndex, type SelectionSnapshot } from "@/lib/hex-flower";
-import { resolveColor } from "@/lib/constants";
+import { isNoPrint, resolveColor } from "@/lib/constants";
 import type { HexMode } from "@/components/Footer";
 import { type Layer } from "@/hooks/use-history";
 import type { Tool } from "@/lib/tools";
@@ -51,6 +51,7 @@ export function GridCanvas({
   saturationOffset,
   crop,
   showCrop = false,
+  showNoPrint = true,
 }: {
   size: { width: number; height: number };
   view: { x: number; y: number; zoom: number };
@@ -75,6 +76,9 @@ export function GridCanvas({
   saturationOffset?: number;
   crop?: CropRect;
   showCrop?: boolean;
+  /** Editor-only visibility for no-print markers. They shape the artwork
+   *  either way; this only decides whether the scaffolding is drawn. */
+  showNoPrint?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
@@ -330,7 +334,12 @@ export function GridCanvas({
           for (const type of ["up", "down"] as const) {
             const key = `${q},${r},${type}`;
             const fill = step.painted[key];
-            if (fill) {
+            // A no-print marker never joins the artwork; it gets its own pass
+            // below. Skipping it here is not cosmetic — `resolveColor` hands
+            // back the raw marker string, and canvas *silently keeps the
+            // previous `fillStyle`* for a value it cannot parse, so the cell
+            // would paint in whatever colour happened to be current.
+            if (fill && !isNoPrint(fill)) {
               const resolved = resolveColor(fill);
               const hex = adjust ? adjust(resolved) : resolved;
               const list = colorGroups.get(hex);
@@ -353,6 +362,31 @@ export function GridCanvas({
         }
         ctx.fill();
       }
+    }
+
+    // No-print markers, drawn over the artwork as scaffolding rather than paint.
+    // They are editor-only by definition — every exporter drops them — so this is
+    // the one place they are ever visible, and the toggle hides them without
+    // touching the shape they produce.
+    if (showNoPrint) {
+      ctx.fillStyle = "rgba(236,72,153,0.35)";
+      ctx.beginPath();
+      for (const layer of layers) {
+        if (!layer.visible) continue;
+        for (let r = minR; r <= maxR; r++) {
+          for (let q = minQ; q <= maxQ; q++) {
+            for (const type of ["up", "down"] as const) {
+              if (!isNoPrint(layer.painted[`${q},${r},${type}`] ?? "")) continue;
+              const [a, b, c] = getTriVertices(q, r, type);
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.lineTo(c.x, c.y);
+              ctx.closePath();
+            }
+          }
+        }
+      }
+      ctx.fill();
     }
 
     // Grid outlines — 3 families of parallel lines
@@ -868,7 +902,7 @@ export function GridCanvas({
     }
 
     ctx.restore();
-  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod]);
+  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod, showNoPrint, layers]);
 
   return (
     <canvas

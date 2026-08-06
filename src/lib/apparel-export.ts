@@ -1,7 +1,7 @@
 import { H, SIDE, connectedComponents, getTriVertices, stringToTri } from "@/lib/grid-math";
 import type { NoisePeriod } from "@/lib/subdivision-noise";
 import { rotatePoint } from "@/lib/crop";
-import { decodeColor, resolveColor } from "@/lib/constants";
+import { decodeColor, isNoPrint, resolveColor } from "@/lib/constants";
 import { drawArtworkPlan } from "@/lib/png-export";
 import { joinRuns, outlineSegments, segToPoints } from "@/lib/region-outline";
 import type { Layer } from "@/hooks/use-history";
@@ -138,6 +138,8 @@ export function artworkBounds(
   for (const layer of layers) {
     if (!layer.visible) continue;
     for (const key in layer.painted) {
+      // A marker is invisible, so it must not stretch the garment print either.
+      if (isNoPrint(layer.painted[key])) continue;
       const tri = stringToTri(key);
       if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
       for (const v of getTriVertices(tri.q, tri.r, tri.type)) {

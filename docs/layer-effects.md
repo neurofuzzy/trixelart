@@ -104,6 +104,45 @@ clamp has pulled the tangent points inward it adds a connecting line that double
 back along the edge — a hairpin sliver of the very curve the corner was meant to
 be.
 
+### Authoring a kink: the no-print marker
+
+`NO_PRINT` (`src/lib/constants.ts`) is a swatch that paints like any other but
+never renders. Its only purpose is to exploit the eligibility rule above: only a
+vertex with exactly two boundary edges may round, so dropping a marker cell
+beside a region raises the degree at the vertices it touches and those corners
+stay sharp. That is a deliberate kink in a shape that rounding would otherwise
+turn to a blob.
+
+**Erasing is not a substitute.** An empty cell *removes* boundary edges; a marker
+*adds* a differently-coloured one. Only the second changes the degree.
+
+**The sentinel deliberately fails `decodeColor`.** Nearly every renderer and
+exporter already skips what it cannot decode, so this direction makes them skip
+the marker for free and leaves exactly one place — the cell loop in
+`boundaryVertexDegrees` — that had to be taught to let it in. A reserved palette
+index would have inverted that: a dozen sites would have needed a guard, and
+forgetting one leaks the marker into a cut file rather than merely losing a kink.
+`regionRings` keeps its own filter, so the marker never produces a ring to draw.
+
+Sites that did *not* already filter, and so needed an explicit guard:
+`generateTriangles` and `stepPaintedColors` (`svg-export.ts`), `GridCanvas`'s
+fill loop — where an unparsable `fillStyle` makes canvas **silently keep the
+previous colour** — `noiseSubFills`, `artworkBounds` (`apparel-export.ts`),
+`fitCropToPainted` (`crop.ts`), and the glow's surface test in `LayerPanel`. The
+fabrication exports (3D, cutting, apparel) are covered in one place by filtering
+`mergedFillPainted` in `TrixelGrid`, which is the only gate in front of all of
+them.
+
+Palette transforms need no change: `remapGrid`, `shiftGridPalettes`, `dodgeColor`
+and `burnColor` all return a value untouched when `decodeColor` fails, so a
+marker survives a palette shift.
+
+The **Show/Hide** switch in Grid Settings is a view toggle only — markers shape
+corners whether or not they are drawn, and they are never in an export either
+way. Verified: markers added on empty cells produce byte-identical SVG while
+dropping exactly the intended corners to radius 0, and the literal `"noprint"`
+appears in no export body.
+
 ## Outline
 
 Swaps a fill layer's solid for a stroke of each region boundary at a selected

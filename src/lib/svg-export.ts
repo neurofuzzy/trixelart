@@ -1,5 +1,5 @@
 import { getTriVertices } from "@/lib/grid-math";
-import { resolveColor } from "@/lib/constants";
+import { isNoPrint, resolveColor } from "@/lib/constants";
 import {
   cropDisplayBounds,
   cropWorldBounds,
@@ -129,6 +129,10 @@ export function generateTriangles(
   const triangles: TriangleData[] = [];
 
   for (const [key, encoded] of entries) {
+    // The no-print marker shapes corners but never renders. Dropped here rather
+    // than at the emit sites, so the full SVG, the cropped SVG and the PNG
+    // exporter — which all funnel through this one function — cannot leak it.
+    if (isNoPrint(encoded)) continue;
     const parts = key.split(",");
     if (parts.length !== 3) continue;
     const q = parseInt(parts[0]);
@@ -274,6 +278,7 @@ function stepPaintedColors(painted: Record<string, string>): Map<string, string>
   const out = new Map<string, string>();
   for (const key in painted) {
     const encoded = painted[key];
+    if (isNoPrint(encoded)) continue;
     const base = resolveColor(encoded);
     if (!out.has(base)) out.set(base, encoded);
   }

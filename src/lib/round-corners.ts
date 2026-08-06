@@ -1,5 +1,5 @@
 import { H, SIDE, getTriVertices, stringToTri } from "@/lib/grid-math";
-import { decodeColor, resolveColor } from "@/lib/constants";
+import { decodeColor, isNoPrint, resolveColor } from "@/lib/constants";
 
 /**
  * Corner rounding for contiguous same-colour regions.
@@ -212,7 +212,13 @@ export function boundaryVertexDegrees(
 
   for (const key in painted) {
     const encoded = painted[key];
-    if (!decodeColor(encoded)) continue;
+    // **The no-print marker is admitted here and nowhere else.** It is the only
+    // consumer that wants it: a marker cell is a distinct colour, so the edges
+    // it shares with a real region come out `mixed`, the degree at those
+    // vertices rises past two, and `roundRing` leaves those corners sharp. That
+    // is the entire kink mechanism. `regionRings` keeps its own filter, so the
+    // marker never produces a ring anyone could draw.
+    if (!decodeColor(encoded) && !isNoPrint(encoded)) continue;
     const tri = stringToTri(key);
     if (!Number.isFinite(tri.q) || !Number.isFinite(tri.r)) continue;
     const hex = hexOf(encoded);

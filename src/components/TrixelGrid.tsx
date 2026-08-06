@@ -30,6 +30,8 @@ import {
   computePaletteColors,
   encodeColor,
   decodeColor,
+  isNoPrint,
+  NO_PRINT,
   remapGrid,
   shiftGridPalettes,
   setPaletteOffsets,
@@ -185,6 +187,7 @@ export default function TrixelGrid() {
   // Crop region and export options are view state, like zoom or the grid
   // settings — deliberately *not* part of ProjectSnapshot, or dragging a crop
   // handle would land in the undo stack and Ctrl+Z would stop undoing paint.
+  const [showNoPrint, setShowNoPrint] = useState(true);
   const [crop, setCrop] = useState<CropRect>(DEFAULT_CROP);
   // Subdivision noise folds its grain onto this so a fabric tile repeats
   // seamlessly. Every backend must receive the same one — the preview, both
@@ -295,7 +298,13 @@ export default function TrixelGrid() {
   const [colorIdx, setColorIdx] = useState(8);
 
   const colorHex = activePalette[colorIdx] ?? activePalette[8];
-  const paintKey = encodeColor(activePaletteIdx, colorIdx);
+  // The no-print pen is a *mode*, not a palette index: the marker has no
+  // palette or lightness, so it cannot be represented as `(paletteIdx, colorIdx)`
+  // the way every real swatch is.
+  const [noPrintPen, setNoPrintPen] = useState(false);
+  const paintKey = noPrintPen
+    ? NO_PRINT
+    : encodeColor(activePaletteIdx, colorIdx);
 
   // On a hatch layer the ordinary swatch row drives the hatch brush, so it
   // shows the brush's *own* palette rather than the paint palette. Anything
@@ -382,7 +391,14 @@ export default function TrixelGrid() {
     const out: Record<string, string> = {};
     for (const layer of layers) {
       if (!layer.visible || layerKind(layer) === "hatch") continue;
-      Object.assign(out, layer.painted);
+      for (const key in layer.painted) {
+        // No-print markers are construction marks, not material. This is the
+        // single gate in front of the 3D, cutting and apparel exports — none of
+        // which filters colours itself — so dropping them here keeps a marker
+        // from being extruded, cut or printed.
+        if (isNoPrint(layer.painted[key])) continue;
+        out[key] = layer.painted[key];
+      }
     }
     return out;
   }, [layers]);
@@ -668,6 +684,8 @@ export default function TrixelGrid() {
           setGridOrientation(data.gridOrientation as GridOrientation);
         }
         if (data.brushSize === "hex") setBrushSize("hex");
+        if (typeof data.showNoPrint === "boolean")
+          setShowNoPrint(data.showNoPrint);
         if (typeof data.projectName === "string" && data.projectName.trim())
           setProjectName(data.projectName);
         if (typeof data.hueOffset === "number") setHueOffset(data.hueOffset);
@@ -820,6 +838,7 @@ export default function TrixelGrid() {
         symmetry,
         gridOrientation,
         brushSize,
+        showNoPrint,
         projectName,
         hueOffset,
         saturationOffset: satOffset,
@@ -841,6 +860,7 @@ export default function TrixelGrid() {
     symmetry,
     gridOrientation,
     brushSize,
+    showNoPrint,
     projectName,
     hueOffset,
     satOffset,
@@ -938,8 +958,16 @@ export default function TrixelGrid() {
     setTool: changeTool,
     color: paintKey,
     setColor: (encoded) => {
+      // A marker is pickable like any other paint, or it would be the one thing
+      // on the canvas the eyedropper silently ignored.
+      if (isNoPrint(encoded)) {
+        setNoPrintPen(true);
+        changeTool("paint");
+        return;
+      }
       const d = decodeColor(encoded);
       if (d && PALETTE_DEFS[d.paletteIdx]) {
+        setNoPrintPen(false);
         setActivePaletteIdx(d.paletteIdx);
         setColorIdx(d.colorIdx);
         changeTool("paint");
@@ -1327,6 +1355,7 @@ export default function TrixelGrid() {
     (c: string) => {
       const idx = activePalette.indexOf(c);
       if (idx >= 0) setColorIdx(idx);
+      setNoPrintPen(false);
       // Through `changeTool`, not `setTool`: picking a colour is a tool change
       // like any other, and it has to close a tool-owned drawer behind it.
       changeTool("paint");
@@ -1754,6 +1783,7 @@ export default function TrixelGrid() {
           saturationOffset={satOffset}
           crop={crop}
           showCrop={tool === "crop"}
+          showNoPrint={showNoPrint}
         />
 
         {tool === "select" ? (
@@ -1823,9 +1853,15 @@ export default function TrixelGrid() {
             onPaletteChange={(colors, idx) => {
               setActivePaletteIdx(idx);
               setColorIdx(colors.length - 1);
+              setNoPrintPen(false);
               changeTool("paint");
             }}
             onPointerEnter={() => setHoveredTri(null)}
+            onNoPrintSelect={() => {
+              setNoPrintPen(true);
+              changeTool("paint");
+            }}
+            noPrintActive={noPrintPen}
             hueOffset={hueOffset}
             onHueOffsetChange={setHueOffset}
             saturationOffset={satOffset}
@@ -1900,6 +1936,8 @@ export default function TrixelGrid() {
             gridOrientation={gridOrientation}
             onGridOrientationChange={setGridOrientation}
             onSpreadHexArtwork={onSpreadHexArtwork}
+            showNoPrint={showNoPrint}
+            onShowNoPrintChange={setShowNoPrint}
             onClose={() => showPanel(null)}
             onPointerEnter={() => setHoveredTri(null)}
           />

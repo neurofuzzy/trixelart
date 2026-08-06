@@ -13,6 +13,8 @@ export function ColorPalette({
   onColorChange,
   onPaletteChange,
   onPointerEnter,
+  onNoPrintSelect,
+  noPrintActive = false,
   hueOffset,
   onHueOffsetChange,
   saturationOffset,
@@ -25,6 +27,9 @@ export function ColorPalette({
   onColorChange: (color: string) => void;
   onPaletteChange: (colors: string[], idx: number) => void;
   onPointerEnter: () => void;
+  /** Selects the no-print marker as the paint colour. */
+  onNoPrintSelect?: () => void;
+  noPrintActive?: boolean;
   hueOffset?: number;
   onHueOffsetChange?: (v: number) => void;
   saturationOffset?: number;
@@ -64,6 +69,29 @@ export function ColorPalette({
           style={{ backgroundColor: c }}
         />
       ))}
+      {/* The no-print marker. Deliberately not part of the strip above: that
+          strip is keyed and selected by resolved hex, and the marker has no hex
+          — it is a construction mark that shapes corners and never renders. */}
+      {onNoPrintSelect && (
+        <button
+          onClick={onNoPrintSelect}
+          title="No-print marker — shapes corners, never renders (0)"
+          className={cn(
+            "w-8 h-8 rounded-full border-2 transition-all hover:scale-110 shrink-0 flex items-center justify-center",
+            noPrintActive
+              ? "border-white scale-125 shadow-lg"
+              : "border-white/10 opacity-70",
+          )}
+          style={{
+            // Reads as tape rather than paint, and matches the magenta the
+            // canvas draws markers in.
+            backgroundImage:
+              "repeating-linear-gradient(45deg, rgba(236,72,153,0.55) 0 3px, transparent 3px 6px)",
+          }}
+        >
+          <span className="w-3 h-3 rounded-full border border-white/40" />
+        </button>
+      )}
       <div className="relative ml-4 lg:ml-0 lg:mt-4">
         <Button
           variant="ghost"

@@ -19,6 +19,8 @@ export function GridSettingsPanel({
   gridOrientation,
   onGridOrientationChange,
   onSpreadHexArtwork,
+  showNoPrint,
+  onShowNoPrintChange,
   onClose,
   onPointerEnter,
 }: {
@@ -29,6 +31,10 @@ export function GridSettingsPanel({
   gridOrientation?: GridOrientation;
   onGridOrientationChange?: (v: GridOrientation) => void;
   onSpreadHexArtwork: (newN: number) => void;
+  /** Editor visibility of no-print markers. Purely a view switch — the markers
+   *  shape corners whether or not they are drawn. */
+  showNoPrint?: boolean;
+  onShowNoPrintChange?: (v: boolean) => void;
   onClose: () => void;
   onPointerEnter: () => void;
 }) {
@@ -87,6 +93,34 @@ export function GridSettingsPanel({
             ))}
           </div>
         </div>
+
+        {onShowNoPrintChange && (
+          <div className="flex flex-col gap-2 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              No-print markers
+            </span>
+            <div className="flex gap-1">
+              {([true, false] as const).map((v) => (
+                <button
+                  key={String(v)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                    (showNoPrint ?? true) === v
+                      ? "bg-cyan-500/25 text-cyan-300"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  )}
+                  onClick={() => onShowNoPrintChange(v)}
+                >
+                  {v ? "Show" : "Hide"}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs leading-snug text-white/40">
+              Hiding them does not change the artwork — they keep their corners
+              sharp either way, and never appear in an export.
+            </span>
+          </div>
+        )}
 
         <div className="flex flex-col gap-2 shrink-0">
           <div className="flex items-baseline justify-between">

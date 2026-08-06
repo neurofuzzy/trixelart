@@ -1,5 +1,11 @@
 import { H, SIDE, getTriVertices, type TriType } from "@/lib/grid-math";
-import { COLOR_COUNT, decodeColor, encodeColor, resolveColor } from "@/lib/constants";
+import {
+  COLOR_COUNT,
+  decodeColor,
+  encodeColor,
+  isNoPrint,
+  resolveColor,
+} from "@/lib/constants";
 
 /**
  * The subdivision-noise effect: a triangular dither *inside* each painted cell.
@@ -282,6 +288,10 @@ export function noiseSubFills(
   encoded: string,
   spec: SubdivisionNoiseSpec,
 ): SubFill[] {
+  // A no-print marker renders as nothing at all, so it grows no grain either.
+  // Without this its undecodable fallback below would emit one undivided
+  // triangle filled with the literal marker string.
+  if (isNoPrint(encoded)) return [];
   const [a, b, c] = getTriVertices(q, r, type);
   if (!decodeColor(encoded)) {
     return [{ points: [a, b, c], hex: resolveColor(encoded) }];
