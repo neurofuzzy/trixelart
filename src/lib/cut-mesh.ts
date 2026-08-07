@@ -278,8 +278,9 @@ export function buildCutStackModel(
   plan: CutPlan,
   painted: Record<string, string>,
   options: CutStackOptions,
+  gridRotation = 0,
 ): CutStackModel | null {
-  const transform = computeModelTransform(painted, options.widthMm);
+  const transform = computeModelTransform(painted, options.widthMm, gridRotation);
   if (!transform || plan.sheets.length === 0) return null;
   const { widthMm, heightMm, toModel } = transform;
 

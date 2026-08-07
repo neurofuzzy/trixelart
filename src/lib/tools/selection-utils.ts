@@ -1,5 +1,5 @@
 import type { SelectionSnapshot } from "@/lib/hex-flower";
-import { triToHex } from "@/lib/hex-flower";
+import { regionMembership } from "@/lib/hex-flower";
 import type { TriKey } from "@/lib/grid-math";
 import type { ToolContext } from "./types";
 
@@ -12,13 +12,8 @@ import type { ToolContext } from "./types";
 export function selectionConstraint(
   ctx: ToolContext,
 ): ((t: TriKey) => boolean) | undefined {
-  const N = ctx.gridDivisions;
-  if (ctx.selectedHexes.length === 0 || N <= 0) return undefined;
-  const hexSet = new Set(ctx.selectedHexes.map((h) => `${h.c},${h.k}`));
-  return (t: TriKey) => {
-    const h = triToHex(t.q, t.r, t.type, N);
-    return hexSet.has(`${h.c},${h.k}`);
-  };
+  if (ctx.gridDivisions <= 0) return undefined;
+  return regionMembership(ctx.selectedHexes) ?? undefined;
 }
 
 export function snapshotKey(snap: SelectionSnapshot): string {

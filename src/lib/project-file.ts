@@ -109,6 +109,10 @@ export function projectFileName(projectName: string): string {
 export function buildProjectSVG(
   payload: ProjectPayload,
   noisePeriod?: NoisePeriod,
+  /** The lattice's quarter turn. The payload records `gridOrientation` so the
+   *  project reopens the right way round; this turns the *drawing*, which is
+   *  what a file browser or an SVG viewer shows. */
+  gridRotation = 0,
 ): string {
   const json = cdataSafe(JSON.stringify(payload, null, 2));
   // The namespace is declared on the element that uses the prefix, not on the
@@ -129,6 +133,7 @@ export function buildProjectSVG(
     // state, and folding it into the payload would silently add it to every
     // saved project file.
     period: noisePeriod,
+    rotation: gridRotation,
   });
 }
 

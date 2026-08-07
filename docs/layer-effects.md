@@ -264,8 +264,9 @@ The region is the caster's box grown by `GLOW_EXTENT_SIGMAS`.
 **Apparel skips glow** — the one raster path that does, via `drawArtworkPlan`'s
 `{ glow: false }`. A soft shadow spreads translucent ink straight across the
 stencil cut gaps, welding the pieces back together and undoing the flex the cut
-exists to provide. Same reasoning that keeps hatch out of the cut. The plotter,
-cutting and 3D exports never saw rounding or outline either and do not see this.
+exists to provide. Same reasoning that keeps hatch out of the cut. The cutting
+and 3D exports never saw rounding or outline either and do not see this; the
+plotter now sees rounding, but nothing else.
 
 ## Adjust colour
 
@@ -531,14 +532,23 @@ anything that reasons about the polygon — a clipper, a triangulator, a plotter
 so the flattener now dedupes before returning (measured 84 → 0 on a real sheet).
 
 `mergedFillPainted` throws away layer identity, so a per-layer radius cannot
-survive it: `mergedFillRoundFraction` takes the **largest enabled** radius among
-visible fill layers. Predictable, and it matches the intent — if the artwork
+survive it: `layersRoundFraction` (`hatch-render.ts`) takes the **largest
+enabled** radius among visible fill layers, and every merged-fill export shares
+it so they cannot drift. Predictable, and it matches the intent — if the artwork
 reads as rounded, the cut should be too.
 
-**Still not honoured by the cut dialog's 3D preview (above), the plotter,
-apparel cuts, or the 3D export.** The plotter and apparel cuts run on
-`region-outline.ts`'s `RawSeg` — a line family plus a 1-D interval —
-which structurally cannot represent an arc; the 3D export extrudes the lattice
-directly. With rounding on, apparel *fills* round but its cut gaps still follow
-the straight lattice boundary, diverging slightly near corners.
+**Honoured by the plotter**, which is the one fabrication path that has been
+taught it. It used to run entirely on `region-outline.ts`'s `RawSeg` — a line
+family plus a 1-D interval — which structurally cannot represent an arc, so it
+now switches to a polygon representation (`plot-geometry.ts`) whenever there is
+a radius to honour or a contour fill to draw, and keeps the `RawSeg` path
+byte-for-byte for the square-cornered hatch. See
+[docs/exports.md](exports.md#corner-rounding-and-the-second-geometry-path) for
+what that costs and what it buys. Note the plotter is fed its merged map with
+`NO_PRINT` markers **intact**, precisely so kinks work there too.
+
+**Still not honoured by the cut dialog's 3D preview (above), apparel cuts, or
+the 3D export.** Apparel cuts still run on `RawSeg`; the 3D export extrudes the
+lattice directly. With rounding on, apparel *fills* round but its cut gaps still
+follow the straight lattice boundary, diverging slightly near corners.
 

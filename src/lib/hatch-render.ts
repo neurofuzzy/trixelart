@@ -41,6 +41,32 @@ export function stepRoundRadius(step: RenderStep): number {
   return 0;
 }
 
+/**
+ * The rounding radius for an export that has already **merged** its fill
+ * layers: the largest enabled one, as a 0–1 fraction.
+ *
+ * The fabrication exports (3D, cutting, apparel, plotter) all flatten the fill
+ * stack into one painted map before they look at geometry, and that merge throws
+ * away layer identity — so a per-layer radius cannot survive it and something
+ * has to win. The largest is both predictable and the right reading of the
+ * intent: if the artwork reads as rounded, the fabricated version should too.
+ *
+ * This is deliberately *not* `stepRoundRadius`. That one answers the question
+ * for a single render step, where a step exists precisely because its effects
+ * are uniform; this one answers it for a pile of layers that no longer have
+ * steps at all.
+ */
+export function layersRoundFraction(layers: Layer[]): number {
+  let max = 0;
+  for (const layer of layers) {
+    if (!layer.visible || layerKind(layer) === "hatch") continue;
+    for (const e of activeEffects(layer)) {
+      if (e.type === "roundCorners") max = Math.max(max, e.radius);
+    }
+  }
+  return max;
+}
+
 /** The outline stroke width a fill step should be drawn with, in world units,
  *  or 0 for none. Like `stepRoundRadius`, an effect whose weight is zero is a
  *  no-op and must render identically to no effect at all. */

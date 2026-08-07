@@ -76,8 +76,8 @@ Each tool is a `ToolHandler` (`onDown`/`onMove`/`onUp`) in `src/lib/tools/`, reg
 | Clone | `C` | Clone-stamp from a captured source |
 | Eyedropper | `I` | Pick a painted color |
 | Move | `H` | Drag to translate painted trixels; **ALT-drag moves every layer**. Click without dragging re-origins the lattice on that trixel. Right-click pans the view |
-| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot. Drag the selection to move its contents — **ALT-drag moves every layer**, SHIFT-drag copies, ALT-*click* still removes a hex from the selection |
-| Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode |
+| Select | `S` | Click a hex to select it; captures all painted trixels inside as a snapshot. Drag the selection to move its contents — **ALT-drag moves every layer**, SHIFT-drag copies, ALT-*click* still removes a hex from the selection. The selection is a list of **`HexRegion`** (anchor + size), not `(c, k)`: in `world` hex mode a fresh selection anchors on the clicked trixel instead of snapping to the honeycomb |
+| Stamp | `T` | Alt-click a hex to define stamp source (yellow flash); click to stamp (right-click erases); `+` button in palette to enter capture mode. **Snaps to the honeycomb only when there is one** — in `world` hex mode it places freely on the hovered trixel (`stampAnchor`) |
 | Crop | `X` | Drag handles to set the export region. **No toolbar button** — reached from the hamburger's "Export for Fabric...", and closing its drawer leaves the mode |
 
 - Right-click on a painted triangle acts as a color picker (eyedropper)
@@ -112,4 +112,11 @@ both ride `generateTriangles`' optional parameters rather than each emit site,
 which is what lets one change carry the PNG exporter and both SVG exporters at
 once. The fabrication paths (3D, cutting, plotter, apparel cut)
 deliberately do **not** run the plan — see the per-export notes for what each one
-ignores and why.
+ignores and why. They merge the fill stack first, so where one of them *does*
+honour a geometry effect it reads the setting through `layersRoundFraction`
+(`hatch-render.ts`), the shared "largest enabled radius wins" rule. Today the
+plotter is the only one: it honours **round corners** by switching to the polygon
+representation in `plot-geometry.ts` (and loading Clipper on demand, which is why
+`buildPlotterPlot` is async), keeping its original `RawSeg` path byte-for-byte
+for the square-cornered hatch. Reaching for `buildRenderPlan` in a fabrication
+path is still the wrong move; reaching for `stepRegionGeometry` is not.

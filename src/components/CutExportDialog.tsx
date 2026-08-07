@@ -56,6 +56,7 @@ export function CutExportDialog({
   painted,
   roundFraction = 0,
   projectName,
+  gridRotation = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,6 +64,8 @@ export function CutExportDialog({
   /** Corner-rounding effect, as the 0-1 slider fraction. See `round-corners.ts`. */
   roundFraction?: number;
   projectName: string;
+  /** The lattice's quarter turn, so a pointy-top design cuts the way it is drawn. */
+  gridRotation?: number;
 }) {
   const [widthMm, setWidthMm] = useState(DEFAULT_CUT_STACK_OPTIONS.widthMm);
   const [widthDraft, setWidthDraft] = useState(String(widthMm));
@@ -92,9 +95,9 @@ export function CutExportDialog({
             frame,
             mergeIslands,
             neck,
-          })
+          }, gridRotation)
         : null,
-    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck],
+    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck, gridRotation],
   );
 
   const commitWidth = () => {
@@ -109,13 +112,12 @@ export function CutExportDialog({
 
   const handleDownloadSVG = () => {
     if (!plan) return;
-    const svg = buildCutSVG(plan, painted, {
-      widthMm,
-      frame,
-      mergeIslands,
-      neck,
-      round,
-    });
+    const svg = buildCutSVG(
+      plan,
+      painted,
+      { widthMm, frame, mergeIslands, neck, round },
+      gridRotation,
+    );
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);

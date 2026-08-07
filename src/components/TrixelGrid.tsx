@@ -4,12 +4,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCanvasSize } from "@/hooks/use-canvas-size";
 import {
   useHistory,
-  activeEffects,
   layerKind,
   type ProjectSnapshot,
   type Layer,
   type LayerKind,
 } from "@/hooks/use-history";
+import { layersRoundFraction } from "@/lib/hatch-render";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useInteraction } from "@/hooks/use-interaction";
 import { Toolbar } from "@/components/Toolbar";
@@ -68,7 +68,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { SelectionSnapshot } from "@/lib/hex-flower";
+import type { SelectionSnapshot, HexRegion } from "@/lib/hex-flower";
 import {
   rotateHexCW,
   rotateHexCCW,
@@ -76,7 +76,7 @@ import {
   flipHexHorizontal,
   remapHex,
   shiftHexPalettes,
-  enumerateHexTrixels,
+  regionTrixels,
   spreadHexArtwork,
 } from "@/lib/hex-flower";
 import { isToolAllowed, type Tool } from "@/lib/tools";
@@ -350,9 +350,9 @@ export default function TrixelGrid() {
   // underlying tri-axial lattice, hex geometry, symmetry math, history and
   // persistence remain untouched — only the screen↔world seam applies it.
   const gridRotation = gridOrientation === "pointy-top" ? Math.PI / 2 : 0;
-  const [selectedHexes, setSelectedHexes] = useState<
-    { c: number; k: number }[]
-  >([]);
+  // Hex-shaped regions, not honeycomb coordinates: in world mode a selection
+  // is anchored wherever it was made. See `HexRegion`.
+  const [selectedHexes, setSelectedHexes] = useState<HexRegion[]>([]);
   const [selections, setSelections] = useState<SelectionSnapshot[]>([]);
   const [activeSelection, setActiveSelection] =
     useState<SelectionSnapshot | null>(null);
@@ -410,20 +410,13 @@ export default function TrixelGrid() {
     return out;
   }, [layers]);
 
-  // Corner rounding for the exports that take `mergedFillPainted`. That merge
-  // deliberately throws away layer identity, so a per-layer radius cannot
-  // survive it — the largest enabled one wins. Predictable, and it matches the
-  // intent: if the artwork reads as rounded, the cut should be too.
-  const mergedFillRoundFraction = useMemo(() => {
-    let max = 0;
-    for (const layer of layers) {
-      if (!layer.visible || layerKind(layer) === "hatch") continue;
-      for (const e of activeEffects(layer)) {
-        if (e.type === "roundCorners") max = Math.max(max, e.radius);
-      }
-    }
-    return max;
-  }, [layers]);
+  // Corner rounding for the exports that take `mergedFillPainted`. Shared with
+  // the plotter, which merges the same way but builds its own map from the
+  // layers, so the two cannot drift on what "the artwork's radius" means.
+  const mergedFillRoundFraction = useMemo(
+    () => layersRoundFraction(layers),
+    [layers],
+  );
 
   // What a hatch layer's marks actually sit on: the visible fill layers
   // *strictly below* the active one, merged bottom-to-top so the topmost wins.
@@ -1085,7 +1078,7 @@ export default function TrixelGrid() {
     const next = { ...prev };
     let changed = false;
     for (const sel of selectedHexes) {
-      const hexTris = enumerateHexTrixels(sel.c, sel.k, gridDivisions);
+      const hexTris = regionTrixels(sel);
       for (const t of hexTris) {
         const key = triToString(t);
         if (key in next) {
@@ -1116,6 +1109,7 @@ export default function TrixelGrid() {
         version: 1,
       },
       noisePeriod,
+      gridRotation,
     );
     downloadBlob(
       new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
@@ -1129,6 +1123,7 @@ export default function TrixelGrid() {
     hueOffset,
     satOffset,
     gridOrientation,
+    gridRotation,
   ]);
 
   const handleExportSVG = useCallback(() => {
@@ -1380,14 +1375,7 @@ export default function TrixelGrid() {
         let next = prev;
         if (selectedHexes.length > 0 && gridDivisions > 0) {
           for (const sel of selectedHexes) {
-            next = shiftHexPalettes(
-              next,
-              sel.c,
-              sel.k,
-              gridDivisions,
-              direction as 1 | -1,
-              count,
-            );
+            next = shiftHexPalettes(next, sel, direction as 1 | -1, count);
           }
         } else {
           next = shiftGridPalettes(next, direction as 1 | -1, count);
@@ -1453,7 +1441,7 @@ export default function TrixelGrid() {
       let next = prev;
       if (selectedHexes.length > 0 && gridDivisions > 0) {
         for (const sel of selectedHexes) {
-          next = remapHex(next, sel.c, sel.k, gridDivisions, 1, COLOR_COUNT);
+          next = remapHex(next, sel, 1, COLOR_COUNT);
         }
       } else {
         next = remapGrid(prev, 1);
@@ -1470,7 +1458,7 @@ export default function TrixelGrid() {
       let next = prev;
       if (selectedHexes.length > 0 && gridDivisions > 0) {
         for (const sel of selectedHexes) {
-          next = remapHex(next, sel.c, sel.k, gridDivisions, -1, COLOR_COUNT);
+          next = remapHex(next, sel, -1, COLOR_COUNT);
         }
       } else {
         next = remapGrid(prev, -1);
@@ -1487,7 +1475,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next = prev;
       for (const sel of selectedHexes) {
-        next = rotateHexCW(next, sel.c, sel.k, gridDivisions);
+        next = rotateHexCW(next, sel);
       }
       if (next !== prev) {
         pushHistory(snapshotWithPainted(next));
@@ -1501,7 +1489,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next = prev;
       for (const sel of selectedHexes) {
-        next = rotateHexCCW(next, sel.c, sel.k, gridDivisions);
+        next = rotateHexCCW(next, sel);
       }
       if (next !== prev) {
         pushHistory(snapshotWithPainted(next));
@@ -1515,7 +1503,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next = prev;
       for (const sel of selectedHexes) {
-        next = flipHexVertical(next, sel.c, sel.k, gridDivisions);
+        next = flipHexVertical(next, sel);
       }
       if (next !== prev) {
         pushHistory(snapshotWithPainted(next));
@@ -1529,7 +1517,7 @@ export default function TrixelGrid() {
     setPainted((prev) => {
       let next = prev;
       for (const sel of selectedHexes) {
-        next = flipHexHorizontal(next, sel.c, sel.k, gridDivisions);
+        next = flipHexHorizontal(next, sel);
       }
       if (next !== prev) {
         pushHistory(snapshotWithPainted(next));
@@ -1980,6 +1968,7 @@ export default function TrixelGrid() {
         settings={svgExport}
         onSettingsChange={updateSvgExport}
         noisePeriod={noisePeriod}
+        gridRotation={gridRotation}
       />
 
       {/* 3D and cutting consume solid regions, so they take the fill-only
@@ -1989,6 +1978,7 @@ export default function TrixelGrid() {
         onOpenChange={setExport3DOpen}
         painted={mergedFillPainted}
         projectName={projectName}
+        gridRotation={gridRotation}
       />
 
       <CutExportDialog
@@ -1997,6 +1987,7 @@ export default function TrixelGrid() {
         painted={mergedFillPainted}
         roundFraction={mergedFillRoundFraction}
         projectName={projectName}
+        gridRotation={gridRotation}
       />
 
       <AlertDialog

@@ -1,4 +1,4 @@
-import { SIDE, H, worldToTri, triToString, stringToTri, triCenter, type TriKey, type TriType } from "./grid-math";
+import { SIDE, H, worldToTri, triToString, stringToTri, triCenter, latticePoint, type TriKey, type TriType } from "./grid-math";
 import { encodeColor } from "./constants";
 import { flipHatchValue, mapEncodedColor, rotateHatchValue } from "./hatch";
 
@@ -97,6 +97,164 @@ export function hexCenterTriAxial(c: number, k: number, N: number) {
   return { qc: N * (c - k), rc: N * (c + 2 * k) };
 }
 
+/**
+ * Where a hex-shaped operation lands: the tri-axial point its contents are
+ * measured from. Used by the stamp and by the hex selection, which want the
+ * same rule.
+ *
+ * In honeycomb mode it snaps to the centre of the hex under the cursor, so the
+ * results tile the lattice. With the hex lattice off ("world") there is no
+ * honeycomb to snap to, so the anchor is the hovered trixel itself — the finest
+ * placement available, since only whole (dq, dr) translations preserve triangle
+ * orientation.
+ *
+ * Preview, outline and commit all read this, or the ghost lands somewhere the
+ * operation does not.
+ */
+export function placementAnchor(
+  tri: TriKey,
+  N: number,
+  hexEnabled: boolean,
+): { qc: number; rc: number } {
+  if (!hexEnabled || N <= 0) return { qc: tri.q, rc: tri.r };
+  const hex = triToHex(tri.q, tri.r, tri.type, N);
+  return hexCenterTriAxial(hex.c, hex.k, N);
+}
+
+/**
+ * One hexagon of the grid, addressed by where it actually sits rather than by a
+ * lattice index: `(qc, rc)` is its centre in tri-axial coordinates and `N` its
+ * size in divisions.
+ *
+ * The hex selection is a list of these. `(c, k)` could only ever name a hex of
+ * the global honeycomb, which is the constraint world mode drops — a region is
+ * free to be anchored on any trixel, and carries its own size so the outline on
+ * screen and the cells an operation touches can never disagree.
+ *
+ * Regions in one selection all share a lattice: each is placed relative to the
+ * first, so they tile edge-to-edge exactly as honeycomb hexes do.
+ */
+export interface HexRegion {
+  qc: number;
+  rc: number;
+  N: number;
+}
+
+/** The region covering honeycomb hex `(c, k)` — the lattice-bound case. */
+export function regionAtHex(c: number, k: number, N: number): HexRegion {
+  return { ...hexCenterTriAxial(c, k, N), N };
+}
+
+/** Identity for set membership. Two regions of the same lattice coincide iff
+ *  their anchors do, so the size is not part of the key. */
+export function regionKey(reg: HexRegion): string {
+  return `${reg.qc},${reg.rc}`;
+}
+
+/** World-space centre of a region. */
+export function regionCenterWorld(reg: HexRegion): { x: number; y: number } {
+  return latticePoint(reg.qc, reg.rc);
+}
+
+/** The hexagon's six corners in world space, centre-first order (0° first). */
+export function regionCorners(reg: HexRegion): Array<{ x: number; y: number }> {
+  const { x, y } = regionCenterWorld(reg);
+  const s = reg.N * SIDE;
+  const v = reg.N * H;
+  return [
+    { x: x + s, y },
+    { x: x + s / 2, y: y + v },
+    { x: x - s / 2, y: y + v },
+    { x: x - s, y },
+    { x: x - s / 2, y: y - v },
+    { x: x + s / 2, y: y - v },
+  ];
+}
+
+/** The hex at the origin, per N. The tiling is translation-invariant, so every
+ *  region is this list shifted — worth caching, since `enumerateHexTrixels`
+ *  scans a bounding box and hatchify walks one selection repeatedly. */
+const baseHexTrixels = new Map<number, TriKey[]>();
+
+/** Every trixel inside a region (6N² of them), the anchored counterpart of
+ *  `enumerateHexTrixels`. */
+export function regionTrixels(reg: HexRegion): TriKey[] {
+  let base = baseHexTrixels.get(reg.N);
+  if (!base) {
+    base = enumerateHexTrixels(0, 0, reg.N);
+    baseHexTrixels.set(reg.N, base);
+  }
+  return base.map((t) => ({ q: t.q + reg.qc, r: t.r + reg.rc, type: t.type }));
+}
+
+/**
+ * The region of `anchor`'s lattice that contains `tri`. Pass the selection's
+ * first region as `anchor` so a hex added to a free-floating selection lands
+ * beside the ones already in it; pass null for the global honeycomb.
+ *
+ * Works by translating the trixel back onto the global lattice, asking
+ * `triToHex`, and translating the answer forward again — the honeycomb tiling
+ * is invariant under any whole (dq, dr) shift, so an off-lattice anchor is
+ * just a different origin for the same tiling.
+ */
+export function regionContaining(
+  tri: TriKey,
+  N: number,
+  anchor: { qc: number; rc: number } | null,
+): HexRegion {
+  const oq = anchor?.qc ?? 0;
+  const or = anchor?.rc ?? 0;
+  const hex = triToHex(tri.q - oq, tri.r - or, tri.type, N);
+  const { qc, rc } = hexCenterTriAxial(hex.c, hex.k, N);
+  return { qc: qc + oq, rc: rc + or, N };
+}
+
+/**
+ * The honeycomb hex whose centre is nearest the tri-axial point (qc, rc) — how
+ * a dragged selection snaps back onto the lattice.
+ *
+ * Cube-rounds the point itself rather than a triangle's centroid (so `t` is 0
+ * rather than 1 or 2), which is what makes it unbiased between the two triangle
+ * orientations and total: a moved anchor is usually a hex *corner*, where "the
+ * hex containing it" is not a question with an answer, but "the nearest hex
+ * centre" always is.
+ */
+export function nearestRegion(q: number, r: number, N: number): HexRegion {
+  const cf = (2 * q + r) / (3 * N);
+  const kf = (r - q) / (3 * N);
+  const sf = -(q + 2 * r) / (3 * N);
+
+  let rc = Math.round(cf);
+  let rk = Math.round(kf);
+  let rs = Math.round(sf);
+
+  const dc = Math.abs(rc - cf);
+  const dk = Math.abs(rk - kf);
+  const ds = Math.abs(rs - sf);
+
+  if (dc > dk && dc > ds) rc = -rk - rs;
+  else if (dk > ds) rk = -rc - rs;
+  else rs = -rc - rk;
+
+  return regionAtHex(rc, rk, N);
+}
+
+/**
+ * A predicate for "is this trixel inside the selection", or null when there is
+ * no selection to clip to. Every consumer that treats the selection as a
+ * boundary goes through this, so none of them has to know the lattice may be
+ * shifted.
+ */
+export function regionMembership(
+  regions: HexRegion[],
+): ((t: TriKey) => boolean) | null {
+  const first = regions[0];
+  if (!first || first.N <= 0) return null;
+  const keys = new Set(regions.map(regionKey));
+  return (t: TriKey) =>
+    keys.has(regionKey(regionContaining(t, first.N, first)));
+}
+
 export function captureHexSnapshot(
   painted: Record<string, string>,
   c: number,
@@ -172,7 +330,12 @@ export function enumerateHexTrixels(
  * with wedge 0 starting at the vertex on the positive x-axis (0°).
  */
 export function hexWedgeIndex(tri: TriKey, c: number, k: number, N: number): number {
-  const center = hexCenterWorld(c, k, N);
+  return regionWedgeIndex(tri, regionAtHex(c, k, N));
+}
+
+/** `hexWedgeIndex` for a region, which may not sit on the honeycomb. */
+export function regionWedgeIndex(tri: TriKey, reg: HexRegion): number {
+  const center = regionCenterWorld(reg);
   const tc = triCenter(tri.q, tri.r, tri.type);
   const dx = tc.x - center.x;
   const dy = tc.y - center.y;
@@ -300,12 +463,10 @@ export function spreadHexArtwork(
 
 export function rotateHexCW(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
 ): Record<string, string> {
-  const { qc, rc } = hexCenterTriAxial(c, k, N);
-  const tris = enumerateHexTrixels(c, k, N);
+  const { qc, rc } = reg;
+  const tris = regionTrixels(reg);
   const result = { ...painted };
 
   const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
@@ -330,12 +491,10 @@ export function rotateHexCW(
 
 export function rotateHexCCW(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
 ): Record<string, string> {
-  const { qc, rc } = hexCenterTriAxial(c, k, N);
-  const tris = enumerateHexTrixels(c, k, N);
+  const { qc, rc } = reg;
+  const tris = regionTrixels(reg);
   const result = { ...painted };
 
   const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
@@ -358,12 +517,10 @@ export function rotateHexCCW(
 
 export function flipHexVertical(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
 ): Record<string, string> {
-  const { x: cx, y: cy } = hexCenterWorld(c, k, N);
-  const tris = enumerateHexTrixels(c, k, N);
+  const { x: cx, y: cy } = regionCenterWorld(reg);
+  const tris = regionTrixels(reg);
   const result = { ...painted };
 
   const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
@@ -390,12 +547,10 @@ export function flipHexVertical(
 
 export function flipHexHorizontal(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
 ): Record<string, string> {
-  const { x: cx } = hexCenterWorld(c, k, N);
-  const tris = enumerateHexTrixels(c, k, N);
+  const { x: cx } = regionCenterWorld(reg);
+  const tris = regionTrixels(reg);
   const result = { ...painted };
 
   const moved: Array<{ q: number; r: number; type: TriType; color: string }> = [];
@@ -424,13 +579,11 @@ export function flipHexHorizontal(
 
 export function remapHex(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
   direction: 1 | -1,
   colorCount: number,
 ): Record<string, string> {
-  const tris = enumerateHexTrixels(c, k, N);
+  const tris = regionTrixels(reg);
   const result = { ...painted };
   for (const t of tris) {
     const key = triToString(t);
@@ -450,13 +603,11 @@ export function remapHex(
 
 export function shiftHexPalettes(
   painted: Record<string, string>,
-  c: number,
-  k: number,
-  N: number,
+  reg: HexRegion,
   direction: 1 | -1,
   paletteCount: number,
 ): Record<string, string> {
-  const tris = enumerateHexTrixels(c, k, N);
+  const tris = regionTrixels(reg);
   const result = { ...painted };
   for (const t of tris) {
     const key = triToString(t);

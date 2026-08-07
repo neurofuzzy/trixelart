@@ -8,7 +8,9 @@ import { cn, normalizeProjectFilename } from "@/lib/utils";
 import type { Layer } from "@/hooks/use-history";
 import { downloadBlob } from "@/lib/png-export";
 import { MAX_DENSITY, MIN_DENSITY } from "@/lib/hatch";
+import { layersRoundFraction } from "@/lib/hatch-render";
 import {
+  MAX_HATCH_INSET_MM,
   MAX_MARGIN_IN,
   MAX_PAGE_IN,
   MIN_PAGE_IN,
@@ -19,8 +21,10 @@ import {
   plotterLayout,
   plotterSVG,
   renderPlotterPreview,
+  type FillStyle,
   type PageSizeId,
   type PenMode,
+  type PlotterPlot,
   type PlotterSettings,
 } from "@/lib/plotter-export";
 
@@ -161,17 +165,50 @@ export function PlotterDialog({
     return () => window.removeEventListener("keydown", handler);
   }, [open, onOpenChange]);
 
-  // The concentric direction comes from the hex wedges, so without a hex lattice
-  // there is nothing to take a direction from.
-  const canPlot = gridDivisions > 0;
+  // The hatch takes its direction from the hex wedges, so without a hex lattice
+  // there is nothing to take a direction from. A contour fill follows each
+  // region's own boundary and needs no lattice at all.
+  const canPlot = gridDivisions > 0 || settings.fillStyle === "contour";
+  const roundFraction = useMemo(() => layersRoundFraction(layers), [layers]);
 
-  const plot = useMemo(
-    () =>
-      open && canPlot
-        ? buildPlotterPlot(layers, gridRotation, gridDivisions, settings)
-        : null,
-    [open, canPlot, layers, gridRotation, gridDivisions, settings],
-  );
+  /**
+   * The plot is built asynchronously — the polygon path loads Clipper on
+   * demand — so it lands in state rather than in a memo.
+   *
+   * Debounced, and guarded by a request id. Every settings change rebuilds the
+   * whole plot, and a slider drag fires one per frame; without the delay the
+   * heavier contour path would queue a build behind every intermediate value,
+   * and without the id a slow early build could resolve *after* a fast later one
+   * and put a stale preview on screen.
+   */
+  const [plot, setPlot] = useState<PlotterPlot | null>(null);
+  const [building, setBuilding] = useState(false);
+  const requestRef = useRef(0);
+
+  useEffect(() => {
+    if (!open || !canPlot) {
+      setPlot(null);
+      setBuilding(false);
+      return;
+    }
+    const id = ++requestRef.current;
+    setBuilding(true);
+    const timer = setTimeout(() => {
+      buildPlotterPlot(layers, gridRotation, gridDivisions, settings)
+        .then((next) => {
+          if (requestRef.current !== id) return;
+          setPlot(next);
+          setBuilding(false);
+        })
+        .catch(() => {
+          if (requestRef.current !== id) return;
+          setPlot(null);
+          setBuilding(false);
+        });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [open, canPlot, layers, gridRotation, gridDivisions, settings]);
+
   const layout = useMemo(
     () => (plot ? plotterLayout(plot, settings) : null),
     [plot, settings],
@@ -189,7 +226,7 @@ export function PlotterDialog({
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, Math.round(wrap.clientWidth * dpr));
       const h = Math.max(1, Math.round(wrap.clientHeight * dpr));
-      renderPlotterPreview(c, plot, layout, w, h);
+      renderPlotterPreview(c, plot, layout, w, h, settings.strokeWidthMm);
       c.style.width = `${wrap.clientWidth}px`;
       c.style.height = `${wrap.clientHeight}px`;
     };
@@ -197,7 +234,9 @@ export function PlotterDialog({
     const ro = new ResizeObserver(draw);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [open, plot, layout]);
+    // `layout` already changes identity with the settings, but the nib is read
+    // straight out of `settings` here, so it has to be named for itself.
+  }, [open, plot, layout, settings.strokeWidthMm]);
 
   const handleExport = useCallback(() => {
     if (!plot || !layout || layout.invalid || allStrokes(plot).length === 0) {
@@ -383,14 +422,33 @@ export function PlotterDialog({
                 onChange={(marginIn) => onSettingsChange({ marginIn })}
               />
 
-              <p className="text-[11px] leading-snug text-muted-foreground">
-                {fitPage
-                  ? "The page is cut to the artwork at the width you set."
-                  : "The artwork is scaled to fit the margins and centred on the sheet."}
-              </p>
             </Section>
 
             <Section title="Tone">
+              <div className="flex rounded-md overflow-hidden border border-white/10">
+                {(
+                  [
+                    ["hatch", "Hatch"],
+                    ["contour", "Contour"],
+                  ] as const
+                ).map(([style, label]) => (
+                  <button
+                    key={style}
+                    onClick={() =>
+                      onSettingsChange({ fillStyle: style as FillStyle })
+                    }
+                    className={cn(
+                      "flex-1 py-2 text-xs transition-colors",
+                      settings.fillStyle === style
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <Slider
                 label="Min density"
                 value={settings.minDensity}
@@ -420,6 +478,46 @@ export function PlotterDialog({
                 }
               />
 
+              {/* Hatch only: a contour's rings are closed loops a full spacing
+                  in from the edge, so they have no ends to blot. */}
+              {settings.fillStyle === "hatch" && (
+                <>
+                  <Slider
+                    label="Edge gap"
+                    value={settings.hatchInsetMm}
+                    min={0}
+                    max={MAX_HATCH_INSET_MM}
+                    step={0.05}
+                    display={settings.hatchInsetMm.toFixed(2)}
+                    onChange={(hatchInsetMm) =>
+                      onSettingsChange({ hatchInsetMm })
+                    }
+                  />
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.linkHatchEnds}
+                      onChange={(e) =>
+                        onSettingsChange({ linkHatchEnds: e.target.checked })
+                      }
+                      className="size-4 rounded accent-amber-400"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Link hatch ends into one stroke
+                    </span>
+                  </label>
+
+                  {/* Kept because it is a state nothing else reveals: with no
+                      gap the line ends sit on the boundary, the connectors have
+                      nowhere to go, and most links are silently refused. */}
+                  {settings.linkHatchEnds && settings.hatchInsetMm <= 0 && (
+                    <p className="text-[11px] leading-snug text-amber-200/70">
+                      Needs an edge gap — connectors have no room otherwise.
+                    </p>
+                  )}
+                </>
+              )}
+
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -438,9 +536,17 @@ export function PlotterDialog({
 
               <p className="text-xs text-muted-foreground tabular-nums">
                 {ladder.length} tone level{ladder.length === 1 ? "" : "s"}
-                {settings.blankLightest ? ", the first blank" : ""} &middot;
-                normalised to the artwork
+                {settings.blankLightest ? ", the first blank" : ""}
               </p>
+
+              {/* The radius is the largest one enabled anywhere in the fill
+                  stack — the plot merges the layers, so only one can win. */}
+              {roundFraction > 0 && (
+                <p className="text-[11px] leading-snug text-amber-200/70">
+                  Following the {Math.round(roundFraction * 100)}% corner
+                  rounding on the artwork.
+                </p>
+              )}
             </Section>
           </div>
         </div>
@@ -449,10 +555,15 @@ export function PlotterDialog({
           <span className="text-xs text-muted-foreground tabular-nums flex-1 leading-snug">
             {!canPlot ? (
               <span className="text-red-400">
-                Needs a hex lattice — set grid divisions above 0.
+                The hatch needs a hex lattice — set grid divisions above 0, or
+                switch to a contour fill.
               </span>
             ) : !hasStrokes ? (
-              "Nothing painted to plot."
+              building ? (
+                "Working out the line work…"
+              ) : (
+                "Nothing painted to plot."
+              )
             ) : layout?.invalid ? (
               <span className="text-red-400">
                 The margin leaves no room to draw — reduce it or use a larger
