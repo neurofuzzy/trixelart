@@ -14,6 +14,7 @@ import {
   type PatternBlendMode,
   type QuantizeTarget,
 } from "@/lib/tri-pattern";
+import { nearestCoincidence, snapRotation } from "@/lib/eisenstein";
 import {
   PREVIEW_SPAN,
   PREVIEW_TRIS,
@@ -77,6 +78,82 @@ function SliderField({
         className="w-full h-2 accent-white"
       />
     </label>
+  );
+}
+
+/** Treat a fit this tight as exact. Landing on a landmark leaves an error of
+ *  order 1e-6 from the double arithmetic alone, so the test cannot be `=== 0`;
+ *  a couple of orders of margin above that is still far finer than the sliders
+ *  can express. */
+const LOCKED_EPS = 2e-5;
+
+/**
+ * Names the exactly-repeating setting nearest to the current one, and offers to
+ * jump to it.
+ *
+ * Deliberately a readout with one button rather than a ladder of presets. The
+ * repeating settings are dense — between any two there are more — so a
+ * catalogue would be arbitrary, and the panel is height-constrained enough that
+ * the preview is the first thing to give way (see docs/pattern-brush.md). This
+ * costs two lines and answers the only question the sliders cannot: *is what I
+ * am looking at going to tile, or is it drifting?*
+ *
+ * Snapping stays opt-in. Quantizing rotation to the lattice was tried and
+ * reverted because it puts the whole emergent family out of reach — so this
+ * offers the landmark and never moves the sliders on its own.
+ */
+function RepeatRow({
+  scale,
+  rotation,
+  onLock,
+}: {
+  scale: number;
+  rotation: number;
+  onLock: (scale: number, rotation: number) => void;
+}) {
+  const fit = useMemo(
+    () => nearestCoincidence(scale, rotation),
+    [scale, rotation],
+  );
+  if (!fit) return null;
+
+  const locked = fit.epsilon < LOCKED_EPS;
+  const cell = fit.near.period.toFixed(2);
+  // How many times the motif repeats before the drift adds up to a whole cell.
+  const holds = 1 / fit.epsilon;
+
+  return (
+    <div className="flex flex-col gap-1 shrink-0">
+      <span className="flex items-baseline justify-between">
+        <span className="text-xs uppercase tracking-wide text-white/60">
+          Repeat
+        </span>
+        <span className="text-xs font-mono text-white/50 tabular-nums">
+          {locked
+            ? `${cell} cells · exact`
+            : `${cell} cells · holds ${holds >= 1000 ? `${Math.round(holds / 1000)}k` : Math.round(holds)}×`}
+        </span>
+      </span>
+      <button
+        onClick={() =>
+          onLock(fit.near.scale, snapRotation(fit.near.rotation, rotation))
+        }
+        disabled={locked}
+        title={
+          locked
+            ? "This pattern tiles exactly"
+            : `Snap to ×${fit.near.scale.toFixed(3)} / ${snapRotation(fit.near.rotation, rotation).toFixed(2)}°`
+        }
+        className={cn(
+          "text-xs py-1.5 rounded-md border transition-colors",
+          locked
+            ? "border-white/10 text-white/30 cursor-default"
+            : "border-white/10 text-white/60 hover:bg-white/5",
+        )}
+      >
+        {locked ? "Tiles exactly" : "Lock to nearest"}
+      </button>
+    </div>
   );
 }
 
@@ -444,15 +521,24 @@ export function PatternPanel({
           />
 
           {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
-              would remove every pattern that depends on being off-axis. */}
+              would remove every pattern that depends on being off-axis. The
+              landmarks live in `RepeatRow` below, as an offer rather than a
+              constraint. Two decimals because a locked angle is rarely a round
+              number — 44.82° displayed as 45° would contradict the readout. */}
           <SliderField
             label="Rotation"
             value={active.rotation}
             min={0}
             max={360}
-            step={0.1}
-            display={`${Math.round(active.rotation)}°`}
+            step={0.01}
+            display={`${active.rotation.toFixed(2)}°`}
             onChange={(rotation) => update({ rotation })}
+          />
+
+          <RepeatRow
+            scale={active.scale}
+            rotation={active.rotation}
+            onLock={(scale, rotation) => update({ scale, rotation })}
           />
         </>
       ) : (
