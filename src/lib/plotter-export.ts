@@ -8,6 +8,7 @@ import {
   DIR_BIT,
   MAX_DENSITY,
   MIN_DENSITY,
+  arcSegmentsInTri,
   clipSegmentToTriangle,
   encodeHatch,
   groupHatchMarks,
@@ -127,8 +128,19 @@ export const PAGE_SIZES: { id: PageSizeId; label: string; w: number; h: number }
  * region with concentric insets of its own boundary, which is the fill that
  * follows a rounded silhouette rather than fighting it — and the only one that
  * can be drawn without a hex lattice to take a direction from.
+ *
+ * `drawn` is not a tone at all: it plots the **hatch layers as authored**, so
+ * the line work is whatever was drawn on screen rather than anything derived
+ * from the fills. It exists as a third style rather than as a toggle on top of
+ * the other two because the alignments disagree — a generated tone sits on the
+ * lattice's division lines and an authored mark sits centred between them, and
+ * two ladders half a division apart on one sheet read as a misprint. Being
+ * mutually exclusive is what keeps that from ever happening. The tone ladder
+ * (`minDensity`, `maxDensity`, `blankLightest`) and the two hatch trims
+ * (`hatchInsetMm`, `linkHatchEnds`) are all inert here: density and weight come
+ * from each mark, and there are no regions to erode.
  */
-export type FillStyle = "hatch" | "contour";
+export type FillStyle = "hatch" | "contour" | "drawn";
 
 export interface PlotterSettings {
   pen: PenMode;
@@ -343,11 +355,13 @@ function wedgeDir(tri: TriKey, gridDivisions: number): HatchDir {
  * crop, so there is no box to enumerate, and walking what exists is both exact
  * and cheaper than sweeping an area that is mostly empty.
  *
- * **Hatch layers are ignored**, unlike every other export. A plot puts its lines
- * on the lattice's division lines (see `rawSegments`), while an authored hatch
- * layer is centred between them; mixing the two schemes on one sheet reads as a
- * mistake, not as emphasis. Line work drawn by hand is a screen and vector
- * feature, and this export derives all of its line work from the fills.
+ * **Hatch layers are ignored here**, unlike every other export. A generated tone
+ * puts its lines on the lattice's division lines (see `rawSegments`), while an
+ * authored hatch layer is centred between them; mixing the two schemes on one
+ * sheet reads as a mistake, not as emphasis. So the two are kept mutually
+ * exclusive rather than merged: this function serves the `hatch` and `contour`
+ * styles, which derive every line from the fills, and the `drawn` style bypasses
+ * it entirely for `drawnHatchGeometry`, which plots the authored marks alone.
  */
 export function plotterMarks(
   layers: Layer[],
@@ -404,6 +418,12 @@ export function plotterMarks(
 function rawSegments(marks: Record<string, string>): RawSeg[] {
   const out: RawSeg[] = [];
   for (const g of groupHatchMarks(marks).groups) {
+    // Arcs are not expressible as `RawSeg`, which is a collinear span on a
+    // family line — `u` plus a range along it — and the whole run-joining and
+    // linking pipeline below depends on that collinearity. Skipping them keeps
+    // arcs out of the plot rather than emitting them as the straight lines
+    // `hatchLinesInBox` would otherwise return for this group.
+    if (g.kind === "arc") continue;
     const gen = trisBox(g.tris);
     if (!gen) continue;
 
@@ -427,6 +447,137 @@ function rawSegments(marks: Record<string, string>): RawSeg[] {
     }
   }
   return out;
+}
+
+/**
+ * Greedily chains segments that share endpoints into the longest polylines it
+ * can, so a field of arcs plots as a few long strokes rather than as thousands
+ * of separate pen-downs.
+ *
+ * `joinRuns` is the equivalent for straight work, but it cannot be reused: it
+ * operates in `RawSeg` space — a line family, which line of it, and an interval
+ * along that line — and merges by overlapping intervals on a shared `u`. Arcs
+ * are not collinear with anything, so there is no `u` to group them by. What
+ * they do have is exact endpoint coincidence: the radius ladder is symmetric
+ * about `SIDE/2`, so an arc entering an edge always meets its neighbour's arc at
+ * the same point. That is the only relation this needs.
+ *
+ * Coordinates are snapped to a thousandth of a world unit to index them, which
+ * is coarse next to the ~1e-9 drift that clipping leaves behind and fine next to
+ * the ~0.5 spacing of anything meant to be distinct.
+ */
+function chainSegments(segs: Seg[]): PlotPoly[] {
+  const key = (x: number, y: number) =>
+    `${Math.round(x * 1000)}:${Math.round(y * 1000)}`;
+
+  // Every segment end, indexed by where it is.
+  const ends = new Map<string, number[]>();
+  const push = (k: string, i: number) => {
+    const l = ends.get(k);
+    if (l) l.push(i);
+    else ends.set(k, [i]);
+  };
+  segs.forEach((s, i) => {
+    push(key(s[0], s[1]), i);
+    push(key(s[2], s[3]), i);
+  });
+
+  const used = new Array<boolean>(segs.length).fill(false);
+
+  /** An unused segment touching `k`, and its far end. */
+  const step = (k: string): { i: number; to: [number, number] } | null => {
+    for (const i of ends.get(k) ?? []) {
+      if (used[i]) continue;
+      const s = segs[i];
+      const atStart = key(s[0], s[1]) === k;
+      return { i, to: atStart ? [s[2], s[3]] : [s[0], s[1]] };
+    }
+    return null;
+  };
+
+  const out: PlotPoly[] = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    const s = segs[i];
+    const pts: [number, number][] = [
+      [s[0], s[1]],
+      [s[2], s[3]],
+    ];
+
+    // Forward from the tail, then backward from the head, so a chain found from
+    // its middle still comes out as one polyline.
+    for (;;) {
+      const tail = pts[pts.length - 1];
+      const n = step(key(tail[0], tail[1]));
+      if (!n) break;
+      used[n.i] = true;
+      pts.push(n.to);
+    }
+    for (;;) {
+      const head = pts[0];
+      const n = step(key(head[0], head[1]));
+      if (!n) break;
+      used[n.i] = true;
+      pts.unshift(n.to);
+    }
+    out.push(pts);
+  }
+  return out;
+}
+
+/**
+ * The authored hatch layers as plottable geometry: straight families in
+ * `RawSeg` space, arcs as chained polylines.
+ *
+ * Mirrors `rawSegments`, with the one deliberate difference that gives this
+ * style its name — the ladder is **centred**, `"center"`, exactly as authored,
+ * not snapped to the lattice like a generated tone. That also removes a step the
+ * generated path needs: a centred line sits at `(n + ½)·step` and a lattice line
+ * at a whole multiple of it, so a drawn mark can never lie along an outline and
+ * there is nothing to mask against. Arcs meet the lattice only at single points,
+ * so they cannot overdraw either.
+ */
+function drawnHatchGeometry(marks: Record<string, string>): {
+  straight: RawSeg[];
+  arcs: PlotPoly[];
+} {
+  const straight: RawSeg[] = [];
+  const arcSegs: Seg[] = [];
+
+  for (const g of groupHatchMarks(marks).groups) {
+    if (g.kind === "arc") {
+      for (const t of g.tris) {
+        for (const seg of arcSegmentsInTri(g.dir, g.density, t.q, t.r, t.type)) {
+          // The outermost radii bulge past the opposite edge; clipping each
+          // flattened piece trims them exactly as it trims an over-long line.
+          const clipped = clipSegmentToTriangle(seg, t.q, t.r, t.type);
+          if (clipped) arcSegs.push(clipped);
+        }
+      }
+      continue;
+    }
+
+    const gen = trisBox(g.tris);
+    if (!gen) continue;
+    const lines = hatchLinesInBox(g.dir, g.density, gen, "center");
+    for (const t of g.tris) {
+      for (const line of lines) {
+        const seg = clipSegmentToTriangle(line, t.q, t.r, t.type);
+        if (!seg) continue;
+        const a = along(g.dir, seg[0], seg[1]);
+        const b = along(g.dir, seg[2], seg[3]);
+        straight.push({
+          dir: g.dir,
+          u: hatchU(g.dir, seg[0], seg[1]),
+          t0: Math.min(a, b),
+          t1: Math.max(a, b),
+        });
+      }
+    }
+  }
+
+  return { straight, arcs: chainSegments(arcSegs) };
 }
 
 const dist = (ax: number, ay: number, bx: number, by: number) =>
@@ -688,6 +839,7 @@ function hatchBuckets(
 
   const cells: HatchCell[] = [];
   for (const g of groupHatchMarks(marks).groups) {
+    if (g.kind === "arc") continue; // see `rawSegments`
     for (const t of g.tris) {
       const region = indexFor(fills[triToString(t)]);
       if (region === undefined) continue;
@@ -1159,7 +1311,28 @@ export async function buildPlotterPlot(
   let outlinePolys: PlotPoly[];
   let rawCount: number;
 
-  if (
+  if (s.fillStyle === "drawn") {
+    // Nothing here is derived from tone, so there are no regions, no ladder and
+    // no Clipper on the straight path — the fills are consulted only for the
+    // outlines that make the shapes read under the drawn line work.
+    const { straight, arcs } = drawnHatchGeometry(mergeKind(layers, "hatch"));
+
+    if (radius > 0) {
+      // Rounding is a fill effect and still applies to the outlines, which are
+      // the only fill-derived geometry left. `regionPolys` flattens the rounded
+      // rings itself, so this path stays clear of Clipper — nothing here erodes
+      // a polygon, which is the only thing Clipper was ever loaded for.
+      outlinePolys = boundaryStrokes(regionPolys(fills, radius));
+    } else {
+      outlinePolys = joinRuns(outlineSegments(fills)).map(segPoly);
+    }
+
+    // No outline mask, unlike the generated hatch: a centred mark cannot lie
+    // along a lattice edge, so it cannot retrace an outline. See
+    // `drawnHatchGeometry`.
+    hatchPolys = [...joinRuns(straight).map(segPoly), ...arcs];
+    rawCount = straight.length + arcs.length + outlinePolys.length;
+  } else if (
     radius <= 0 &&
     s.fillStyle === "hatch" &&
     s.hatchInsetMm <= 0 &&
@@ -1552,7 +1725,10 @@ export function normalizePlotterSettings(raw: unknown): PlotterSettings {
   );
   return {
     pen: r.pen === "white-on-black" ? "white-on-black" : "black-on-white",
-    fillStyle: r.fillStyle === "contour" ? "contour" : "hatch",
+    fillStyle:
+      r.fillStyle === "contour" || r.fillStyle === "drawn"
+        ? r.fillStyle
+        : "hatch",
     minDensity,
     maxDensity: Math.round(
       num(

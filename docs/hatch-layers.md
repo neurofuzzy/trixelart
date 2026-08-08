@@ -27,6 +27,28 @@ Brush settings are view state → `trixel-settings`, not `ProjectSnapshot` (same
 
 3D-print and cutting exports take `mergedFillPainted`, which filters hatch layers out — hatch lines have no meaning as an extruded body or a cut path.
 
+## Truchet arcs
+
+A **second triad in the same `dirMask`** — bits 8/16/32 alongside the line families' 1/2/4 — drawing a quarter-turn arc in one corner of the trixel instead of a straight family. No new layer kind, no new value format: `"40|3|2|0,8"` is arcs in two corners, and every existing path (storage in `painted`, undo, project JSON, `mapEncodedColor`, duplicate/reorder) carries them with no change.
+
+**An arc bit names a corner by the edge it faces**, reusing the family index rather than introducing a vertex numbering. That is the whole reason the triad costs nothing: `rotateHatchMask` and `flipHatchMask` apply the *same* permutation to both triads — a 60° turn is the same 3-cycle, a mirror the same 1↔2 swap — because an arc turns with the edge it faces. Verified over all 64 masks.
+
+Two alternatives were rejected. Numbering the vertices via `getTriVertices` breaks on that function's two windings. A global 3-colouring of lattice vertices chains perfectly but is **not translation-invariant** — colour shifts under a general lattice translation, so moving a hatched selection would slide its arcs onto different corners.
+
+**Density is concentric arcs at `(n + ½)·SIDE/k`, the line ladder's radii.** The half step is load-bearing twice over here: it keeps radius 0 and radius `SIDE` out of the set, *and* it makes the ladder symmetric about `SIDE/2`, so the complement of `r[n]` is exactly `r[k−1−n]`. That symmetry is what makes arcs **chain**. Across a shared edge the two triangles centre on opposite ends of it, so an arc of radius `r` from one end lands on the same point as one of radius `SIDE − r` from the other — and only a self-complementary ladder guarantees that partner exists. Both cross the edge perpendicularly, so they join smoothly and curve opposite ways: the S-bend that turns separate arcs into long wandering paths. Verified: endpoints coincide on 450/450 shared-edge cases across densities 1–16.
+
+Density 1 — the single arc through the edge midpoints — is the classic tile, so `HatchBar` drops the slider floor from `MIN_DENSITY` to 1 whenever an arc bit is on.
+
+**Radii past the apothem are dropped, in complementary pairs.** An arc centred on a vertex is an arc of the circle about that vertex, and the six triangles meeting there form a hexagon whose inscribed circle has radius `H` — so `rad ≤ H` is exactly the condition for the arc to stay inside its own triangle, and one comparison replaces any density threshold. Past it the clip takes the arc's middle out against the opposite edge and leaves a stub either side, which reads as breakage rather than as an arc. This bites from `k = 4` (one radius), and from `k = 12` two.
+
+Dropping the outer `m` **requires** dropping the inner `m`: `r[n]`'s cross-edge partner is `r[k−1−n]`, so a one-sided trim would leave the innermost arcs ending on a shared edge with nothing to meet. Trimming both ends keeps the ladder self-complementary — symmetric about `SIDE/2` — which is the entire condition for chaining. The band narrows from both sides as density climbs (density 4 keeps 2 of 4, density 16 keeps 12 of 16) and the arcs that survive still S-bend into their neighbours. Verified over densities 1–16: every kept radius has its complement kept, and none exceeds `H`.
+
+**Arcs are flattened to `Seg` polylines** (`ARC_STEPS = 8`, sagitta < 0.05 world units) rather than being a new shape, so canvas, SVG, the crop clip and bounds all keep consuming segments and need no new case — and the preview and the exported file agree exactly rather than approximately. Unlike a line family, arcs are generated **per triangle**, so `drawHatchLayer` filters marks against the viewBox itself instead of getting that for free from line generation.
+
+**The pen plotter skips arc groups.** `RawSeg` is a collinear span on a family line (`u` plus a range along it), and the whole run-joining and linking pipeline depends on that collinearity. Skipping is deliberate: feeding an arc group to `hatchLinesInBox` would silently emit straight lines where arcs belong.
+
+A brush stroke sets the same bits everywhere, which chains into continuous scalloped bands (one bit), a hexagonal net (two) or packed circles (three). The broken labyrinth wants a *varied* bit per trixel — a generator, in the shape of Convert to Hatches, not a brush.
+
 ## Convert to hatches
 
 Re-renders existing flat colour as line work: reads the merged fills **below** the active hatch layer, inside the hex selection, and writes a whole selection's worth of marks in one undoable step. `src/lib/hatchify.ts` is the maths (pure); `HatchifyDialog` is the UI; the button lives in `HatchBar` and shows only under Select with a live selection.

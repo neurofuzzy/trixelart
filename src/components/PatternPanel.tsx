@@ -6,14 +6,25 @@ import { cn } from "@/lib/utils";
 import { PanelShell } from "@/components/PanelShell";
 import { encodeColor, resolveColor } from "@/lib/constants";
 import {
+  MAX_FOLDS,
+  MAX_STEPS,
+  MIN_FOLDS,
+  MIN_STEPS,
   PATTERN_BLEND_MODES,
+  PATTERN_FIELDS,
   makePatternLayer,
   makePatternPainter,
-  triPatternValue,
+  mixHex,
+  patternField,
+  patternFolds,
+  patternSteps,
+  patternTone,
+  type PatternField,
   type PatternLayer,
   type PatternBlendMode,
   type QuantizeTarget,
 } from "@/lib/tri-pattern";
+import { nearestCoincidence, snapRotation } from "@/lib/eisenstein";
 import {
   PREVIEW_SPAN,
   PREVIEW_TRIS,
@@ -39,7 +50,8 @@ const MODE_LABEL: Record<PatternBlendMode, string> = {
 };
 
 /** Label above a slider, value right-aligned in mono so it stops jittering as
- *  the thumb moves. */
+ *  the thumb moves. `disabled` carries the *reason* rather than a boolean, so a
+ *  control that does not apply says why instead of just going grey. */
 function SliderField({
   label,
   value,
@@ -47,6 +59,7 @@ function SliderField({
   max,
   step,
   display,
+  disabled,
   onChange,
 }: {
   label: string;
@@ -55,16 +68,20 @@ function SliderField({
   max: number;
   step: number;
   display: string;
+  disabled?: string;
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex flex-col gap-1 shrink-0">
+    <label
+      className={cn("flex flex-col gap-1 shrink-0", disabled && "opacity-40")}
+      title={disabled}
+    >
       <span className="flex items-baseline justify-between">
         <span className="text-xs uppercase tracking-wide text-white/60">
           {label}
         </span>
         <span className="text-xs font-mono text-white/50 tabular-nums">
-          {display}
+          {disabled ?? display}
         </span>
       </span>
       <input
@@ -73,10 +90,92 @@ function SliderField({
         max={max}
         step={step}
         value={value}
+        disabled={Boolean(disabled)}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full h-2 accent-white"
       />
     </label>
+  );
+}
+
+const FIELD_LABEL: Record<PatternField, string> = {
+  checker: "Checker",
+  waves: "Waves",
+};
+
+/** Treat a fit this tight as exact. Landing on a landmark leaves an error of
+ *  order 1e-6 from the double arithmetic alone, so the test cannot be `=== 0`;
+ *  a couple of orders of margin above that is still far finer than the sliders
+ *  can express. */
+const LOCKED_EPS = 2e-5;
+
+/**
+ * Names the exactly-repeating setting nearest to the current one, and offers to
+ * jump to it.
+ *
+ * Deliberately a readout with one button rather than a ladder of presets. The
+ * repeating settings are dense — between any two there are more — so a
+ * catalogue would be arbitrary, and the panel is height-constrained enough that
+ * the preview is the first thing to give way (see docs/pattern-brush.md). This
+ * costs two lines and answers the only question the sliders cannot: *is what I
+ * am looking at going to tile, or is it drifting?*
+ *
+ * Snapping stays opt-in. Quantizing rotation to the lattice was tried and
+ * reverted because it puts the whole emergent family out of reach — so this
+ * offers the landmark and never moves the sliders on its own.
+ */
+function RepeatRow({
+  scale,
+  rotation,
+  onLock,
+}: {
+  scale: number;
+  rotation: number;
+  onLock: (scale: number, rotation: number) => void;
+}) {
+  const fit = useMemo(
+    () => nearestCoincidence(scale, rotation),
+    [scale, rotation],
+  );
+  if (!fit) return null;
+
+  const locked = fit.epsilon < LOCKED_EPS;
+  const cell = fit.near.period.toFixed(2);
+  // How many times the motif repeats before the drift adds up to a whole cell.
+  const holds = 1 / fit.epsilon;
+
+  return (
+    <div className="flex flex-col gap-1 shrink-0">
+      <span className="flex items-baseline justify-between">
+        <span className="text-xs uppercase tracking-wide text-white/60">
+          Repeat
+        </span>
+        <span className="text-xs font-mono text-white/50 tabular-nums">
+          {locked
+            ? `${cell} cells · exact`
+            : `${cell} cells · holds ${holds >= 1000 ? `${Math.round(holds / 1000)}k` : Math.round(holds)}×`}
+        </span>
+      </span>
+      <button
+        onClick={() =>
+          onLock(fit.near.scale, snapRotation(fit.near.rotation, rotation))
+        }
+        disabled={locked}
+        title={
+          locked
+            ? "This pattern tiles exactly"
+            : `Snap to ×${fit.near.scale.toFixed(3)} / ${snapRotation(fit.near.rotation, rotation).toFixed(2)}°`
+        }
+        className={cn(
+          "text-xs py-1.5 rounded-md border transition-colors",
+          locked
+            ? "border-white/10 text-white/30 cursor-default"
+            : "border-white/10 text-white/60 hover:bg-white/5",
+        )}
+      >
+        {locked ? "Tiles exactly" : "Lock to nearest"}
+      </button>
+    </div>
   );
 }
 
@@ -89,9 +188,11 @@ function LayerThumb({ layer }: { layer: PatternLayer }) {
     const c = ref.current;
     if (!c) return;
     // The thumbnail shows the layer alone, unblended and unquantized — it is
-    // there to identify the layer, not to predict the composite.
+    // there to identify the layer, not to predict the composite. It does honour
+    // the layer's own ramp, since a multi-tone layer and a two-tone one are
+    // otherwise indistinguishable in the list.
     paintPatternCanvas(c, THUMB_SPAN, THUMB_TRIS, (t) =>
-      triPatternValue(t, layer) ? fg : bg,
+      mixHex(bg, fg, patternTone(t, layer)),
     );
   }, [layer, fg, bg]);
 
@@ -431,6 +532,33 @@ export function PatternPanel({
             </div>
           </div>
 
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Field
+            </span>
+            <div className="grid grid-cols-2 gap-1.5">
+              {PATTERN_FIELDS.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => update({ field: f })}
+                  title={
+                    f === "checker"
+                      ? "Up/down parity of the re-quantized sample"
+                      : "Sum of plane waves — continuous, so Tones has something to work with"
+                  }
+                  className={cn(
+                    "text-xs py-1.5 rounded-md border transition-colors",
+                    patternField(active) === f
+                      ? "border-white bg-white/15 text-white"
+                      : "border-white/10 text-white/60 hover:bg-white/5",
+                  )}
+                >
+                  {FIELD_LABEL[f]}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Above 1 the pattern lattice is finer than the grid, which is where
               the emergent motifs live — so the range runs well past it. */}
           <SliderField
@@ -444,16 +572,44 @@ export function PatternPanel({
           />
 
           {/* Continuous on purpose: snapping to the lattice's 6-fold symmetry
-              would remove every pattern that depends on being off-axis. */}
+              would remove every pattern that depends on being off-axis. The
+              landmarks live in `RepeatRow` below, as an offer rather than a
+              constraint. Two decimals because a locked angle is rarely a round
+              number — 44.82° displayed as 45° would contradict the readout. */}
           <SliderField
             label="Rotation"
             value={active.rotation}
             min={0}
             max={360}
-            step={0.1}
-            display={`${Math.round(active.rotation)}°`}
+            step={0.01}
+            display={`${active.rotation.toFixed(2)}°`}
             onChange={(rotation) => update({ rotation })}
           />
+
+          {patternField(active) === "waves" ? (
+            /* Odd fold counts are the interesting ones: their wave directions
+               cannot line up with the lattice's 6-fold symmetry, so the field
+               never repeats however the other two sliders are set. */
+            <SliderField
+              label="Folds"
+              value={patternFolds(active)}
+              min={MIN_FOLDS}
+              max={MAX_FOLDS}
+              step={1}
+              display={`${patternFolds(active)} · ${2 * patternFolds(active)}-fold`}
+              onChange={(folds) => update({ folds })}
+            />
+          ) : (
+            /* Only meaningful for the checker: the Eisenstein argument is about
+               re-quantizing into the lattice, and a wave sum does not do that.
+               Showing it here for `waves` would be a claim about repetition that
+               the field does not honour. */
+            <RepeatRow
+              scale={active.scale}
+              rotation={active.rotation}
+              onLock={(scale, rotation) => update({ scale, rotation })}
+            />
+          )}
         </>
       ) : (
         <>
@@ -493,6 +649,25 @@ export function PatternPanel({
               onChange={(c) => update({ bg: c })}
             />
           </div>
+
+          {/* Lives on the Color tab rather than next to the field: it is a
+              question about what the layer's two colours mean, not about the
+              geometry. `checker` is binary whatever this says, so it is disabled
+              there rather than silently ignored. */}
+          <SliderField
+            label="Tones"
+            value={patternSteps(active)}
+            min={MIN_STEPS}
+            max={MAX_STEPS}
+            step={1}
+            disabled={patternField(active) === "waves" ? undefined : "checker is two-valued"}
+            display={
+              patternSteps(active) === MIN_STEPS
+                ? "2 · flat"
+                : `${patternSteps(active)}`
+            }
+            onChange={(steps) => update({ steps })}
+          />
 
           <SliderField
             label="Opacity"

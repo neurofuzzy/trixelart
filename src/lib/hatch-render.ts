@@ -1,4 +1,4 @@
-import { getTriVertices } from "@/lib/grid-math";
+import { getTriVertices, type TriKey } from "@/lib/grid-math";
 import { resolveColor } from "@/lib/constants";
 import { colorAdjuster } from "@/lib/color-adjust";
 import type {
@@ -13,6 +13,7 @@ import {
   type GlowSpec,
 } from "@/lib/glow";
 import {
+  arcSegmentsInTri,
   clipSegmentToRect,
   clipSegmentToTriangle,
   groupHatchMarks,
@@ -250,6 +251,22 @@ export function buildRenderPlan(layers: Layer[]): RenderStep[] {
  * `Math.max(w, k / zoom)` trick the grid outlines use. Exports pass no zoom and
  * get the true world weight.
  */
+/** Whether a triangle's bounding box overlaps `box`. Deliberately cheap and
+ *  conservative — it only has to reject marks that are plainly off-screen. */
+function triInBox(t: TriKey, box: Box): boolean {
+  const v = getTriVertices(t.q, t.r, t.type);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of v) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return (
+    maxX >= box.minX && minX <= box.maxX && maxY >= box.minY && minY <= box.maxY
+  );
+}
+
 export function drawHatchLayer(
   ctx: CanvasRenderingContext2D,
   marks: Record<string, string>,
@@ -264,7 +281,20 @@ export function drawHatchLayer(
     const clipped = viewBox ? intersectBox(box, viewBox) : box;
     if (!clipped) continue;
 
-    const lines = hatchLinesInBox(g.dir, g.density, clipped);
+    // Arc centres move with each triangle, so unlike a line family they cannot
+    // be generated once for the whole group. The clip still earns its keep: it
+    // trims the outer radii where they bulge past the opposite edge.
+    const lines = g.kind === "arc"
+      ? g.tris.flatMap((t) =>
+          // Off-screen marks are skipped individually. A line family is bounded
+          // by `clipped` when it is *generated*; arcs are generated per mark, so
+          // without this a large document rebuilds its whole extent on every
+          // pointer move — the same trap `viewBox` exists to avoid.
+          triInBox(t, clipped)
+            ? arcSegmentsInTri(g.dir, g.density, t.q, t.r, t.type)
+            : [],
+        )
+      : hatchLinesInBox(g.dir, g.density, clipped);
     if (lines.length === 0) continue;
 
     ctx.save();
@@ -322,11 +352,14 @@ export function hatchStrokes(
     const gen = clipBox ? intersectBox(box, clipBox) : box;
     if (!gen) continue;
 
-    const lines = hatchLinesInBox(g.dir, g.density, gen);
-    if (lines.length === 0) continue;
+    const shared = g.kind === "arc" ? null : hatchLinesInBox(g.dir, g.density, gen);
+    if (shared && shared.length === 0) continue;
     const color = resolveColor(g.color);
 
     for (const t of g.tris) {
+      // Per triangle for arcs, one shared family for lines.
+      const lines =
+        shared ?? arcSegmentsInTri(g.dir, g.density, t.q, t.r, t.type);
       for (const line of lines) {
         const tri = clipSegmentToTriangle(line, t.q, t.r, t.type);
         if (!tri) continue;

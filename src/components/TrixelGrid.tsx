@@ -113,6 +113,7 @@ import {
   DEFAULT_HATCH_BRUSH,
   MAX_DENSITY,
   MAX_WEIGHT,
+  DIR_MASK_MAX,
   MIN_DENSITY,
   MIN_WEIGHT,
   type HatchBrush,
@@ -729,7 +730,7 @@ export default function TrixelGrid() {
           setHatchBrushState({
             // Clamped on ingest — this is a file-format boundary, and a mask of
             // 0 would be a brush that silently paints nothing.
-            dirMask: num(h.dirMask, 1, 7, DEFAULT_HATCH_BRUSH.dirMask),
+            dirMask: num(h.dirMask, 1, DIR_MASK_MAX, DEFAULT_HATCH_BRUSH.dirMask),
             density: num(
               h.density,
               MIN_DENSITY,
