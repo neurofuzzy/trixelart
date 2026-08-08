@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +11,9 @@ import {
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
+import { clipLayersToSelection } from "@/lib/hatch-render";
 import type { Layer } from "@/hooks/use-history";
+import type { HexRegion } from "@/lib/hex-flower";
 import type { NoisePeriod } from "@/lib/subdivision-noise";
 import { normalizeProjectFilename } from "@/lib/utils";
 
@@ -32,6 +34,7 @@ export function ExportDialog({
   onSettingsChange,
   noisePeriod,
   gridRotation,
+  selection = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,19 +49,35 @@ export function ExportDialog({
   /** The lattice's quarter turn, so a pointy-top grid exports the way the
    *  editor draws it. */
   gridRotation?: number;
+  /** The live hex selection, offered as an export bound. Empty means the
+   *  option isn't available at all. */
+  selection?: HexRegion[];
 }) {
   const stroke = settings.stroke ?? false;
   const merge = settings.merge ?? false;
 
+  // Deliberately *not* part of `SVGExportOptions`: those persist, and a saved
+  // "selection only" would come back with no selection to apply it to. The
+  // choice belongs to the selection that is on screen right now, so the
+  // toggle dies with it.
+  const [selectionOnlyPref, setSelectionOnlyPref] = useState(false);
+  const canClip = selection.length > 0;
+  const selectionOnly = canClip && selectionOnlyPref;
+
+  const exported = useMemo(
+    () => (selectionOnly ? clipLayersToSelection(layers, selection) : layers),
+    [layers, selection, selectionOnly],
+  );
+
   const svg = useMemo(
     () =>
-      generateSVG(layers, {
+      generateSVG(exported, {
         stroke,
         merge,
         period: noisePeriod,
         rotation: gridRotation,
       }),
-    [layers, stroke, merge, noisePeriod, gridRotation],
+    [exported, stroke, merge, noisePeriod, gridRotation],
   );
 
   const previewSvg = useMemo(() => stripSvgDimensions(svg), [svg]);
@@ -132,6 +151,20 @@ export function ExportDialog({
                 Merge same color triangles
               </span>
             </label>
+            {canClip && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectionOnlyPref}
+                  onChange={(e) => setSelectionOnlyPref(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-sm text-muted-foreground">
+                  Selection only ({selection.length} hex
+                  {selection.length === 1 ? "" : "es"})
+                </span>
+              </label>
+            )}
           </div>
         </div>
 

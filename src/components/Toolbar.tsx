@@ -33,6 +33,7 @@ import {
   Pipette,
   GitCompareArrows,
   HelpCircle,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -115,6 +116,8 @@ export function Toolbar({
   onToolChange,
   activeLayerKind,
   onExport,
+  onSaveSelection,
+  hasSelection,
   onExportSVG,
   onExport3D,
   onExportCut,
@@ -145,6 +148,9 @@ export function Toolbar({
   /** Kind of the active layer — decides which tools are usable. */
   activeLayerKind: LayerKind;
   onExport: () => void;
+  onSaveSelection: () => void;
+  /** Gates "Save Selection..." — there is nothing to narrow to without one. */
+  hasSelection: boolean;
   onExportSVG: () => void;
   onExport3D: () => void;
   onExportCut: () => void;
@@ -177,6 +183,7 @@ export function Toolbar({
   const activeEdit = shownTools.find((e) => e.tool === tool);
   const ActiveIcon = activeEdit?.icon ?? Pencil;
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [flowerOpen, setFlowerOpen] = useState(false);
   const flowerWrapRef = useRef<HTMLDivElement | null>(null);
@@ -246,16 +253,51 @@ export function Toolbar({
               <Upload className="w-4 h-4" />
               <span>Save Project</span>
             </DropdownMenuItem>
+            {/* Sits with Save Project rather than with the exports: what it
+                writes is a project file, loadable like any other — the
+                selection only decides how much of the project goes in. */}
             <DropdownMenuItem
+              disabled={!hasSelection}
               onClick={() => {
                 setHamburgerOpen(false);
+                onSaveSelection();
+              }}
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Selection...</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Its own menu, not a submenu of the hamburger. The two lists answer
+            different questions — "what is my project" against "what do I want
+            out of it" — and the export side has six entries that all read as
+            "Export for …", which buried New/Load/Save under them. Matches the
+            hamburger's bare-icon trigger so the pair reads as two menus rather
+            than a menu and a button. */}
+        <DropdownMenu open={exportOpen} onOpenChange={setExportOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Export"
+              data-tour="export-menu"
+            >
+              <ImageDown className="w-4 h-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={6}>
+            <DropdownMenuItem
+              onClick={() => {
+                setExportOpen(false);
                 onExportSVG();
               }}
             >
-              {/* Both this and Save Project write `.svg` now; only the saved
-                  one can be loaded back, so the labels have to say which. */}
+              {/* Both this and Save Project write `.svg`; only the saved one can
+                  be loaded back, so the labels have to say which. They are in
+                  different menus now, which helps but does not say it. */}
               <ImageDown className="w-4 h-4" />
-              <span>Export Image (SVG)...</span>
+              <span>Image (SVG)...</span>
             </DropdownMenuItem>
             {/* Not a dialog — fabric export is a whole editing mode (crop
                 handles on the canvas), so the menu selects the tool, which is
@@ -266,55 +308,60 @@ export function Toolbar({
                 which only reads correctly if entering it went through here. */}
             <DropdownMenuItem
               onClick={() => {
-                setHamburgerOpen(false);
+                setExportOpen(false);
                 onToolChange("crop");
               }}
             >
               <Scroll className="w-4 h-4" />
-              <span>Export for Fabric...</span>
+              <span>Fabric...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
-                setHamburgerOpen(false);
+                setExportOpen(false);
                 onExport3D();
               }}
             >
               <Box className="w-4 h-4" />
-              <span>Export for 3D Print...</span>
+              <span>3D Print...</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
-                setHamburgerOpen(false);
+                setExportOpen(false);
                 onExportCut();
               }}
             >
               <Scissors className="w-4 h-4" />
-              <span>Export for Cutting...</span>
+              <span>Cutting...</span>
             </DropdownMenuItem>
             {/* A dialog, not a canvas mode: a plot takes the whole artwork, so
                 unlike fabric there is no region to drag out on the canvas. */}
             <DropdownMenuItem
               onClick={() => {
-                setHamburgerOpen(false);
+                setExportOpen(false);
                 onExportPlotter();
               }}
             >
               <PenLine className="w-4 h-4" />
-              <span>Export for Plotter...</span>
+              <span>Plotter...</span>
             </DropdownMenuItem>
             {/* Also a dialog, and also whole-artwork: a shirt print is not a
                 repeat tile, so it takes no crop either. */}
             <DropdownMenuItem
               onClick={() => {
-                setHamburgerOpen(false);
+                setExportOpen(false);
                 onExportApparel();
               }}
             >
               <Shirt className="w-4 h-4" />
-              <span>Export for Apparel...</span>
+              <span>Apparel...</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Matches the rule before the effects group. Unlike that one it shows
+            at every width: the tools are a dropdown below `lg` and a row above
+            it, but the menus sit to the left of them either way. */}
+        <div className="w-px h-6 bg-border mx-0.5 self-center" />
 
         <div className="lg:hidden">
           <DropdownMenu>

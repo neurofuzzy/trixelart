@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, FlipVertical, FlipHorizontal } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, FlipVertical, FlipHorizontal, Layers } from "lucide-react";
 import type { GridOrientation } from "@/components/Footer";
 
 export function SelectionPalette({
@@ -11,6 +11,8 @@ export function SelectionPalette({
   onFlip,
   onFlipHorizontal,
   onPaletteShift,
+  onMoveToLayer,
+  canMoveToLayer,
   hasSelection,
   onPointerEnter,
   gridOrientation,
@@ -21,6 +23,9 @@ export function SelectionPalette({
   onFlip: () => void;
   onFlipHorizontal: () => void;
   onPaletteShift: (dir: number) => void;
+  onMoveToLayer: () => void;
+  /** False once the layer stack is full — the split has nowhere to go. */
+  canMoveToLayer: boolean;
   hasSelection: boolean;
   onPointerEnter: () => void;
   gridOrientation: GridOrientation;
@@ -133,6 +138,23 @@ export function SelectionPalette({
         ) : (
           <FlipHorizontal className="w-4 h-4" />
         )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={(e) => {
+          e.stopPropagation();
+          onMoveToLayer();
+        }}
+        disabled={!hasSelection || !canMoveToLayer}
+        title={
+          canMoveToLayer
+            ? "Move selection to a new layer"
+            : "Move selection to a new layer — the layer stack is full"
+        }
+      >
+        <Layers className="w-4 h-4" />
       </Button>
     </div>
   );

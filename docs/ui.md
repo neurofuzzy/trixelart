@@ -32,6 +32,27 @@
 
 Shortcuts suppressed when focus is in `<input>` or `<textarea>` (except `Escape` and undo/redo).
 
+## The two toolbar menus
+
+The left of the toolbar carries **two** dropdowns, split by the question they
+answer:
+
+- **Hamburger** (`data-tour="menu"`) — *what is my project*: New Project, Load
+  Project, Load Example..., Save Project, Save Selection... All of these read or
+  write a `.trixel.svg`, or replace what is on the canvas.
+- **Export** (`data-tour="export-menu"`) — *what do I want out of it*: Image
+  (SVG)..., Fabric..., 3D Print..., Cutting..., Plotter..., Apparel...
+
+They used to be one list of eleven. Six of them began "Export for …", which
+buried New/Load/Save under a wall of near-identical entries; the prefix is gone
+now that the menu itself says it. Both triggers are bare `size="icon"` ghost
+buttons, so the pair reads as two menus rather than as a menu and a button.
+
+"Save Selection..." stays with the project items despite being about the
+selection: what it writes is a project file, loadable like any other. Only *how
+much* of the project goes in is the selection's business. It is disabled with no
+selection.
+
 ## The panel slot
 
 Four right-hand drawers — **Layers**, **Grid Settings**, **Pattern** and **Crop & Export** — share one strip down the right edge of the canvas, and **exactly one may be open at a time**. That is held by a single `panel: PanelId | null` in `TrixelGrid` rather than a boolean per drawer: with four booleans "only one" is a rule every new call site has to remember, and the failure mode is two drawers stacked on the same 384px of screen with the lower one unreachable.
@@ -43,7 +64,7 @@ Children supply their own scroll container, because the four do not agree on wha
 **Two kinds of drawer, and the difference is who opens them.**
 
 - **Tool-owned** (`panelForTool`): the Pattern drawer *is* the pattern brush's controls, and Crop & Export is the crop tool's. Selecting the tool opens it; leaving the tool closes it.
-  - **Crop goes further: the drawer owns the tool back.** Crop has no toolbar button — it is entered from the hamburger's "Export for Fabric..." — so closing its drawer, or letting another drawer take the slot, exits crop mode (`showPanel` → `leaveCropMode`). Without that, opening Layers over it left the canvas covered in crop handles with painting locked out and nothing on screen to explain why. A tool whose whole interface is one drawer cannot outlive the drawer.
+  - **Crop goes further: the drawer owns the tool back.** Crop has no toolbar button — it is entered from the Export menu's "Fabric..." — so closing its drawer, or letting another drawer take the slot, exits crop mode (`showPanel` → `leaveCropMode`). Without that, opening Layers over it left the canvas covered in crop handles with painting locked out and nothing on screen to explain why. A tool whose whole interface is one drawer cannot outlive the drawer.
 - **Manual**: Layers and Grid Settings are toggled from the footer and survive a tool change — unless a tool-owned drawer takes the slot, which is the one thing that can evict them.
 
 **The reconciliation lives in `changeTool`, not in an effect keyed on `tool`.** Re-selecting the tool that already owns the slot does not change `tool`, so an effect would never fire and the drawer's own close button would be a one-way door: closed, with no way back short of switching tools twice. Doing it in the handler also avoids the cascading render `setState` inside an effect costs.

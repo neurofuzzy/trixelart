@@ -177,7 +177,7 @@ export interface ProjectSnapshot {
 
 const STORAGE_KEY = "trixel-save";
 const MAX_HISTORY = 50;
-const MAX_LAYERS = 5;
+export const MAX_LAYERS = 5;
 
 function makeLayer(name: string, kind: LayerKind = "fill"): Layer {
   return {
@@ -187,6 +187,55 @@ function makeLayer(name: string, kind: LayerKind = "fill"): Layer {
     painted: {},
     visible: true,
   };
+}
+
+/** The next free "Layer N" number. Both kinds share the numbering — see
+ *  `addLayer` for why the prefix has to stay parseable. */
+function nextLayerNumber(layers: Layer[]): number {
+  const nums = layers.map(
+    (l) => parseInt(l.name.replace("Layer ", ""), 10) || 0,
+  );
+  return Math.max(0, ...nums) + 1;
+}
+
+/**
+ * Lifts `moved` off `layers[idx]` into a fresh layer, and returns the whole new
+ * stack — or null when there is nothing to move or no room for another layer,
+ * so the caller can leave the artwork (and the undo stack) alone.
+ *
+ * A pure function over the array rather than a `setLayers` updater: two layers
+ * change at once, so the caller has to push the result as one history entry and
+ * needs the array in hand to do it.
+ *
+ * The new layer goes **directly above its source**, inherits its kind, its
+ * visibility and a deep copy of its effects. All four are the same requirement:
+ * splitting cells out must not change what the composite looks like, and
+ * anywhere else in the stack — or any other effect list — would.
+ */
+export function splitLayerAt(
+  layers: Layer[],
+  idx: number,
+  moved: Record<string, string>,
+): Layer[] | null {
+  const src = layers[idx];
+  if (!src || layers.length >= MAX_LAYERS) return null;
+  const keys = Object.keys(moved);
+  if (keys.length === 0) return null;
+
+  const remaining = { ...src.painted };
+  for (const k of keys) delete remaining[k];
+
+  const split: Layer = {
+    ...makeLayer(`Layer ${nextLayerNumber(layers)}`, layerKind(src)),
+    painted: { ...moved },
+    visible: src.visible,
+    effects: layerEffects(src).map((e) => ({ ...e })),
+  };
+
+  const next = [...layers];
+  next[idx] = { ...src, painted: remaining };
+  next.splice(idx + 1, 0, split);
+  return next;
 }
 
 function defaultLayers(): Layer[] {
@@ -365,9 +414,7 @@ export function useHistory() {
   const addLayer = useCallback((kind: LayerKind = "fill") => {
     setLayers((prev) => {
       if (prev.length >= MAX_LAYERS) return prev;
-      const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
-      const nextNum = Math.max(0, ...nameNums) + 1;
-      const next = [...prev, makeLayer(`Layer ${nextNum}`, kind)];
+      const next = [...prev, makeLayer(`Layer ${nextLayerNumber(prev)}`, kind)];
       setActiveLayerIdx(next.length - 1);
       return next;
     });
@@ -392,10 +439,8 @@ export function useHistory() {
         if (prev.length >= MAX_LAYERS) return prev;
         const src = prev[idx];
         if (!src) return prev;
-        const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
-        const nextNum = Math.max(0, ...nameNums) + 1;
         const dup: Layer = {
-          ...makeLayer(`Layer ${nextNum}`, layerKind(src)),
+          ...makeLayer(`Layer ${nextLayerNumber(prev)}`, layerKind(src)),
           painted: { ...src.painted },
           visible: src.visible,
           // Deep-copied, or editing one copy's radius would move the other's.

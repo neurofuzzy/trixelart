@@ -1,6 +1,8 @@
 import { generateSVG, type SVGExportOptions } from "@/lib/svg-export";
+import { clipLayersToSelection } from "@/lib/hatch-render";
 import { normalizeProjectFilename } from "@/lib/utils";
 import type { ProjectSnapshot } from "@/hooks/use-history";
+import type { HexRegion } from "@/lib/hex-flower";
 import type { NoisePeriod } from "@/lib/subdivision-noise";
 
 /**
@@ -135,6 +137,56 @@ export function buildProjectSVG(
     period: noisePeriod,
     rotation: gridRotation,
   });
+}
+
+/** What "Save Selection..." lets the user decide. */
+export interface SelectionSaveOptions {
+  name: string;
+  /** Carry the stamp palette (`selections`) into the saved file. */
+  includeStamps: boolean;
+  /** Keep layers the clip emptied, so the stack's shape survives the save. */
+  includeEmptyLayers: boolean;
+}
+
+/**
+ * The payload for "Save Selection...": the same project narrowed to what the
+ * hex selection covers.
+ *
+ * A **payload transform, not a second file format**. The result goes through
+ * `buildProjectSVG` like any other save, so a saved selection is an ordinary
+ * project file that loads through the ordinary importer — which is the whole
+ * point of it being a save rather than an export.
+ *
+ * Everything else the payload carries rides along untouched: grid divisions, hex
+ * mode, symmetry, the palette offsets and the orientation all have to match or
+ * the piece reopens meaning something different.
+ */
+export function selectionPayload(
+  payload: ProjectPayload,
+  regions: HexRegion[],
+  opts: SelectionSaveOptions,
+): ProjectPayload {
+  const clipped = clipLayersToSelection(payload.layers, regions);
+  const active = clipped[payload.activeLayerIdx] ?? clipped[0];
+
+  let layers = clipped;
+  if (!opts.includeEmptyLayers) {
+    const kept = clipped.filter((l) => Object.keys(l.painted).length > 0);
+    // A project with no layers at all cannot be opened, so one always survives.
+    // Emptying the active layer rather than picking an arbitrary survivor keeps
+    // the saved file honest about which layer the selection came from.
+    layers = kept.length > 0 ? kept : [{ ...active, painted: {} }];
+  }
+
+  return {
+    ...payload,
+    layers,
+    // `indexOf` is -1 when the active layer was one of the dropped empties,
+    // which `Math.max` turns into the bottom layer.
+    activeLayerIdx: Math.max(0, layers.indexOf(active)),
+    name: opts.name,
+    selections: opts.includeStamps ? payload.selections : [],
+  };
 }
 
 export type ReadResult =

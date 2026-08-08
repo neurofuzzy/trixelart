@@ -8,7 +8,8 @@ import { cn, normalizeProjectFilename } from "@/lib/utils";
 import type { Layer } from "@/hooks/use-history";
 import { downloadBlob } from "@/lib/png-export";
 import { MAX_DENSITY, MIN_DENSITY } from "@/lib/hatch";
-import { layersRoundFraction } from "@/lib/hatch-render";
+import { clipLayersToSelection, layersRoundFraction } from "@/lib/hatch-render";
+import type { HexRegion } from "@/lib/hex-flower";
 import {
   MAX_HATCH_INSET_MM,
   MAX_MARGIN_IN,
@@ -139,6 +140,7 @@ export function PlotterDialog({
   projectName,
   settings,
   onSettingsChange,
+  selection = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -149,9 +151,26 @@ export function PlotterDialog({
   projectName: string;
   settings: PlotterSettings;
   onSettingsChange: (patch: Partial<PlotterSettings>) => void;
+  /** The live hex selection, offered as a plot bound. Empty means the option
+   *  isn't available at all. */
+  selection?: HexRegion[];
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Local rather than a `PlotterSettings` field, which persists: a saved
+  // "selection only" would return with no selection to apply it to. The
+  // toggle belongs to the selection on screen and dies with it.
+  const [selectionOnlyPref, setSelectionOnlyPref] = useState(false);
+  const canClip = selection.length > 0;
+  const selectionOnly = canClip && selectionOnlyPref;
+
+  // The page is derived from what is painted, so clipping here also shrinks
+  // the sheet to the selection — which is the point of plotting one.
+  const plotted = useMemo(
+    () => (selectionOnly ? clipLayersToSelection(layers, selection) : layers),
+    [layers, selection, selectionOnly],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -173,7 +192,7 @@ export function PlotterDialog({
     settings.fillStyle === "contour" ||
     // Direction comes from the marks, not from a hex wedge.
     settings.fillStyle === "drawn";
-  const roundFraction = useMemo(() => layersRoundFraction(layers), [layers]);
+  const roundFraction = useMemo(() => layersRoundFraction(plotted), [plotted]);
 
   /**
    * The plot is built asynchronously — the polygon path loads Clipper on
@@ -198,7 +217,7 @@ export function PlotterDialog({
     const id = ++requestRef.current;
     setBuilding(true);
     const timer = setTimeout(() => {
-      buildPlotterPlot(layers, gridRotation, gridDivisions, settings)
+      buildPlotterPlot(plotted, gridRotation, gridDivisions, settings)
         .then((next) => {
           if (requestRef.current !== id) return;
           setPlot(next);
@@ -211,7 +230,7 @@ export function PlotterDialog({
         });
     }, 120);
     return () => clearTimeout(timer);
-  }, [open, canPlot, layers, gridRotation, gridDivisions, settings]);
+  }, [open, canPlot, plotted, gridRotation, gridDivisions, settings]);
 
   const layout = useMemo(
     () => (plot ? plotterLayout(plot, settings) : null),
@@ -298,6 +317,25 @@ export function PlotterDialog({
           </div>
 
           <div className="sm:w-72 shrink-0 min-h-0 overflow-y-auto pr-1 divide-y divide-white/10">
+            {/* First, because it decides *what* is being plotted — everything
+                below is how. Only offered while a selection exists. */}
+            {canClip && (
+              <Section title="Artwork">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectionOnlyPref}
+                    onChange={(e) => setSelectionOnlyPref(e.target.checked)}
+                    className="size-4 rounded accent-amber-400"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Selection only ({selection.length} hex
+                    {selection.length === 1 ? "" : "es"})
+                  </span>
+                </label>
+              </Section>
+            )}
+
             <Section title="Pen">
               <div className="flex rounded-md overflow-hidden border border-white/10">
                 {(

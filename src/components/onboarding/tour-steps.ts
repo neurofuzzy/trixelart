@@ -63,7 +63,13 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: "menu",
     title: "Projects",
-    body: "Start a new project, load or save your work as a file, or export your art as an SVG from this menu.",
+    body: "Start a new project, load an example, or save your work as a file. You can also save just the selected hexes as a project of their own.",
+    placement: "bottom",
+  },
+  {
+    target: "export-menu",
+    title: "Exports",
+    body: "Take your art out: an SVG image, a seamless fabric tile, a 3D print, a cutting file, a pen-plotter drawing, or an apparel print.",
     placement: "bottom",
   },
   {

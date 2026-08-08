@@ -48,7 +48,9 @@ size and shape stay hexagonal, the anchor is free.
   overlap, and each holds 6N² trixels like any hex.
 - Every consumer that treats the selection as a **boundary** goes through
   `regionMembership(regions)` — fill, ALT-erase, `clippedLine`, the paint-target
-  clip in `use-interaction`. None of them knows the lattice may be shifted.
+  clip in `use-interaction`, `clipLayersToSelection` (the selection-only
+  exports, see [exports.md](exports.md)) and the move-to-new-layer split. None
+  of them knows the lattice may be shifted.
 - Every consumer that **operates on** the selection takes a region:
   `regionTrixels`, `rotateHexCW`/`CCW`, `flipHexVertical`/`Horizontal`,
   `remapHex`, `shiftHexPalettes`, `hatchify`. Because a region carries its own
@@ -61,6 +63,27 @@ size and shape stay hexagonal, the anchor is free.
   itself rather than of a triangle centroid. The old code re-snapped by feeding
   the moved world point to `worldToTri`, which is ambiguous at a hex corner (the
   usual case) and disagreed with the nearest hex in ~4.5% of drags.
+
+### Move the selection to a new layer
+
+The last button of `SelectionPalette` lifts everything the selection covers off
+the **active** layer into a layer of its own. `splitLayerAt(layers, idx, moved)`
+(`use-history.ts`) is the whole operation, as a pure function over the array.
+
+- **The new layer goes directly above its source**, and inherits its kind, its
+  visibility and a deep copy of its effects. All four say the same thing: a
+  split must not change what the composite looks like. Anywhere else in the
+  stack, a different kind, or a different effect list, and it would. Verified:
+  the exported SVG's element set is unchanged by a split, differing only in the
+  emission order of non-overlapping cells.
+- It returns **null** rather than an array when there is nothing painted inside
+  the selection or the stack is already at `MAX_LAYERS`, so the caller makes no
+  edit and pushes no history entry. The button is disabled on the second of
+  those; the first is only knowable after walking the layer.
+- Two layers change at once, which is why this cannot go through `setPainted` /
+  `snapshotWithPainted` — those address only `layers[activeLayerIdx]`. Like
+  `applyHatchify` it rebuilds the array and pushes **one** snapshot, so the
+  cells leaving one layer and arriving in the other undo together.
 
 ## Grid coordinate system
 
