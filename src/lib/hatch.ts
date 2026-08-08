@@ -422,11 +422,32 @@ const ARC_VERTEX_IDX: Record<TriKey["type"], readonly [number, number, number]> 
  * ways: the S-bend that turns separate arcs into long wandering paths.
  *
  * Density 1 is the classic single arc through the edge midpoints.
+ *
+ * **Radii past `H` are dropped.** An arc centred on a vertex is an arc of the
+ * circle about that vertex, and the six triangles meeting there form a hexagon
+ * whose *inscribed* circle has radius `H = SIDE·√3/2` — the apothem. So the arc
+ * stays inside its own triangle exactly while `rad ≤ H`, and past that the
+ * caller's clip cuts its middle away against the opposite edge and leaves a stub
+ * either side, which reads as breakage rather than as an arc. One comparison, no
+ * density threshold: it drops the outermost from `k = 4`, and the outermost two
+ * from `k = 12`, where `(k − 1.5)·SIDE/k` clears the apothem as well.
+ *
+ * **Each dropped radius takes its partner with it.** `r[n]`'s cross-edge partner
+ * is `r[k−1−n]`, so dropping the outer `m` without the inner `m` would leave the
+ * innermost arcs ending on a shared edge with nothing to meet. Trimming both ends
+ * keeps the surviving ladder self-complementary — symmetric about `SIDE/2` — which
+ * is the whole condition for chaining, so the arcs that remain still S-bend into
+ * their neighbours. The band just narrows from both sides as density climbs.
  */
 export function arcRadii(density: number): number[] {
   const k = Math.max(1, Math.round(density));
+  const radius = (n: number) => ((n + 0.5) * SIDE) / k;
+
+  let m = 0;
+  while (m < k && radius(k - 1 - m) > H) m++;
+
   const out: number[] = [];
-  for (let n = 0; n < k; n++) out.push(((n + 0.5) * SIDE) / k);
+  for (let n = m; n < k - m; n++) out.push(radius(n));
   return out;
 }
 
