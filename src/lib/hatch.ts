@@ -51,6 +51,37 @@ export const HATCH_DIRS: readonly HatchDir[] = [0, 1, 2];
 export const DIR_BIT: Record<HatchDir, number> = { 0: 1, 1: 2, 2: 4 };
 export const DIR_LABEL: Record<HatchDir, string> = { 0: "—", 1: "/", 2: "\\" };
 
+/**
+ * The second triad of `dirMask`: Truchet arcs, centred on a triangle's corner.
+ *
+ * An arc bit reuses the family index rather than introducing a vertex numbering,
+ * because **a triangle's corner is named by the edge it is opposite**, and those
+ * edges are already the three line families. Everything that permutes the line
+ * triad therefore permutes this one identically — a 60° turn is the same 3-cycle
+ * on both, and a mirror is the same 1↔2 swap — so `rotateHatchMask` and
+ * `flipHatchMask` need one extra loop and no extra reasoning.
+ *
+ * Deriving the corner from the families instead of from `getTriVertices`' index
+ * order also sidesteps that function's two windings, and keeps the choice
+ * invariant under lattice translation, which a vertex 3-colouring would not be:
+ * a 3-colouring shifts class under a general translation, so moving a hatched
+ * selection would silently slide its arcs onto different corners.
+ */
+export const ARC_BIT: Record<HatchDir, number> = { 0: 8, 1: 16, 2: 32 };
+
+/** Every bit `dirMask` can legitimately carry. Anything loading or clamping a
+ *  mask must use this — a range of 1–7 silently strips every arc. */
+export const DIR_MASK_MAX = 63;
+
+/** Line segments per arc when flattening.
+ *
+ * Arcs are emitted as polylines rather than as a new shape so that every
+ * backend — canvas, SVG, the crop exporter, bounds — keeps consuming `Seg` and
+ * needs no new case. Eight steps across the 60° sweep leaves a sagitta under
+ * 0.05 world units at the classic radius, well below a stroke width, so the
+ * preview and the exported file agree exactly instead of approximately. */
+export const ARC_STEPS = 8;
+
 export const MIN_DENSITY = 4;
 export const MAX_DENSITY = 16;
 export const MIN_WEIGHT = 0.5;
@@ -137,19 +168,27 @@ export function rotateHatchMask(mask: number, steps: number): number {
   const s = ((steps % 3) + 3) % 3;
   if (s === 0) return mask;
   let out = 0;
-  for (const dir of HATCH_DIRS) {
-    if (mask & DIR_BIT[dir]) out |= DIR_BIT[(((dir + s) % 3) as HatchDir)];
+  // The same 3-cycle on both triads: an arc is named by the family of the edge
+  // it faces, so it turns with that edge.
+  for (const bits of [DIR_BIT, ARC_BIT]) {
+    for (const dir of HATCH_DIRS) {
+      if (mask & bits[dir]) out |= bits[(((dir + s) % 3) as HatchDir)];
+    }
   }
   return out;
 }
 
 /** Mirrors a direction mask: the horizontal family is fixed and the two
  *  diagonals swap. Both flip axes act the same way, because they differ by a
- *  180° rotation, which is the identity on undirected families. */
+ *  180° rotation, which is the identity on undirected families. Arcs follow the
+ *  edges they face, so they take the same swap. */
 export function flipHatchMask(mask: number): number {
-  let out = mask & DIR_BIT[0];
-  if (mask & DIR_BIT[1]) out |= DIR_BIT[2];
-  if (mask & DIR_BIT[2]) out |= DIR_BIT[1];
+  let out = 0;
+  for (const bits of [DIR_BIT, ARC_BIT]) {
+    out |= mask & bits[0];
+    if (mask & bits[1]) out |= bits[2];
+    if (mask & bits[2]) out |= bits[1];
+  }
   return out;
 }
 
@@ -349,7 +388,96 @@ export function clipSegmentToRect(seg: Seg, box: Box): Seg | null {
   return [x0 + dx * t0, y0 + dy * t0, x0 + dx * t1, y0 + dy * t1];
 }
 
+/**
+ * Which `getTriVertices` index an arc of family `dir` centres on, per triangle
+ * type: the corner opposite that family's edge.
+ *
+ * Read off the geometry rather than guessed. For an `up` triangle the vertices
+ * are `[A, B, C] = [(q,r), (q+1,r), (q,r+1)]`; edge `AB` is horizontal
+ * (family 0) so family 0 centres on `C`, `CA` is family 1 so family 1 centres on
+ * `B`, and `BC` is family 2 so family 2 centres on `A`. A `down` triangle's
+ * vertices come back in the order `[C, D, B]`, which is why its row is not the
+ * reverse of the other.
+ */
+const ARC_VERTEX_IDX: Record<TriKey["type"], readonly [number, number, number]> =
+  {
+    up: [2, 1, 0],
+    down: [2, 0, 1],
+  };
+
+/**
+ * Radii of the concentric arc ladder at `density`.
+ *
+ * The same `(n + ½)·step` ladder the line families use, and **the half step is
+ * load-bearing for the same reason twice over**. It keeps radius 0 and radius
+ * `SIDE` — the degenerate point and the full edge — out of the set, and it makes
+ * the ladder symmetric about `SIDE/2`, so the complement of `r[n]` is exactly
+ * `r[k−1−n]`.
+ *
+ * That symmetry is what makes arcs *chain*. Across a shared edge the two
+ * triangles centre their arcs on opposite ends of it, so an arc of radius `r`
+ * from one end meets an arc of radius `SIDE − r` from the other at the same
+ * point — and only a self-complementary ladder guarantees that partner exists.
+ * Both cross the edge perpendicularly, so they join smoothly and curve opposite
+ * ways: the S-bend that turns separate arcs into long wandering paths.
+ *
+ * Density 1 is the classic single arc through the edge midpoints.
+ */
+export function arcRadii(density: number): number[] {
+  const k = Math.max(1, Math.round(density));
+  const out: number[] = [];
+  for (let n = 0; n < k; n++) out.push(((n + 0.5) * SIDE) / k);
+  return out;
+}
+
+/**
+ * One triangle's arcs for family `dir`, flattened to segments.
+ *
+ * The sweep is the triangle's 60° interior angle at the centre vertex, taken the
+ * short way round. Arcs beyond radius `H` bulge past the opposite edge; they are
+ * left alone here and clipped by the caller, exactly as an over-long hatch line
+ * is.
+ */
+export function arcSegmentsInTri(
+  dir: HatchDir,
+  density: number,
+  q: number,
+  r: number,
+  type: TriKey["type"],
+): Seg[] {
+  const v = getTriVertices(q, r, type);
+  const ci = ARC_VERTEX_IDX[type][dir];
+  const c = v[ci];
+  const p1 = v[(ci + 1) % 3];
+  const p2 = v[(ci + 2) % 3];
+
+  const a1 = Math.atan2(p1.y - c.y, p1.x - c.x);
+  const a2 = Math.atan2(p2.y - c.y, p2.x - c.x);
+  let sweep = a2 - a1;
+  while (sweep > Math.PI) sweep -= 2 * Math.PI;
+  while (sweep < -Math.PI) sweep += 2 * Math.PI;
+
+  const out: Seg[] = [];
+  for (const rad of arcRadii(density)) {
+    let px = c.x + rad * Math.cos(a1);
+    let py = c.y + rad * Math.sin(a1);
+    for (let i = 1; i <= ARC_STEPS; i++) {
+      const t = a1 + (sweep * i) / ARC_STEPS;
+      const nx = c.x + rad * Math.cos(t);
+      const ny = c.y + rad * Math.sin(t);
+      out.push([px, py, nx, ny]);
+      px = nx;
+      py = ny;
+    }
+  }
+  return out;
+}
+
 export interface HatchGroup {
+  /** `"line"` — a family of straight lines, generated once for the whole group.
+   *  `"arc"` — Truchet arcs, generated per triangle because the centre moves
+   *  with the triangle. */
+  kind: "line" | "arc";
   dir: HatchDir;
   density: number;
   weight: number;
@@ -392,19 +520,25 @@ export function groupHatchMarks(marks: Record<string, string>): {
     }
     any = true;
 
-    for (const dir of HATCH_DIRS) {
-      if (!(h.dirMask & DIR_BIT[dir])) continue;
-      const gk = `${dir}|${h.density}|${h.weight}|${h.color}`;
-      const g = byKey.get(gk);
-      if (g) g.tris.push(tri);
-      else {
-        byKey.set(gk, {
-          dir,
-          density: h.density,
-          weight: h.weight,
-          color: h.color,
-          tris: [tri],
-        });
+    for (const [kind, bits] of [
+      ["line", DIR_BIT],
+      ["arc", ARC_BIT],
+    ] as const) {
+      for (const dir of HATCH_DIRS) {
+        if (!(h.dirMask & bits[dir])) continue;
+        const gk = `${kind}|${dir}|${h.density}|${h.weight}|${h.color}`;
+        const g = byKey.get(gk);
+        if (g) g.tris.push(tri);
+        else {
+          byKey.set(gk, {
+            kind,
+            dir,
+            density: h.density,
+            weight: h.weight,
+            color: h.color,
+            tris: [tri],
+          });
+        }
       }
     }
   }

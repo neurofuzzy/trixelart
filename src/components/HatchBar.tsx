@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import {
+  ARC_BIT,
   DIR_BIT,
   DIR_LABEL,
   HATCH_DIRS,
@@ -47,6 +48,59 @@ export function HatchGlyph({
         <line x1={-9} y1={-4} x2={9} y2={-4} />
         <line x1={-9} y1={0} x2={9} y2={0} />
         <line x1={-9} y1={4} x2={9} y2={4} />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * Which corner of the glyph's triangle each family's arc sits in, as the arc
+ * through the midpoints of that corner's two edges — the density-1 tile, at true
+ * proportions.
+ *
+ * The triangle is `L(-9,7) R(9,7) T(0,-8.6)`, so `LR` is the horizontal edge
+ * (family 0) and the arc opposite it goes at the apex `T`. The other two are
+ * read off `hatchU`, **not** off `DIR_LABEL`: world y points down, so family 1
+ * (`x − y·SKEW`) descends to the right and looks like `\` on screen, putting its
+ * arc at `L`, and family 2 (`x + y·SKEW`) looks like `/` and puts its arc at `R`.
+ * Taking the labels at face value swaps these two, which is exactly what it
+ * looks like — a `\` button drawing the horizontal one.
+ *
+ * Nothing is rotated. An earlier version turned the whole glyph by 120° per
+ * family, but the triangle's centroid is at `(0, 1.8)` rather than the origin,
+ * so rotating about the origin slid the triangle around instead of mapping it
+ * onto itself.
+ */
+const ARC_GLYPH_PATH: Record<HatchDir, string> = {
+  0: "M -4.5 -0.8 A 9 9 0 0 0 4.5 -0.8",
+  1: "M -4.5 -0.8 A 9 9 0 0 1 0 7",
+  2: "M 4.5 -0.8 A 9 9 0 0 0 0 7",
+};
+
+/**
+ * A Truchet arc in the corner the family faces.
+ *
+ * Drawn as the arc plus faint triangle edges, because an arc alone gives no
+ * clue *which* corner it sits in — and that is the only thing distinguishing
+ * the three buttons.
+ */
+export function ArcGlyph({
+  dir = 0,
+  className,
+}: {
+  dir?: HatchDir;
+  className?: string;
+}) {
+  return (
+    <svg viewBox="-12 -12 24 24" className={className ?? "w-5 h-5"}>
+      <g fill="none" strokeLinecap="round">
+        <path
+          d="M -9 7 L 9 7 L 0 -8.6 Z"
+          stroke="currentColor"
+          strokeOpacity={0.28}
+          strokeWidth={1.2}
+        />
+        <path d={ARC_GLYPH_PATH[dir]} stroke="currentColor" strokeWidth={1.8} />
       </g>
     </svg>
   );
@@ -112,12 +166,18 @@ export function HatchBar({
   hasSelection: boolean;
   onConvert: () => void;
 }) {
-  const toggleDir = (dir: HatchDir) => {
-    const next = brush.dirMask ^ DIR_BIT[dir];
-    // At least one direction must stay on, or the brush paints nothing.
+  const toggleBit = (bit: number) => {
+    const next = brush.dirMask ^ bit;
+    // At least one mark must stay on, or the brush paints nothing.
     if (next === 0) return;
     onBrushChange({ dirMask: next });
   };
+
+  // Density means concentric arcs, and density 1 — the single arc through the
+  // edge midpoints — is the classic Truchet tile, so the line families' floor
+  // would put the most useful setting out of reach.
+  const arcsOn =
+    (brush.dirMask & (ARC_BIT[0] | ARC_BIT[1] | ARC_BIT[2])) !== 0;
 
   return (
     <div
@@ -138,7 +198,7 @@ export function HatchBar({
           return (
             <button
               key={dir}
-              onClick={() => toggleDir(dir)}
+              onClick={() => toggleBit(DIR_BIT[dir])}
               title={`${DIR_LABEL[dir]} — click to toggle; enable two or three to cross-hatch`}
               className={cn(
                 "inline-flex items-center justify-center h-9 w-9 rounded-md transition-colors",
@@ -153,10 +213,31 @@ export function HatchBar({
         })}
       </div>
 
+      <div className="flex items-center gap-0.5 shrink-0">
+        {HATCH_DIRS.map((dir) => {
+          const on = (brush.dirMask & ARC_BIT[dir]) !== 0;
+          return (
+            <button
+              key={`arc-${dir}`}
+              onClick={() => toggleBit(ARC_BIT[dir])}
+              title={`Truchet arc in the corner opposite the ${DIR_LABEL[dir]} edge — arcs chain across trixels into continuous paths`}
+              className={cn(
+                "inline-flex items-center justify-center h-9 w-9 rounded-md transition-colors",
+                on
+                  ? "bg-amber-500/25 text-amber-300"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              )}
+            >
+              <ArcGlyph dir={dir} className="w-4 h-4" />
+            </button>
+          );
+        })}
+      </div>
+
       <SliderField
         label="Density"
         value={brush.density}
-        min={MIN_DENSITY}
+        min={arcsOn ? 1 : MIN_DENSITY}
         max={MAX_DENSITY}
         step={1}
         display={String(brush.density)}

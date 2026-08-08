@@ -404,6 +404,12 @@ export function plotterMarks(
 function rawSegments(marks: Record<string, string>): RawSeg[] {
   const out: RawSeg[] = [];
   for (const g of groupHatchMarks(marks).groups) {
+    // Arcs are not expressible as `RawSeg`, which is a collinear span on a
+    // family line — `u` plus a range along it — and the whole run-joining and
+    // linking pipeline below depends on that collinearity. Skipping them keeps
+    // arcs out of the plot rather than emitting them as the straight lines
+    // `hatchLinesInBox` would otherwise return for this group.
+    if (g.kind === "arc") continue;
     const gen = trisBox(g.tris);
     if (!gen) continue;
 
@@ -688,6 +694,7 @@ function hatchBuckets(
 
   const cells: HatchCell[] = [];
   for (const g of groupHatchMarks(marks).groups) {
+    if (g.kind === "arc") continue; // see `rawSegments`
     for (const t of g.tris) {
       const region = indexFor(fills[triToString(t)]);
       if (region === undefined) continue;
