@@ -94,7 +94,12 @@ export function SaveSelectionDialog({
               autoFocus
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
+                // Escape is read by the global shortcuts *before* their
+                // focused-INPUT guard, so without this, dismissing the dialog
+                // would also clear the selection being saved.
+                e.stopPropagation();
                 if (e.key === "Enter") commit();
+                if (e.key === "Escape") onOpenChange(false);
               }}
               className="h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
             />

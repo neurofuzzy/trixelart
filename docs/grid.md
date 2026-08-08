@@ -67,8 +67,10 @@ size and shape stay hexagonal, the anchor is free.
 ### Move the selection to a new layer
 
 The last button of `SelectionPalette` lifts everything the selection covers off
-the **active** layer into a layer of its own. `splitLayerAt(layers, idx, moved)`
-(`use-history.ts`) is the whole operation, as a pure function over the array.
+the **active** layer into a layer of its own. It asks for the layer's name first
+(`NameLayerDialog` — see [ui.md](ui.md)), then
+`splitLayerAt(layers, idx, moved, name)` (`use-history.ts`) is the whole
+operation, as a pure function over the array.
 
 - **The new layer goes directly above its source**, and inherits its kind, its
   visibility and a deep copy of its effects. All four say the same thing: a

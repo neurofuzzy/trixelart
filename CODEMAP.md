@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-08 17:22:37
-# Files: 94
-# Lines of code: ~25869
+# Last updated: 2026-08-08 17:34:53
+# Files: 95
+# Lines of code: ~26103
 ```
 - **/app**
   - **/lib**
@@ -81,6 +81,8 @@
     - Function: `LayerPanel`
   - [Model3DPreview.tsx](../src/components/Model3DPreview.tsx)
     - Function: `Model3DPreview` - Orbitable 3D preview of the export model, lit b...
+  - [NameLayerDialog.tsx](../src/components/NameLayerDialog.tsx)
+    - Function: `NameLayerDialog` - Names a layer that is about to be created. Show...
   - [PalettePicker.tsx](../src/components/PalettePicker.tsx)
     - Function: `PalettePicker`
   - [PanelShell.tsx](../src/components/PanelShell.tsx)
@@ -124,6 +126,7 @@
     - Interface: `Layer`
     - Interface: `ProjectSnapshot`
     - Variable: `MAX_LAYERS`
+    - Function: `nextLayerName` - The next free "Layer N" number. Both kinds shar...
     - Function: `splitLayerAt` - Lifts `moved` off `layers[idx]` into a fresh la...
     - Function: `useHistory`
   - [use-interaction.ts](../src/hooks/use-interaction.ts)

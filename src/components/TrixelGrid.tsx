@@ -62,6 +62,7 @@ import {
   type SelectionSaveOptions,
 } from "@/lib/project-file";
 import { SaveSelectionDialog } from "@/components/SaveSelectionDialog";
+import { NameLayerDialog } from "@/components/NameLayerDialog";
 import { fetchExample, type Example } from "@/lib/examples";
 import { ExampleGallery } from "@/components/ExampleGallery";
 import {
@@ -169,6 +170,7 @@ export default function TrixelGrid() {
     addLayer,
     deleteLayer,
     duplicateLayer,
+    renameLayer,
     toggleLayerVisibility,
     setLayerEffects,
     moveLayer,
@@ -187,6 +189,7 @@ export default function TrixelGrid() {
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [saveSelectionOpen, setSaveSelectionOpen] = useState(false);
+  const [nameSplitLayerOpen, setNameSplitLayerOpen] = useState(false);
   const [export3DOpen, setExport3DOpen] = useState(false);
   const [exportCutOpen, setExportCutOpen] = useState(false);
   const [svgExport, setSvgExport] =
@@ -1553,38 +1556,41 @@ export default function TrixelGrid() {
    * rebuilt and pushed as a single history entry — the cells leaving one layer
    * and arriving in the other are one edit and must undo as one.
    */
-  const onMoveSelectionToLayer = useCallback(() => {
-    if (selectedHexes.length === 0 || gridDivisions <= 0) return;
-    const inside = regionMembership(selectedHexes);
-    if (!inside) return;
+  const onMoveSelectionToLayer = useCallback(
+    (name: string) => {
+      if (selectedHexes.length === 0 || gridDivisions <= 0) return;
+      const inside = regionMembership(selectedHexes);
+      if (!inside) return;
 
-    const idx = activeLayerIdxRef.current;
-    const src = layersRef.current[idx];
-    if (!src) return;
+      const idx = activeLayerIdxRef.current;
+      const src = layersRef.current[idx];
+      if (!src) return;
 
-    const moved: Record<string, string> = {};
-    for (const [key, value] of Object.entries(src.painted)) {
-      if (inside(stringToTri(key))) moved[key] = value;
-    }
+      const moved: Record<string, string> = {};
+      for (const [key, value] of Object.entries(src.painted)) {
+        if (inside(stringToTri(key))) moved[key] = value;
+      }
 
-    // Null covers both "the selection is empty of paint" and "the stack is
-    // full" — neither is an edit, so neither pushes.
-    const next = splitLayerAt(layersRef.current, idx, moved);
-    if (!next) return;
+      // Null covers both "the selection is empty of paint" and "the stack is
+      // full" — neither is an edit, so neither pushes.
+      const next = splitLayerAt(layersRef.current, idx, moved, name);
+      if (!next) return;
 
-    setLayers(next);
-    setActiveLayerIdx(idx + 1);
-    pushHistory({ ...buildSnapshot(), layers: next, activeLayerIdx: idx + 1 });
-  }, [
-    selectedHexes,
-    gridDivisions,
-    setLayers,
-    setActiveLayerIdx,
-    pushHistory,
-    buildSnapshot,
-    layersRef,
-    activeLayerIdxRef,
-  ]);
+      setLayers(next);
+      setActiveLayerIdx(idx + 1);
+      pushHistory({ ...buildSnapshot(), layers: next, activeLayerIdx: idx + 1 });
+    },
+    [
+      selectedHexes,
+      gridDivisions,
+      setLayers,
+      setActiveLayerIdx,
+      pushHistory,
+      buildSnapshot,
+      layersRef,
+      activeLayerIdxRef,
+    ],
+  );
 
   /**
    * Rewrites the selected hexes as hatch marks derived from the fills below.
@@ -1853,7 +1859,7 @@ export default function TrixelGrid() {
             onFlip={onFlipSelection}
             onFlipHorizontal={onFlipHorizontal}
             onPaletteShift={onPaletteShift}
-            onMoveToLayer={onMoveSelectionToLayer}
+            onMoveToLayer={() => setNameSplitLayerOpen(true)}
             canMoveToLayer={layers.length < MAX_LAYERS}
             hasSelection={selectedHexes.length > 0}
             onPointerEnter={() => setHoveredTri(null)}
@@ -1979,6 +1985,7 @@ export default function TrixelGrid() {
             onAddLayer={addLayer}
             onDeleteLayer={deleteLayer}
             onDuplicateLayer={duplicateLayer}
+            onRenameLayer={renameLayer}
             onToggleVisibility={toggleLayerVisibility}
             onSetLayerEffects={setLayerEffects}
             onMoveLayer={moveLayer}
@@ -2047,6 +2054,23 @@ export default function TrixelGrid() {
           selection={selectedHexes}
           stampCount={selections.length}
           projectName={projectName}
+        />
+      )}
+
+      {/* The name is collected before the edit runs, so the split lands in the
+          undo stack as one entry already carrying it — renaming afterwards
+          would be a second entry to undo. */}
+      {nameSplitLayerOpen && (
+        <NameLayerDialog
+          title="Move selection to a new layer"
+          description={`Lifts what the selection covers off “${layers[activeLayerIdx]?.name ?? "this layer"}” onto a new layer directly above it.`}
+          suggestion={`${layers[activeLayerIdx]?.name ?? "Layer"} selection`}
+          confirmLabel="Move"
+          onCancel={() => setNameSplitLayerOpen(false)}
+          onConfirm={(name) => {
+            onMoveSelectionToLayer(name);
+            setNameSplitLayerOpen(false);
+          }}
         />
       )}
 

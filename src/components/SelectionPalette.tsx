@@ -150,7 +150,7 @@ export function SelectionPalette({
         disabled={!hasSelection || !canMoveToLayer}
         title={
           canMoveToLayer
-            ? "Move selection to a new layer"
+            ? "Move selection to a new layer..."
             : "Move selection to a new layer — the layer stack is full"
         }
       >

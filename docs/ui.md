@@ -75,6 +75,24 @@ That only works because **`changeTool` is now the sole caller of `setTool`** —
 
 Verified in a browser across the whole matrix — footer toggles, tool switches, close-and-reopen, and a tool change out of a tool-owned drawer: never more than one `<aside>` on screen, and no path that leaves a drawer stranded.
 
+### Layer names
+
+**Renaming is in place, on double-click**, in `LayerPanel`. A single click has to stay "select this layer" — it is what the whole row is for — so the second click is the only gesture free to mean something else, and it is the one every other layer panel uses. The draft lives in the panel's own state and `onRenameLayer` fires **once, on the way out** (Enter, or blur); a commit per keystroke would spend a dozen of the 50 history entries on one word. Escape discards. A blank name is refused in `renameLayer` itself, not just in the UI: the row would otherwise become an unclickable sliver with no way back.
+
+The rename input calls `stopPropagation` on keydown. The global shortcuts already bail on a focused `INPUT` — **except Escape, which is handled before that guard**, so without it, cancelling a rename would also clear the hex selection. The two naming dialogs do the same, for the same reason. React's `stopPropagation` reaches the native event and the hook listens on `window` in the bubble phase, so this is enough.
+
+**Two of the three layer-creating actions ask for a name first** (`NameLayerDialog`), because both make a layer *out of something that already exists* and so have a suggestion worth offering:
+
+| Action | Suggests | Why it asks |
+|---|---|---|
+| Duplicate layer (Copy icon) | `{name} copy` | The copy is about to be edited into something else |
+| Move selection to a new layer | `{name} selection` | The user picked that region for a reason |
+| Add layer (+) | — | Makes an **empty** layer: nothing to name it after, and a modal on the panel's commonest action is a toll |
+
+The name is collected **before** the edit runs, so the split or duplicate lands in the undo stack as one entry already carrying it. Renaming afterwards would be a second entry to undo.
+
+`nextLayerName(layers)` is the fallback for a blank name, and is a *suggestion, not a uniqueness guarantee*: it parses the "Layer N" prefix, so a stack renamed to "Sky" and "Sea" hands out "Layer 1" however many times it is asked. That is fine — `id` is identity and a shared name is cosmetic. Every layer-creating path funnels through one `layerName(layers, name?)` helper, so an all-spaces name is impossible whichever dialog asked.
+
 ## Canvas background
 
 The canvas backdrop defaults to faint diagonal stripes (`DEFAULT_EDITOR_BG` in

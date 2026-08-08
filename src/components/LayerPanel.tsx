@@ -18,6 +18,7 @@ import {
   type SubdivisionMode,
 } from "@/lib/subdivision-noise";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
+import { NameLayerDialog } from "@/components/NameLayerDialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -209,6 +210,7 @@ export function LayerPanel({
   onAddLayer,
   onDeleteLayer,
   onDuplicateLayer,
+  onRenameLayer,
   onToggleVisibility,
   onSetLayerEffects,
   onMoveLayer,
@@ -222,7 +224,8 @@ export function LayerPanel({
   onSelectLayer: (idx: number) => void;
   onAddLayer: (kind?: LayerKind) => void;
   onDeleteLayer: (idx: number) => void;
-  onDuplicateLayer: (idx: number) => void;
+  onDuplicateLayer: (idx: number, name?: string) => void;
+  onRenameLayer: (idx: number, name: string) => void;
   onToggleVisibility: (idx: number) => void;
   onSetLayerEffects: (idx: number, effects: LayerEffect[]) => void;
   onMoveLayer: (idx: number, dir: -1 | 1) => void;
@@ -234,6 +237,14 @@ export function LayerPanel({
   const canAdd = layers.length < 5;
   /** Index of the effect whose colour is being picked, or `null`. */
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
+  /** The layer being renamed in place, and the text so far. One object rather
+   *  than two states, so a row can never be in edit mode with a draft belonging
+   *  to a different row. */
+  const [renaming, setRenaming] = useState<{ idx: number; draft: string } | null>(
+    null,
+  );
+  /** The layer a pending duplicate would copy, or `null`. */
+  const [duplicating, setDuplicating] = useState<number | null>(null);
 
   /**
    * Every layer edit goes through here.
@@ -247,6 +258,23 @@ export function LayerPanel({
   const commit = (fn: () => void) => {
     fn();
     onCommit();
+  };
+
+  /**
+   * Ends an in-place rename, writing the draft unless it is blank or unchanged.
+   *
+   * One commit per rename, on the way out — not per keystroke, which would fill
+   * the 50-entry history with a dozen entries for one word. The draft lives here
+   * until then, which is also what makes Escape a plain discard.
+   */
+  const endRename = (write: boolean) => {
+    if (renaming && write) {
+      const next = renaming.draft.trim();
+      if (next && next !== layers[renaming.idx]?.name) {
+        commit(() => onRenameLayer(renaming.idx, next));
+      }
+    }
+    setRenaming(null);
   };
 
   const activeLayer = layers[activeLayerIdx];
@@ -351,25 +379,60 @@ export function LayerPanel({
                 )}
               </button>
 
-              <button
-                className="flex-1 min-w-0 flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground text-left"
-                onClick={() => onSelectLayer(i)}
-                title={`${layer.name} — ${layerKind(layer)} layer`}
-              >
-                {layerKind(layer) === "hatch" ? (
-                  <HatchGlyph className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />
-                ) : (
-                  <Square className="w-3.5 h-3.5 shrink-0 opacity-50" />
-                )}
-                <span className="truncate">{layer.name}</span>
-              </button>
+              {/* Double-click to rename, the convention every other layer
+                  panel uses — a single click has to stay "select this layer",
+                  which is what the row is for. The kind glyph stays put across
+                  both states so the row does not reflow on entering edit. */}
+              {renaming?.idx === i ? (
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  {layerKind(layer) === "hatch" ? (
+                    <HatchGlyph className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                  )}
+                  <input
+                    value={renaming.draft}
+                    autoFocus
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) =>
+                      setRenaming({ idx: i, draft: e.target.value })
+                    }
+                    onBlur={() => endRename(true)}
+                    onKeyDown={(e) => {
+                      // The global shortcuts already bail on a focused INPUT —
+                      // except Escape, which is handled *before* that guard, so
+                      // cancelling a rename would also drop the hex selection.
+                      // React's stopPropagation reaches the native event, and
+                      // the hook listens on `window` in the bubble phase.
+                      e.stopPropagation();
+                      if (e.key === "Enter") endRename(true);
+                      if (e.key === "Escape") endRename(false);
+                    }}
+                    className="flex-1 min-w-0 h-6 rounded border border-cyan-500/50 bg-background px-1.5 text-sm font-medium text-foreground outline-none focus:border-cyan-400"
+                  />
+                </div>
+              ) : (
+                <button
+                  className="flex-1 min-w-0 flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground text-left"
+                  onClick={() => onSelectLayer(i)}
+                  onDoubleClick={() => setRenaming({ idx: i, draft: layer.name })}
+                  title={`${layer.name} — ${layerKind(layer)} layer (double-click to rename)`}
+                >
+                  {layerKind(layer) === "hatch" ? (
+                    <HatchGlyph className="w-3.5 h-3.5 shrink-0 text-amber-400/80" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                  )}
+                  <span className="truncate">{layer.name}</span>
+                </button>
+              )}
 
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   className="inline-flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30"
-                  onClick={() => commit(() => onDuplicateLayer(i))}
+                  onClick={() => setDuplicating(i)}
                   disabled={!canAdd}
-                  title="Duplicate layer"
+                  title="Duplicate layer..."
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
@@ -677,6 +740,20 @@ export function LayerPanel({
         palettes={palettes}
         title="Glow colour"
       />
+
+      {duplicating !== null && layers[duplicating] && (
+        <NameLayerDialog
+          title="Duplicate layer"
+          description={`Copies “${layers[duplicating].name}” — its cells, its visibility and its effects — onto a new layer at the top of the stack.`}
+          suggestion={`${layers[duplicating].name} copy`}
+          confirmLabel="Duplicate"
+          onCancel={() => setDuplicating(null)}
+          onConfirm={(name) => {
+            commit(() => onDuplicateLayer(duplicating, name));
+            setDuplicating(null);
+          }}
+        />
+      )}
       </div>
     </PanelShell>
   );
