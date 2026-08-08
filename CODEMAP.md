@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-08 00:25:31
+# Last updated: 2026-08-08 00:42:25
 # Files: 93
-# Lines of code: ~25141
+# Lines of code: ~25330
 ```
 - **/app**
   - **/lib**

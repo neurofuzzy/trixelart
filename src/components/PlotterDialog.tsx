@@ -168,7 +168,11 @@ export function PlotterDialog({
   // The hatch takes its direction from the hex wedges, so without a hex lattice
   // there is nothing to take a direction from. A contour fill follows each
   // region's own boundary and needs no lattice at all.
-  const canPlot = gridDivisions > 0 || settings.fillStyle === "contour";
+  const canPlot =
+    gridDivisions > 0 ||
+    settings.fillStyle === "contour" ||
+    // Direction comes from the marks, not from a hex wedge.
+    settings.fillStyle === "drawn";
   const roundFraction = useMemo(() => layersRoundFraction(layers), [layers]);
 
   /**
@@ -430,6 +434,7 @@ export function PlotterDialog({
                   [
                     ["hatch", "Hatch"],
                     ["contour", "Contour"],
+                    ["drawn", "Drawn"],
                   ] as const
                 ).map(([style, label]) => (
                   <button
@@ -449,6 +454,11 @@ export function PlotterDialog({
                 ))}
               </div>
 
+              {/* The tone ladder drives generated fills only. Under `drawn`,
+                  density and weight come from each authored mark, so these
+                  would silently do nothing. */}
+              {settings.fillStyle !== "drawn" && (
+                <>
               <Slider
                 label="Min density"
                 value={settings.minDensity}
@@ -477,6 +487,16 @@ export function PlotterDialog({
                   })
                 }
               />
+                </>
+              )}
+
+              {settings.fillStyle === "drawn" && (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Plots the hatch layers as drawn, at their authored density and
+                  weight. Outlines still come from the fills; the tone ladder
+                  does not apply.
+                </p>
+              )}
 
               {/* Hatch only: a contour's rings are closed loops a full spacing
                   in from the edge, so they have no ends to blot. */}
