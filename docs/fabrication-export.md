@@ -1,6 +1,6 @@
 # Fabrication Export — Design Spec
 
-> Status: **design/spec only, not implemented.** The 3D-print export (`src/lib/mesh-export.ts`, `Export3DDialog`, `Model3DPreview`) exists; the **cutting-machine (Cricut/paper) export** described here does not yet. This document is the plan of record.
+> Status: **design/spec only, not implemented.** The 3D-print export (`src/lib/mesh-export.ts`, `Export3DDialog`, `Model3DPreview`) exists; the **cutting-machine (Cricut/paper) export** described here does not yet — except where a section says otherwise (see §8 phase 3 and §9). This document is the plan of record.
 
 ## 1. Why this exists
 
@@ -182,3 +182,81 @@ Ship **planner + exploded preview first**; SVG export lands second (cut paper on
 **Phase 3 — SVG cut export. ✅ built** (`src/lib/cut-svg.ts`). `traceUnionLoops` walks boundary edges (reverse-edge-absent test) into closed loops, merges collinear runs → **one compound path per layer** (outer + holes as sub-paths, opposite winding, `fill-rule: evenodd`) so the cutter cuts the union silhouette, never internal triangle edges. `buildCutSVG` auto-tiles the layers into a grid, each a labeled inkscape layer (`Sᵢ ∪ frame`; the mat is the frame alone), sized in mm from the width control. Wired to a **Download SVG** button in `CutExportDialog`.
 
 **Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding/feature-size guards · budget>0 auto-splits · bridge-hint surfacing.
+
+---
+
+## 9. Corner rounding in the fabrication paths
+
+Both facets follow the artwork's **round corners** effect, read through
+`layersRoundFraction` (`hatch-render.ts`) — the shared "largest enabled radius
+wins" rule, since every fabrication path merges the fill stack before it looks at
+geometry, so a per-layer radius could not survive the merge. It is not a dialog
+setting in either export: a print or a cut that disagreed with the picture on
+screen would be a bug, not an option.
+
+**A cut sheet must round as if its colours had never been merged.** This is the
+one place in the app holding geometry that has forgotten what colour it came
+from: `Sᵢ` unions every colour at level i and above, so its boundary runs along
+colour seams that are invisible in the artwork, and its corners have no region to
+be a corner *of*.
+
+Rounding that boundary on its own terms is the trap, and the argument for it is
+seductive: a cut sheet genuinely has no airtightness constraint, because the
+sheets are nested (`S₁ ⊇ … ⊇ S_K`) and a rounded piece always sits on a strictly
+larger one. But airtightness was never the only thing the degree-2 rule bought.
+It is also what keeps a corner where three colours meet sharp — and a sheet that
+rounds everything turns each scattered upper sheet into a handful of discs that
+look nothing like the picture. (Observed: on an interleaved four-colour design,
+every sheet above the first came out as blobs.)
+
+So `traceUnionLoops` takes the **original artwork's** `boundaryVertexDegrees`
+and looks each of its vertices back up through `latticeVertexIdAt`, rounding only
+under the same rule the screen applies. Neck points are not lattice vertices, so
+they come back null and stay sharp — which is what a deliberate straight bridge
+wants anyway. Without the degree map nothing rounds at all: rounding everything
+is the failure the parameter exists to prevent, so it is not the fallback.
+
+That is what `round-corners.ts` exposes `roundPolygon` for (geometry only, caller
+decides eligibility) underneath `roundRing` (geometry + the degree-2 rule): the
+two consumers do not differ on the *rule*, they differ on how they can ask. A
+colour ring carries its own lattice vertex ids; a sheet has to recover them.
+
+The 3D print never faced this, because it never merges colours: it rounds per
+colour region with `roundRing` directly, and its abutting filament bodies still
+meet with no gap and no overlap.
+
+The one residual difference from the screen is the **clamp**, not the shape. Run
+lengths are measured along the sheet's boundary, which can pass straight through
+a junction where the colour's own ring turned, so a corner just before such a
+junction may take a slightly larger radius than it does in the artwork. Both
+corners at the junction itself stay sharp either way.
+
+**Rounding runs after the necks are inserted**, and the run clamp is what makes
+that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
+those vertices to nearly nothing and the tiny-hexagon bridge keeps its shape.
+
+**Meshes need triangles, so a rounded loop is triangulated** —
+`triangulateLoops` (`mesh-export.ts`, ear-clipping with holes via the earcut
+three vendors). Outer loops wind positive and holes negative by construction in
+both producers, so nesting needs no containment analysis beyond assigning each
+hole to the smallest outer loop containing it — which is also what puts an island
+sitting inside a hole in its own group.
+
+Two things that are easy to get wrong here, both found by measuring the exported
+area against the flat renderer's:
+
+- **The chord tolerance belongs to the finished part, not to the drawing.**
+  `FAB_CHORD_MM` (20 µm) is divided by the model transform's `scale`, so the same
+  physical error holds whether the piece is made at 20 mm or 300 mm, and the
+  vertex count follows the size of the object rather than the size of the
+  artwork. A fixed world-unit tolerance was a 3.7% area error on a small piece.
+- **Earcut has no notion of winding.** At the top of the radius range a rounded
+  boundary can fold back over itself; canvas and SVG both resolve that lobe away
+  (winding number 0 under nonzero, parity 0 under even-odd) but a raw ear-clip
+  fills it, putting solid material outside the silhouette the user drew — up to
+  4% extra area from 80% of the slider up. `triangulateLoops` detects it by
+  comparing the triangulated area against the loops' *signed* area, and only then
+  runs the quadratic repair: split the loop at its proper self-crossings, keep
+  the sub-loops that wind with the parent. Filtering earcut's output triangles by
+  the winding number at their centroid does **not** work — the ears straddle the
+  crossing.

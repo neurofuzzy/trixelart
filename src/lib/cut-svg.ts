@@ -1,8 +1,18 @@
 import { getTriVertices, stringToTri } from "@/lib/grid-math";
-import { signedArea, computeModelTransform, type Pt } from "@/lib/mesh-export";
+import {
+  FAB_CHORD_MM,
+  signedArea,
+  computeModelTransform,
+  type Pt,
+} from "@/lib/mesh-export";
 import { cutLayers, type CutFrame } from "@/lib/cut-mesh";
 import type { CutPlan } from "@/lib/cut-export";
-import { flattenRoundedRing, roundPolygon } from "@/lib/round-corners";
+import {
+  boundaryVertexDegrees,
+  flattenRoundedRing,
+  latticeVertexIdAt,
+  roundPolygon,
+} from "@/lib/round-corners";
 import { rotatePoint } from "@/lib/crop";
 
 // ---------------------------------------------------------------------------
@@ -205,15 +215,48 @@ function hexNeck(
   return out.length >= 3 ? out : loop.map((nd) => nd.p);
 }
 
+export interface UnionLoopOptions {
+  /** Weld corner-touching pieces with tiny-hexagon necks. */
+  merge?: boolean;
+  /** Hexagon-neck radius for those welds, in world units (0 = sharp weld). */
+  neck?: number;
+  /** Corner-rounding radius in world units, 0 for none. */
+  round?: number;
+  /** Chord tolerance when flattening those corners, in world units. */
+  sagitta?: number;
+  /**
+   * Boundary-vertex degrees of the **original artwork**, from
+   * `boundaryVertexDegrees(painted)`. Required for `round` to mean anything
+   * faithful — see below.
+   */
+  degrees?: Map<number, number>;
+}
+
 /**
  * Traces the union boundary of a triangle set as closed loops (world coords).
  * With `merge`, corner-touching pieces are welded with tiny-hexagon necks.
  *
- * `round` is the corner-rounding radius in world units, 0 for none. Unlike the
- * flat artwork, a cut sheet has no airtightness constraint to respect — the
- * sheets are *nested*, so a rounded piece sits on a strictly larger one and
- * cannot open a gap — hence every non-collinear corner is eligible and no
- * boundary-degree test is needed.
+ * **A sheet is a union of colours, and it must still round as if it were not.**
+ * This is the one place in the app that holds geometry which has forgotten what
+ * colour it came from: `Sᵢ` merges every colour at level i and above, so its
+ * boundary runs along colour seams that are invisible in the artwork and its
+ * corners have no region to be a corner *of*. Rounding it on its own terms — as
+ * if the whole sheet were one colour — rounds every corner where three colours
+ * meet, which the artwork keeps sharp, and an upper sheet of scattered cells
+ * comes out as a handful of unrecognisable discs.
+ *
+ * So each vertex is looked back up in the original artwork's degree map, via
+ * `latticeVertexIdAt`, and rounds only under the same degree-2 rule the flat
+ * renderer applies. Neck points are not lattice vertices, so they come back null
+ * and stay sharp — which is also what the necks want, being deliberate straight
+ * bridges. Without `degrees` nothing rounds at all: silently rounding everything
+ * is the failure this parameter exists to prevent, so it is not the fallback.
+ *
+ * The remaining difference from the artwork is the *clamp*, not the shape: run
+ * lengths are measured along the sheet's boundary, which can pass straight
+ * through a junction where the colour's own ring turned, so a corner just before
+ * such a junction may take a slightly larger radius than it does on screen.
+ * Both corners at the junction itself stay sharp either way.
  *
  * The result is flattened back to a polyline rather than carrying arcs, so
  * everything downstream (bounds, the SVG path emit, and the 3D preview's
@@ -227,18 +270,21 @@ function hexNeck(
  */
 export function traceUnionLoops(
   keys: string[],
-  merge = false,
-  neck = 0,
-  round = 0,
+  options: UnionLoopOptions = {},
 ): Pt[][] {
+  const { merge = false, neck = 0, round = 0, sagitta, degrees } = options;
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
   const raw = walkLoops(edges, merge);
   const loops = raw.map((loop) => hexNeck(loop, deg, merge ? neck : 0));
-  if (round <= 0) return loops;
+  if (round <= 0 || !degrees) return loops;
   return loops.map((loop) => {
-    const rounded = roundPolygon(loop, round, () => true);
-    return flattenRoundedRing(rounded).map(([x, y]) => ({ x, y }));
+    const eligible = (i: number) => {
+      const v = latticeVertexIdAt(loop[i].x, loop[i].y);
+      return v !== null && degrees.get(v) === 2;
+    };
+    const rounded = roundPolygon(loop, round, eligible);
+    return flattenRoundedRing(rounded, sagitta).map(([x, y]) => ({ x, y }));
   });
 }
 
@@ -321,8 +367,17 @@ export function buildCutSVG(
   // round *here* or the tiles are laid out to the flat-top box. The loops are
   // traced in world space, so this is the one place the turn can happen —
   // unlike the mesh paths, nothing here goes through `toModel`.
+  // From the artwork, not from any sheet: a sheet has already merged colours
+  // together, and this is what remembers where their boundaries were.
+  const degrees = boundaryVertexDegrees(painted);
   const traced = layers.map((l) =>
-    traceUnionLoops(l.keys, merge, neck, options.round ?? 0).map((loop) =>
+    traceUnionLoops(l.keys, {
+      merge,
+      neck,
+      round: options.round ?? 0,
+      sagitta: FAB_CHORD_MM / scale,
+      degrees,
+    }).map((loop) =>
       loop.map((p) => {
         const [x, y] = rotatePoint(p.x, p.y, gridRotation);
         return { x, y };

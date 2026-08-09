@@ -2080,6 +2080,7 @@ export default function TrixelGrid() {
         open={export3DOpen}
         onOpenChange={setExport3DOpen}
         painted={mergedFillPainted}
+        roundFraction={mergedFillRoundFraction}
         projectName={projectName}
         gridRotation={gridRotation}
       />

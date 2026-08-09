@@ -118,9 +118,20 @@ The fabrication paths (3D, cutting, plotter, apparel cut)
 deliberately do **not** run the plan — see the per-export notes for what each one
 ignores and why. They merge the fill stack first, so where one of them *does*
 honour a geometry effect it reads the setting through `layersRoundFraction`
-(`hatch-render.ts`), the shared "largest enabled radius wins" rule. Today the
-plotter is the only one: it honours **round corners** by switching to the polygon
-representation in `plot-geometry.ts` (and loading Clipper on demand, which is why
-`buildPlotterPlot` is async), keeping its original `RawSeg` path byte-for-byte
-for the square-cornered hatch. Reaching for `buildRenderPlan` in a fabrication
-path is still the wrong move; reaching for `stepRegionGeometry` is not.
+(`hatch-render.ts`), the shared "largest enabled radius wins" rule. **Round
+corners is the one effect all of them honour**, because it is the one that
+changes the silhouette rather than what is drawn on it — everything else
+(outline, glow, blend) is ink, and there is no ink in a print or a cut. Each
+reaches it its own way: the plotter switches to the polygon representation in
+`plot-geometry.ts` (loading Clipper on demand, which is why `buildPlotterPlot` is
+async) and keeps its original `RawSeg` path byte-for-byte for the square-cornered
+hatch; the 3D print rounds per colour region through `stepRegionGeometry`'s
+building blocks; and the cutting stack rounds its sheets' union boundary in
+`traceUnionLoops`. **A cut sheet has merged its colours away, and still has to
+round as if it had not** — it recovers each boundary vertex with
+`latticeVertexIdAt` and applies the artwork's own degree-2 rule, or every corner
+where three colours meet rounds and the sheets come out as blobs. The two mesh
+paths then go through `triangulateLoops`
+(`mesh-export.ts`) — a rounded outline is not a lattice cell, and the extruders
+take triangles. Reaching for `buildRenderPlan` in a fabrication path is still the
+wrong move; reaching for `stepRegionGeometry` is not.

@@ -93,7 +93,23 @@ largest bundled example). Edges pack as `(base vertex, direction)` — combining
 two vertex ids overflows the exact-integer range.
 
 **Rendering** — one shape, three backends, all driven off `ringTangents` so they
-cannot disagree about where an arc begins. The arc's centre and sweep are
+cannot disagree about where an arc begins.
+
+**Fabrication** — the 3D print, the cutting stack and the cutting SVG honour the
+radius too, through `layersRoundFraction` (largest enabled wins, since they all
+merge the fill stack before looking at geometry). They cannot extrude a ring
+directly, so `mesh-export.ts` flattens it to a polyline and triangulates it
+(`triangulateLoops`, ear-clipping with holes); the extruders keep taking
+triangles and nothing downstream changes.
+
+**Both obey the degree-2 rule; they differ only in how they can ask.** The 3D
+print rounds per colour region, so `roundRing` reads the ring's own lattice
+vertex ids. A cut sheet is a *union of colours* — its boundary has forgotten
+which ones — so it recovers each vertex with `latticeVertexIdAt` and looks it up
+in the original artwork's degree map. Skipping that (a sheet has no airtightness
+constraint, so every corner *looks* fair game) rounds the junctions the artwork
+keeps sharp and turns a scattered upper sheet into blobs. See
+[fabrication-export.md](fabrication-export.md). The arc's centre and sweep are
 recovered from the two tangent points (`cornerArc`); canvas draws it with `arc`
 from the entry tangent, SVG emits explicit `A` commands with the sweep flag taken
 from the turn direction, and the cropped SVG flattens arcs to chords first,
@@ -165,8 +181,10 @@ rings are drawn in a deterministic colour order — `regionRings` sorts by encod
 colour index, then palette, so a lighter region's outline wins over a darker
 neighbour's. Outline is honoured exactly where corner rounding is — the canvas
 preview and the PNG/SVG (full + cropped) exports, all via `buildRenderPlan` — and
-deliberately not in the 3D/plotter fabrication paths, which walk `painted`
-directly and never saw rounding either. (The apparel cut is the exception: it
+deliberately not in the fabrication paths, which walk `painted` directly. Those
+now do see *rounding* (a silhouette is a shape a machine can make), but not
+outline: a stroke is ink, and there is no ink in a print or a cut. (The apparel
+cut is the exception: it
 must *not* ignore outline, because a stroked layer cut along its own boundary
 would erase itself — see [docs/exports.md](exports.md).) An SVG outline extends the document box by
 `weight/2` (a stroke is centred on the boundary); the crop export needs no box
@@ -264,9 +282,10 @@ The region is the caster's box grown by `GLOW_EXTENT_SIGMAS`.
 **Apparel skips glow** — the one raster path that does, via `drawArtworkPlan`'s
 `{ glow: false }`. A soft shadow spreads translucent ink straight across the
 stencil cut gaps, welding the pieces back together and undoing the flex the cut
-exists to provide. Same reasoning that keeps hatch out of the cut. The cutting
-and 3D exports never saw rounding or outline either and do not see this; the
-plotter now sees rounding, but nothing else.
+exists to provide. Same reasoning that keeps hatch out of the cut. No
+fabrication path sees glow — a soft falloff is not a thing a nozzle or a blade
+can make. Corner rounding is the one geometry effect all of them honour, because
+it is the one that changes the *silhouette* rather than what is drawn on it.
 
 ## Adjust colour
 
