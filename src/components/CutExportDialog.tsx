@@ -82,7 +82,8 @@ export function CutExportDialog({
   // Hexagon-neck radius in world units (SIDE = 50); 0 = sharp weld.
   const neck = mergeIslands ? joinSize * 18 : 0;
 
-  // The layer effect's radius in the same world units the cut geometry uses.
+  // The layer effect's radius in the same world units the cut geometry uses —
+  // fed to both the preview stack and the SVG so they cut the same outline.
   const round = roundFraction * ROUND_RADIUS_AT_FULL;
 
   const stack = useMemo(
@@ -95,9 +96,10 @@ export function CutExportDialog({
             frame,
             mergeIslands,
             neck,
+            round,
           }, gridRotation)
         : null,
-    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck, gridRotation],
+    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck, round, gridRotation],
   );
 
   const commitWidth = () => {
@@ -169,6 +171,14 @@ export function CutExportDialog({
                     {plan.colorCount} sheet{plan.colorCount === 1 ? "" : "s"}
                   </span>
                 </div>
+                {roundFraction > 0 && (
+                  // The cut follows a layer effect this dialog does not own;
+                  // doing that silently would be worse than saying it.
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Corner rounding is on ({Math.round(roundFraction * 100)}%) —
+                    every sheet is cut to the rounded outline.
+                  </p>
+                )}
               </div>
 
               {/* Right: controls + per-sheet stack. */}

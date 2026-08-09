@@ -8,16 +8,18 @@ import {
   triEdgeNeighbors,
 } from "@/lib/grid-math";
 import {
+  FAB_CHORD_MM,
   MeshBuilder,
   addSlab,
   signedArea,
+  triangulateLoops,
   computeModelTransform,
   type Pt,
   type ExportBody,
   type TrixelModel,
 } from "@/lib/mesh-export";
 import type { CutPlan } from "@/lib/cut-export";
-import { neckFillTriangles } from "@/lib/cut-svg";
+import { neckFillTriangles, traceUnionLoops } from "@/lib/cut-svg";
 
 // ---------------------------------------------------------------------------
 // Cut plan → exploded 3D stack of cardstock sheets (see docs/fabrication-export
@@ -55,6 +57,10 @@ export interface CutStackOptions {
   mergeIslands?: boolean;
   /** Hexagon-neck radius for merges, in world units (0 = sharp weld). */
   neck?: number;
+  /** Corner-rounding radius in world units (0 = sharp), from the layer effect.
+   *  The same value `CutSVGOptions.round` takes, so the previewed sheet and the
+   *  cut sheet are the same outline. */
+  round?: number;
 }
 
 export const DEFAULT_CUT_STACK_OPTIONS: CutStackOptions = {
@@ -165,37 +171,73 @@ function matTriangles(painted: Record<string, string>): string[] {
   return [...mat];
 }
 
-/** Builds one slab body from a set of triangle keys at [zLow, zHigh]. When
- *  `neck > 0`, tiny-hexagon neck fills are extruded too so corner-touching
- *  pieces weld into one solid — matching the SVG cut export. */
+/** How a sheet's paper is shaped, before it is given a thickness. Exactly the
+ *  three knobs `buildCutSVG` cuts by, so the preview and the file agree. */
+interface SheetShape {
+  merge: boolean;
+  /** Hexagon-neck radius for merges, in world units (0 = sharp weld). */
+  neck: number;
+  /** Corner-rounding radius in world units (0 = sharp). */
+  round: number;
+  /** Chord tolerance for flattening those corners, world units. */
+  sagitta: number;
+}
+
+/**
+ * Builds one slab body from a set of triangle keys at [zLow, zHigh].
+ *
+ * Two ways to the same solid, and which one runs is decided by rounding:
+ *
+ * - **Sharp** — extrude the lattice cells themselves, plus (when `neck > 0`) the
+ *   tiny-hexagon neck fills that weld corner-touching pieces. The prisms
+ *   overlap and the slicer/viewer unions them, so no boundary tracing is needed.
+ * - **Rounded** — the cell edges are no longer the sheet's edges, so extrude the
+ *   *union boundary* instead: `traceUnionLoops` (the very loops the SVG export
+ *   cuts, necks and all) triangulated back into polygons. Holes come out as
+ *   negative space for free, which is the whole point of a cut sheet.
+ *
+ * The rounded path deliberately does **not** also add `neckFillTriangles` — the
+ * traced loops already run through each neck, and extruding the fans on top
+ * would put solid paper across the notch the necks are there to leave open.
+ */
 function sheetBody(
-  keys: string[],
+  layer: CutLayer,
   toModel: (v: Pt) => Pt,
   zLow: number,
   zHigh: number,
-  name: string,
-  colorKey: string,
-  colorHex: string,
-  neck: number,
+  shape: SheetShape,
 ): ExportBody {
   const mesh = new MeshBuilder();
   const polys: Pt[][] = [];
-  for (const key of keys) {
-    const t = stringToTri(key);
-    const poly = getTriVertices(t.q, t.r, t.type).map(toModel);
+  const push = (poly: Pt[]) => {
     if (signedArea(poly) < 0) poly.reverse();
     polys.push(poly);
+  };
+
+  if (shape.round > 0) {
+    const loops = traceUnionLoops(
+      layer.keys,
+      shape.merge,
+      shape.neck,
+      shape.round,
+      shape.sagitta,
+    );
+    for (const tri of triangulateLoops(loops)) push(tri.map(toModel));
+  } else {
+    for (const key of layer.keys) {
+      const t = stringToTri(key);
+      push(getTriVertices(t.q, t.r, t.type).map(toModel));
+    }
+    for (const tri of neckFillTriangles(layer.keys, shape.neck)) {
+      push(tri.map(toModel));
+    }
   }
-  for (const tri of neckFillTriangles(keys, neck)) {
-    const poly = tri.map(toModel);
-    if (signedArea(poly) < 0) poly.reverse();
-    polys.push(poly);
-  }
+
   addSlab(mesh, polys, zLow, zHigh);
   return {
-    name,
-    colorKey,
-    colorHex,
+    name: layer.label,
+    colorKey: layer.colorKey,
+    colorHex: layer.colorHex,
     grainAngle: null, // cardstock has no grain (MVP)
     positions: mesh.positions,
     indices: mesh.indices,
@@ -288,25 +330,20 @@ export function buildCutStackModel(
   const gap = options.explode * MAX_EXPLODE_GAP_MM;
   const step = T + gap;
 
-  const neck = options.mergeIslands ? (options.neck ?? 0) : 0;
+  const merge = options.mergeIslands ?? false;
+  const shape: SheetShape = {
+    merge,
+    neck: merge ? (options.neck ?? 0) : 0,
+    round: options.round ?? 0,
+    sagitta: FAB_CHORD_MM / transform.scale,
+  };
   const layers = cutLayers(plan, painted, options.frame);
   const bodies: ExportBody[] = [];
   const sheets: CutSheetGeometry[] = [];
 
   for (const layer of layers) {
     const zLow = (layer.level - 1) * step;
-    bodies.push(
-      sheetBody(
-        layer.keys,
-        toModel,
-        zLow,
-        zLow + T,
-        layer.label,
-        layer.colorKey,
-        layer.colorHex,
-        neck,
-      ),
-    );
+    bodies.push(sheetBody(layer, toModel, zLow, zLow + T, shape));
     sheets.push({
       level: layer.level,
       colorHex: layer.colorHex,

@@ -1,5 +1,10 @@
 import { getTriVertices, stringToTri } from "@/lib/grid-math";
-import { signedArea, computeModelTransform, type Pt } from "@/lib/mesh-export";
+import {
+  FAB_CHORD_MM,
+  signedArea,
+  computeModelTransform,
+  type Pt,
+} from "@/lib/mesh-export";
 import { cutLayers, type CutFrame } from "@/lib/cut-mesh";
 import type { CutPlan } from "@/lib/cut-export";
 import { flattenRoundedRing, roundPolygon } from "@/lib/round-corners";
@@ -224,12 +229,17 @@ function hexNeck(
  * that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
  * those vertices to nearly nothing on its own and the tiny-hexagon bridge keeps
  * the shape it was designed to have.
+ *
+ * `sagitta` is the chord tolerance for that flattening, in world units — the
+ * cut file and the 3D preview both pass `FAB_CHORD_MM / scale` so they cannot
+ * disagree about the shape of a corner.
  */
 export function traceUnionLoops(
   keys: string[],
   merge = false,
   neck = 0,
   round = 0,
+  sagitta?: number,
 ): Pt[][] {
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
@@ -238,7 +248,7 @@ export function traceUnionLoops(
   if (round <= 0) return loops;
   return loops.map((loop) => {
     const rounded = roundPolygon(loop, round, () => true);
-    return flattenRoundedRing(rounded).map(([x, y]) => ({ x, y }));
+    return flattenRoundedRing(rounded, sagitta).map(([x, y]) => ({ x, y }));
   });
 }
 
@@ -322,7 +332,13 @@ export function buildCutSVG(
   // traced in world space, so this is the one place the turn can happen —
   // unlike the mesh paths, nothing here goes through `toModel`.
   const traced = layers.map((l) =>
-    traceUnionLoops(l.keys, merge, neck, options.round ?? 0).map((loop) =>
+    traceUnionLoops(
+      l.keys,
+      merge,
+      neck,
+      options.round ?? 0,
+      FAB_CHORD_MM / scale,
+    ).map((loop) =>
       loop.map((p) => {
         const [x, y] = rotatePoint(p.x, p.y, gridRotation);
         return { x, y };

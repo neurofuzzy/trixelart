@@ -95,12 +95,15 @@ export function Export3DDialog({
   open,
   onOpenChange,
   painted,
+  roundFraction = 0,
   projectName,
   gridRotation = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   painted: Record<string, string>;
+  /** Corner-rounding effect, as the 0-1 slider fraction. See `round-corners.ts`. */
+  roundFraction?: number;
   projectName: string;
   /** The lattice's quarter turn, so a pointy-top design prints the way it is drawn. */
   gridRotation?: number;
@@ -108,9 +111,14 @@ export function Export3DDialog({
   const [options, setOptions] = useState<MeshExportOptions>(DEFAULT_MESH_OPTIONS);
   const [copied, setCopied] = useState(false);
 
+  // Rounding is the artwork's, not a dialog setting, so it is merged in here
+  // rather than living in `options` where the reset controls could clear it.
   const model = useMemo(
-    () => (open ? buildTrixelModel(painted, options, gridRotation) : null),
-    [open, painted, options, gridRotation],
+    () =>
+      open
+        ? buildTrixelModel(painted, { ...options, roundFraction }, gridRotation)
+        : null,
+    [open, painted, options, roundFraction, gridRotation],
   );
 
   const set = (patch: Partial<MeshExportOptions>) =>
@@ -188,6 +196,14 @@ export function Export3DDialog({
                     {model.bodies.length} bodies · {model.triangleCount} tris
                   </span>
                 </div>
+                {roundFraction > 0 && (
+                  // The model follows a layer effect this dialog does not own;
+                  // doing that silently would be worse than saying it.
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Corner rounding is on ({Math.round(roundFraction * 100)}%) —
+                    bodies are extruded from the rounded outline.
+                  </p>
+                )}
               </div>
 
               {/* Right: dimensions, backing, and per-color grain angles. */}

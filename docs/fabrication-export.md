@@ -1,6 +1,6 @@
 # Fabrication Export — Design Spec
 
-> Status: **design/spec only, not implemented.** The 3D-print export (`src/lib/mesh-export.ts`, `Export3DDialog`, `Model3DPreview`) exists; the **cutting-machine (Cricut/paper) export** described here does not yet. This document is the plan of record.
+> Status: **design/spec only, not implemented.** The 3D-print export (`src/lib/mesh-export.ts`, `Export3DDialog`, `Model3DPreview`) exists; the **cutting-machine (Cricut/paper) export** described here does not yet — except where a section says otherwise (see §8 phase 3 and §9). This document is the plan of record.
 
 ## 1. Why this exists
 
@@ -182,3 +182,55 @@ Ship **planner + exploded preview first**; SVG export lands second (cut paper on
 **Phase 3 — SVG cut export. ✅ built** (`src/lib/cut-svg.ts`). `traceUnionLoops` walks boundary edges (reverse-edge-absent test) into closed loops, merges collinear runs → **one compound path per layer** (outer + holes as sub-paths, opposite winding, `fill-rule: evenodd`) so the cutter cuts the union silhouette, never internal triangle edges. `buildCutSVG` auto-tiles the layers into a grid, each a labeled inkscape layer (`Sᵢ ∪ frame`; the mat is the frame alone), sized in mm from the width control. Wired to a **Download SVG** button in `CutExportDialog`.
 
 **Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding/feature-size guards · budget>0 auto-splits · bridge-hint surfacing.
+
+---
+
+## 9. Corner rounding in the fabrication paths
+
+Both facets follow the artwork's **round corners** effect, read through
+`layersRoundFraction` (`hatch-render.ts`) — the shared "largest enabled radius
+wins" rule, since every fabrication path merges the fill stack before it looks at
+geometry, so a per-layer radius could not survive the merge. It is not a dialog
+setting in either export: a print or a cut that disagreed with the picture on
+screen would be a bug, not an option.
+
+**Rounding a cut sheet is a different question from rounding the artwork.** The
+flat renderer may only round a vertex where exactly two colour regions meet, or
+neighbouring polygons stop meeting airtight. A cut sheet has no such constraint —
+the sheets are *nested* (`S₁ ⊇ … ⊇ S_K`), so a rounded piece always sits on a
+strictly larger one and cannot open a gap — so `traceUnionLoops` rounds **every**
+non-collinear corner of the sheet's union boundary. That split is exactly why
+`round-corners.ts` exposes `roundPolygon` (geometry only, caller decides
+eligibility) underneath `roundRing` (geometry + the degree-2 rule). The 3D print
+is on the *other* side of it: its colour bodies abut, so it rounds per region
+with `roundRing` and the filament bodies still meet with no gap and no overlap.
+
+**Rounding runs after the necks are inserted**, and the run clamp is what makes
+that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
+those vertices to nearly nothing and the tiny-hexagon bridge keeps its shape.
+
+**Meshes need triangles, so a rounded loop is triangulated** —
+`triangulateLoops` (`mesh-export.ts`, ear-clipping with holes via the earcut
+three vendors). Outer loops wind positive and holes negative by construction in
+both producers, so nesting needs no containment analysis beyond assigning each
+hole to the smallest outer loop containing it — which is also what puts an island
+sitting inside a hole in its own group.
+
+Two things that are easy to get wrong here, both found by measuring the exported
+area against the flat renderer's:
+
+- **The chord tolerance belongs to the finished part, not to the drawing.**
+  `FAB_CHORD_MM` (20 µm) is divided by the model transform's `scale`, so the same
+  physical error holds whether the piece is made at 20 mm or 300 mm, and the
+  vertex count follows the size of the object rather than the size of the
+  artwork. A fixed world-unit tolerance was a 3.7% area error on a small piece.
+- **Earcut has no notion of winding.** At the top of the radius range a rounded
+  boundary can fold back over itself; canvas and SVG both resolve that lobe away
+  (winding number 0 under nonzero, parity 0 under even-odd) but a raw ear-clip
+  fills it, putting solid material outside the silhouette the user drew — up to
+  4% extra area from 80% of the slider up. `triangulateLoops` detects it by
+  comparing the triangulated area against the loops' *signed* area, and only then
+  runs the quadratic repair: split the loop at its proper self-crossings, keep
+  the sub-loops that wind with the parent. Filtering earcut's output triangles by
+  the winding number at their centroid does **not** work — the ears straddle the
+  crossing.

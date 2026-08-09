@@ -3,9 +3,19 @@ import {
   stringToTri,
   countComponents,
 } from "@/lib/grid-math";
-import { resolveColor } from "@/lib/constants";
+import { encodeColor, resolveColor } from "@/lib/constants";
 import { rotatePoint } from "@/lib/crop";
+import {
+  ROUND_RADIUS_AT_FULL,
+  boundaryVertexDegrees,
+  flattenRoundedRing,
+  regionRings,
+  roundRing,
+} from "@/lib/round-corners";
 import { zipSync, strToU8 } from "fflate";
+// Standalone module — mapbox's earcut, vendored by three with no imports of its
+// own, so this costs nothing at runtime and drags no WebGL in behind it.
+import { Earcut } from "three/src/extras/Earcut.js";
 
 // ---------------------------------------------------------------------------
 // Trixel art → shallow 3D model (one body per color) → 3MF for print services.
@@ -31,6 +41,15 @@ export interface MeshExportOptions {
   /** Per-color grain-angle overrides, keyed by color key. Colors absent here
    *  fall back to the auto-cycled angle (0/60/120° by body order). */
   grainByColor?: Record<string, number>;
+  /**
+   * The artwork's corner-rounding effect, as the 0–1 slider fraction (see
+   * `ROUND_RADIUS_AT_FULL`). 0 prints the raw lattice silhouette.
+   *
+   * Not a dialog setting: it comes from the layer stack via
+   * `layersRoundFraction`, so the print matches the picture rather than
+   * offering a second, contradictory radius.
+   */
+  roundFraction?: number;
 }
 
 export const DEFAULT_MESH_OPTIONS: MeshExportOptions = {
@@ -214,6 +233,281 @@ export function signedArea(p: Pt[]): number {
   return a / 2;
 }
 
+/** Even-odd ray cast. Used only to decide which outer loop a hole belongs to. */
+function pointInLoop(p: Pt, loop: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[i];
+    const b = loop[j];
+    if (
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Where two segments properly cross, with the parameter along each. Touching
+ *  endpoints do not count: a ring is full of those and none of them is a fold. */
+function properCross(
+  a: Pt,
+  b: Pt,
+  c: Pt,
+  d: Pt,
+): { p: Pt; t1: number; t2: number } | null {
+  const rx = b.x - a.x,
+    ry = b.y - a.y,
+    sx = d.x - c.x,
+    sy = d.y - c.y;
+  const den = rx * sy - ry * sx;
+  if (den === 0) return null;
+  const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+  const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+  if (t <= 0 || t >= 1 || u <= 0 || u >= 1) return null;
+  return { p: { x: a.x + t * rx, y: a.y + t * ry }, t1: t, t2: u };
+}
+
+/**
+ * A self-overlapping loop → the simple loops that make up the region it winds
+ * around, folded-back lobes dropped.
+ *
+ * The loop is cut at every proper self-crossing and walked with a stack: each
+ * time the walk revisits a vertex it has on the stack, everything since that
+ * visit is a closed sub-loop and comes off. The sub-loops that wind *against*
+ * the parent are exactly the folds — the material the boundary crossed back
+ * over — so keeping only the ones with the parent's orientation leaves the
+ * nonzero-filled region, which is what canvas and SVG already show.
+ *
+ * Quadratic in the loop's length, and deliberately only reached for a loop that
+ * has been *shown* to need it.
+ */
+function splitSimpleLoops(loop: Pt[]): Pt[][] {
+  const n = loop.length;
+  const cuts: { t: number; p: Pt }[][] = Array.from({ length: n }, () => []);
+  const at = (i: number) => loop[i % n];
+  let found = false;
+
+  for (let i = 0; i < n; i++) {
+    const a = at(i),
+      b = at(i + 1);
+    const loX = Math.min(a.x, b.x),
+      hiX = Math.max(a.x, b.x);
+    const loY = Math.min(a.y, b.y),
+      hiY = Math.max(a.y, b.y);
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // shares the closing vertex
+      const c = at(j),
+        d = at(j + 1);
+      if (Math.min(c.x, d.x) > hiX || Math.max(c.x, d.x) < loX) continue;
+      if (Math.min(c.y, d.y) > hiY || Math.max(c.y, d.y) < loY) continue;
+      const hit = properCross(a, b, c, d);
+      if (!hit) continue;
+      cuts[i].push({ t: hit.t1, p: hit.p });
+      cuts[j].push({ t: hit.t2, p: hit.p });
+      found = true;
+    }
+  }
+  if (!found) return [loop];
+
+  const pts: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    pts.push(loop[i]);
+    cuts[i].sort((p, q) => p.t - q.t);
+    for (const cut of cuts[i]) pts.push(cut.p);
+  }
+
+  const key = (p: Pt) => `${Math.round(p.x * 1e3)},${Math.round(p.y * 1e3)}`;
+  const stack: Pt[] = [];
+  const seen = new Map<string, number>();
+  const parts: Pt[][] = [];
+  for (const p of pts) {
+    const k = key(p);
+    const start = seen.get(k);
+    if (start !== undefined) {
+      const sub = stack.splice(start + 1);
+      for (const s of sub) seen.delete(key(s));
+      if (sub.length >= 2) parts.push([stack[start], ...sub]);
+    } else {
+      seen.set(k, stack.length);
+      stack.push(p);
+    }
+  }
+  if (stack.length >= 3) parts.push(stack);
+
+  const want = Math.sign(signedArea(loop));
+  const kept = parts.filter(
+    (part) => part.length >= 3 && Math.sign(signedArea(part)) === want,
+  );
+  return kept.length ? kept : [loop];
+}
+
+/** Below this a triangle is degenerate. World units, where `SIDE` is 50. */
+const DEGENERATE_AREA = 1e-9;
+
+/**
+ * Chord tolerance for flattening a rounded corner, in **millimetres of the
+ * finished part** — not world units.
+ *
+ * Every fabrication backend turns arcs into polylines, and the only tolerance
+ * that means anything is the one measured on the object that comes out of the
+ * machine. Expressed in world units it would be a different physical error at
+ * every export width; divided by the model transform's `scale` it is the same
+ * 20 µm whether the piece is printed at 20 mm or 300 mm, and the vertex count
+ * follows the size of the part instead of the size of the drawing.
+ *
+ * 20 µm is an order of magnitude under both a 0.4 mm nozzle and a cutting
+ * blade's kerf — the same margin `PLOT_SAGITTA` keeps against a plotter nib.
+ */
+export const FAB_CHORD_MM = 0.02;
+
+/**
+ * Closed loops → a flat list of triangles covering the region they bound.
+ *
+ * The extrusion primitives here take triangles, so anything that is *not* a
+ * lattice cell — a rounded silhouette, a welded cut sheet — has to be
+ * triangulated before it can become a solid. Loops arrive as plain polylines,
+ * arcs already flattened, and holes come out as negative space for free.
+ *
+ * **Outer loops wind positive under `signedArea`, holes negative.** Both
+ * producers guarantee that by construction rather than by a containment test:
+ * `regionRings` walks a region's boundary with the region on one consistent
+ * side, and `traceUnionLoops` forces every source triangle positive before it
+ * chains the boundary. A hole is then assigned to the *smallest* outer loop
+ * containing it, which is what puts an island sitting inside a hole in its own
+ * group instead of the enclosing one.
+ *
+ * The result is a set of independent triangles, in the loops' own coordinate
+ * space and with no promise about winding — callers map them into model space
+ * (which flips Y, and with it the winding) and fix that afterwards, exactly as
+ * they already do for lattice cells.
+ */
+export function triangulateLoops(loops: Pt[][]): Pt[][] {
+  const tris = earcutLoops(loops);
+  // Earcut fills whatever the loops enclose, with no notion of winding, so a
+  // boundary that doubles back over itself — which corner rounding does at the
+  // top of its range, where an arc can overrun the shape it belongs to — comes
+  // back with the folded-back lobe filled in. On screen that lobe is invisible:
+  // canvas and SVG both resolve it away (winding number 0 under nonzero, parity
+  // 0 under even-odd), and a fabrication path that kept it would print or cut
+  // solid material outside the silhouette the user drew.
+  //
+  // The triangulated area agreeing with the loops' *signed* area is exactly the
+  // statement that no such fold exists, so the repair costs one comparison in
+  // the overwhelmingly common case and only runs the quadratic split for the
+  // rare loop that has been shown to need it.
+  const net = loops.reduce((s, loop) => s + signedArea(loop), 0);
+  const covered = tris.reduce((s, tri) => s + Math.abs(signedArea(tri)), 0);
+  if (Math.abs(covered - net) <= 1e-6 * Math.abs(net)) return tris;
+  return earcutLoops(loops.flatMap(splitSimpleLoops));
+}
+
+/** `triangulateLoops` without the fold repair: classify, then ear-clip. */
+function earcutLoops(loops: Pt[][]): Pt[][] {
+  const outers: Pt[][] = [];
+  const holes: Pt[][] = [];
+  for (const loop of loops) {
+    if (loop.length < 3) continue;
+    (signedArea(loop) >= 0 ? outers : holes).push(loop);
+  }
+  if (outers.length === 0) return [];
+
+  const outerArea = outers.map((o) => Math.abs(signedArea(o)));
+  const holesOf: Pt[][][] = outers.map(() => []);
+  for (const hole of holes) {
+    let best = -1;
+    for (let i = 0; i < outers.length; i++) {
+      if (best >= 0 && outerArea[i] >= outerArea[best]) continue;
+      if (pointInLoop(hole[0], outers[i])) best = i;
+    }
+    if (best >= 0) holesOf[best].push(hole);
+  }
+
+  const out: Pt[][] = [];
+  outers.forEach((outer, i) => {
+    const verts: Pt[] = [...outer];
+    const data: number[] = [];
+    for (const p of outer) data.push(p.x, p.y);
+    const holeIndices: number[] = [];
+    for (const hole of holesOf[i]) {
+      holeIndices.push(data.length / 2);
+      for (const p of hole) {
+        data.push(p.x, p.y);
+        verts.push(p);
+      }
+    }
+    const idx = Earcut.triangulate(data, holeIndices, 2);
+    for (let k = 0; k + 2 < idx.length; k += 3) {
+      const tri = [verts[idx[k]], verts[idx[k + 1]], verts[idx[k + 2]]];
+      // A sliver from the flattened arcs would extrude into a zero-volume prism
+      // — harmless on screen, but a degenerate face in the exported mesh.
+      if (Math.abs(signedArea(tri)) < DEGENERATE_AREA) continue;
+      out.push(tri);
+    }
+  });
+  return out;
+}
+
+/**
+ * Each colour's footprint as CCW model-space polygons, keyed by encoded colour.
+ *
+ * Without rounding this is one polygon per painted cell, which is what keeps a
+ * plain export byte-identical to what it always was. With rounding it is the
+ * *region* boundary instead — the same `regionRings` + `roundRing` the canvas
+ * and both SVG exporters walk, so the printed silhouette is the one on screen —
+ * triangulated back into polygons the extruder can take.
+ *
+ * **Rounding uses the shared boundary-degree rule, and that is what keeps the
+ * colours airtight.** Each region rounds its own rings in ignorance of its
+ * neighbours; because the radius at a vertex is derived from the boundary both
+ * sides agree on, the convex corner one body loses is exactly the concave bulge
+ * the next one gains. Two abutting filament bodies therefore still meet with no
+ * gap and no overlap — see the note at the top of `round-corners.ts`.
+ *
+ * Regions group by *resolved* hex where cells group by encoded colour, so two
+ * palettes resolving to one hex become one body rather than two. That is the
+ * right answer for a print (they would be the same filament) and it is only
+ * reachable with rounding on, where the boundary between them is not a boundary
+ * at all.
+ */
+function colorPolys(
+  painted: Record<string, string>,
+  roundFraction: number,
+  transform: ModelTransform,
+): Map<string, Pt[][]> {
+  const toModel = transform.toModel;
+  const byColor = new Map<string, Pt[][]>();
+  const push = (colorKey: string, poly: Pt[]) => {
+    if (signedArea(poly) < 0) poly.reverse();
+    const list = byColor.get(colorKey);
+    if (list) list.push(poly);
+    else byColor.set(colorKey, [poly]);
+  };
+
+  if (roundFraction <= 0) {
+    for (const [key, colorKey] of Object.entries(painted)) {
+      const t = stringToTri(key);
+      push(colorKey, getTriVertices(t.q, t.r, t.type).map(toModel));
+    }
+    return byColor;
+  }
+
+  const degrees = boundaryVertexDegrees(painted);
+  const radius = roundFraction * ROUND_RADIUS_AT_FULL;
+  const sagitta = FAB_CHORD_MM / transform.scale;
+  for (const region of regionRings(painted)) {
+    const loops = region.rings.map((ring) =>
+      flattenRoundedRing(roundRing(ring, degrees, radius), sagitta).map(
+        ([x, y]) => ({ x, y }),
+      ),
+    );
+    const colorKey = encodeColor(region.paletteIdx, region.colorIdx);
+    for (const tri of triangulateLoops(loops)) push(colorKey, tri.map(toModel));
+  }
+  return byColor;
+}
+
 /** Build a 3D model from the painted grid. Returns null if nothing is painted. */
 export function buildTrixelModel(
   painted: Record<string, string>,
@@ -226,18 +520,10 @@ export function buildTrixelModel(
   // Shared world → centered, Y-up model transform (matches on-screen orientation).
   const transform = computeModelTransform(painted, options.widthMm, gridRotation);
   if (!transform) return null;
-  const { widthMm, heightMm, toModel } = transform;
+  const { widthMm, heightMm } = transform;
 
   // Group tiles by color; store each as a CCW model-space polygon.
-  const byColor = new Map<string, Pt[][]>();
-  for (const [key, colorKey] of entries) {
-    const t = stringToTri(key);
-    const poly = getTriVertices(t.q, t.r, t.type).map(toModel);
-    if (signedArea(poly) < 0) poly.reverse();
-    const list = byColor.get(colorKey);
-    if (list) list.push(poly);
-    else byColor.set(colorKey, [poly]);
-  }
+  const byColor = colorPolys(painted, options.roundFraction ?? 0, transform);
   const allPolys: Pt[][] = [];
   for (const polys of byColor.values()) allPolys.push(...polys);
 
