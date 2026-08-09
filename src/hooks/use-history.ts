@@ -177,7 +177,7 @@ export interface ProjectSnapshot {
 
 const STORAGE_KEY = "trixel-save";
 const MAX_HISTORY = 50;
-const MAX_LAYERS = 5;
+export const MAX_LAYERS = 5;
 
 function makeLayer(name: string, kind: LayerKind = "fill"): Layer {
   return {
@@ -187,6 +187,70 @@ function makeLayer(name: string, kind: LayerKind = "fill"): Layer {
     painted: {},
     visible: true,
   };
+}
+
+/**
+ * The next free "Layer N" number. Both kinds share the numbering — see
+ * `addLayer` for why the prefix has to stay parseable.
+ *
+ * It is a *suggestion*, not a uniqueness guarantee: layers can be renamed by
+ * hand, so a stack of "Sky" and "Sea" parses to 0 and hands out "Layer 1"
+ * however many times it is asked. That is fine — `id` is identity, and two
+ * layers sharing a name is cosmetic.
+ */
+export function nextLayerName(layers: Layer[]): string {
+  const nums = layers.map(
+    (l) => parseInt(l.name.replace("Layer ", ""), 10) || 0,
+  );
+  return `Layer ${Math.max(0, ...nums) + 1}`;
+}
+
+/** A user-supplied layer name, or the generated one when it is blank. Every
+ *  layer-creating path goes through this, so an all-spaces name is impossible
+ *  no matter which dialog asked for it. */
+function layerName(layers: Layer[], name?: string): string {
+  return name?.trim() || nextLayerName(layers);
+}
+
+/**
+ * Lifts `moved` off `layers[idx]` into a fresh layer, and returns the whole new
+ * stack — or null when there is nothing to move or no room for another layer,
+ * so the caller can leave the artwork (and the undo stack) alone.
+ *
+ * A pure function over the array rather than a `setLayers` updater: two layers
+ * change at once, so the caller has to push the result as one history entry and
+ * needs the array in hand to do it.
+ *
+ * The new layer goes **directly above its source**, inherits its kind, its
+ * visibility and a deep copy of its effects. All four are the same requirement:
+ * splitting cells out must not change what the composite looks like, and
+ * anywhere else in the stack — or any other effect list — would.
+ */
+export function splitLayerAt(
+  layers: Layer[],
+  idx: number,
+  moved: Record<string, string>,
+  name?: string,
+): Layer[] | null {
+  const src = layers[idx];
+  if (!src || layers.length >= MAX_LAYERS) return null;
+  const keys = Object.keys(moved);
+  if (keys.length === 0) return null;
+
+  const remaining = { ...src.painted };
+  for (const k of keys) delete remaining[k];
+
+  const split: Layer = {
+    ...makeLayer(layerName(layers, name), layerKind(src)),
+    painted: { ...moved },
+    visible: src.visible,
+    effects: layerEffects(src).map((e) => ({ ...e })),
+  };
+
+  const next = [...layers];
+  next[idx] = { ...src, painted: remaining };
+  next.splice(idx + 1, 0, split);
+  return next;
 }
 
 function defaultLayers(): Layer[] {
@@ -362,12 +426,14 @@ export function useHistory() {
   // Both kinds share the "Layer N" numbering: the next number is derived by
   // parsing that prefix, so naming hatch layers anything else makes the parse
   // yield 0 and the next fill layer collides on a name already in use.
+  //
+  // Unprompted, unlike duplicate and split: this makes an *empty* layer, so
+  // there is nothing yet to name it after, and a modal between "+" and a blank
+  // canvas is a toll on the commonest layer action in the panel.
   const addLayer = useCallback((kind: LayerKind = "fill") => {
     setLayers((prev) => {
       if (prev.length >= MAX_LAYERS) return prev;
-      const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
-      const nextNum = Math.max(0, ...nameNums) + 1;
-      const next = [...prev, makeLayer(`Layer ${nextNum}`, kind)];
+      const next = [...prev, makeLayer(nextLayerName(prev), kind)];
       setActiveLayerIdx(next.length - 1);
       return next;
     });
@@ -387,15 +453,13 @@ export function useHistory() {
   );
 
   const duplicateLayer = useCallback(
-    (idx: number) => {
+    (idx: number, name?: string) => {
       setLayers((prev) => {
         if (prev.length >= MAX_LAYERS) return prev;
         const src = prev[idx];
         if (!src) return prev;
-        const nameNums = prev.map((l) => parseInt(l.name.replace("Layer ", ""), 10) || 0);
-        const nextNum = Math.max(0, ...nameNums) + 1;
         const dup: Layer = {
-          ...makeLayer(`Layer ${nextNum}`, layerKind(src)),
+          ...makeLayer(layerName(prev, name), layerKind(src)),
           painted: { ...src.painted },
           visible: src.visible,
           // Deep-copied, or editing one copy's radius would move the other's.
@@ -408,6 +472,27 @@ export function useHistory() {
     },
     [],
   );
+
+  /**
+   * Renames one layer. Like every other layer edit the caller follows it with
+   * `onCommit()` — the name lives on the `Layer`, so it is inside
+   * `ProjectSnapshot` and skipping the push would let a later undo silently
+   * revert it.
+   *
+   * A blank name is refused rather than stored: the row would then be an
+   * un-clickable sliver with nothing to grab and no way back.
+   */
+  const renameLayer = useCallback((idx: number, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setLayers((prev) => {
+      const l = prev[idx];
+      if (!l || l.name === trimmed) return prev;
+      const next = [...prev];
+      next[idx] = { ...l, name: trimmed };
+      return next;
+    });
+  }, []);
 
   /** Replaces one layer's effect stack. Like every other structural layer edit
    *  the caller follows this with `onCommit()`, so it lands in the undo stack —
@@ -473,6 +558,7 @@ export function useHistory() {
     addLayer,
     deleteLayer,
     duplicateLayer,
+    renameLayer,
     toggleLayerVisibility,
     setLayerEffects,
     moveLayer,

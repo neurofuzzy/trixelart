@@ -1,4 +1,5 @@
-import { getTriVertices, type TriKey } from "@/lib/grid-math";
+import { getTriVertices, stringToTri, type TriKey } from "@/lib/grid-math";
+import { regionMembership, type HexRegion } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import { colorAdjuster } from "@/lib/color-adjust";
 import type {
@@ -204,6 +205,37 @@ export function glowReceivers(plan: RenderStep[]): (RoundedRing[] | null)[] {
  * own step. Only layers with none coalesce, which is the common case (all of
  * them carrying none).
  */
+/**
+ * The same layer stack with everything outside the hex selection erased, or the
+ * stack untouched when there is no selection.
+ *
+ * A *pre*-plan transform, deliberately: every backend already walks
+ * `buildRenderPlan`, so clipping the painted maps on the way in makes
+ * "selection only" mean the same thing in the SVG file, the plot and anything
+ * added later, with no per-exporter code. It runs before the plan rather than
+ * after it because the plan coalesces layers — filtering a step's map would
+ * still be correct, but the layer array is the thing the callers already hold.
+ *
+ * Geometry effects then read the *clipped* map, so a region cut by the
+ * selection edge rounds and outlines against its new boundary rather than
+ * against the shape it had in the full artwork. That is the intent: the export
+ * is of the selection, not a window onto the whole piece.
+ */
+export function clipLayersToSelection(
+  layers: Layer[],
+  regions: HexRegion[],
+): Layer[] {
+  const inside = regionMembership(regions);
+  if (!inside) return layers;
+  return layers.map((layer) => {
+    const painted: Record<string, string> = {};
+    for (const [key, value] of Object.entries(layer.painted)) {
+      if (inside(stringToTri(key))) painted[key] = value;
+    }
+    return { ...layer, painted };
+  });
+}
+
 export function buildRenderPlan(layers: Layer[]): RenderStep[] {
   const steps: RenderStep[] = [];
   for (const layer of layers) {

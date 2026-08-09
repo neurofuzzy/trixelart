@@ -32,6 +32,27 @@
 
 Shortcuts suppressed when focus is in `<input>` or `<textarea>` (except `Escape` and undo/redo).
 
+## The two toolbar menus
+
+The left of the toolbar carries **two** dropdowns, split by the question they
+answer:
+
+- **Hamburger** (`data-tour="menu"`) — *what is my project*: New Project, Load
+  Project, Load Example..., Save Project, Save Selection... All of these read or
+  write a `.trixel.svg`, or replace what is on the canvas.
+- **Export** (`data-tour="export-menu"`) — *what do I want out of it*: Image
+  (SVG)..., Fabric..., 3D Print..., Cutting..., Plotter..., Apparel...
+
+They used to be one list of eleven. Six of them began "Export for …", which
+buried New/Load/Save under a wall of near-identical entries; the prefix is gone
+now that the menu itself says it. Both triggers are bare `size="icon"` ghost
+buttons, so the pair reads as two menus rather than as a menu and a button.
+
+"Save Selection..." stays with the project items despite being about the
+selection: what it writes is a project file, loadable like any other. Only *how
+much* of the project goes in is the selection's business. It is disabled with no
+selection.
+
 ## The panel slot
 
 Four right-hand drawers — **Layers**, **Grid Settings**, **Pattern** and **Crop & Export** — share one strip down the right edge of the canvas, and **exactly one may be open at a time**. That is held by a single `panel: PanelId | null` in `TrixelGrid` rather than a boolean per drawer: with four booleans "only one" is a rule every new call site has to remember, and the failure mode is two drawers stacked on the same 384px of screen with the lower one unreachable.
@@ -43,7 +64,7 @@ Children supply their own scroll container, because the four do not agree on wha
 **Two kinds of drawer, and the difference is who opens them.**
 
 - **Tool-owned** (`panelForTool`): the Pattern drawer *is* the pattern brush's controls, and Crop & Export is the crop tool's. Selecting the tool opens it; leaving the tool closes it.
-  - **Crop goes further: the drawer owns the tool back.** Crop has no toolbar button — it is entered from the hamburger's "Export for Fabric..." — so closing its drawer, or letting another drawer take the slot, exits crop mode (`showPanel` → `leaveCropMode`). Without that, opening Layers over it left the canvas covered in crop handles with painting locked out and nothing on screen to explain why. A tool whose whole interface is one drawer cannot outlive the drawer.
+  - **Crop goes further: the drawer owns the tool back.** Crop has no toolbar button — it is entered from the Export menu's "Fabric..." — so closing its drawer, or letting another drawer take the slot, exits crop mode (`showPanel` → `leaveCropMode`). Without that, opening Layers over it left the canvas covered in crop handles with painting locked out and nothing on screen to explain why. A tool whose whole interface is one drawer cannot outlive the drawer.
 - **Manual**: Layers and Grid Settings are toggled from the footer and survive a tool change — unless a tool-owned drawer takes the slot, which is the one thing that can evict them.
 
 **The reconciliation lives in `changeTool`, not in an effect keyed on `tool`.** Re-selecting the tool that already owns the slot does not change `tool`, so an effect would never fire and the drawer's own close button would be a one-way door: closed, with no way back short of switching tools twice. Doing it in the handler also avoids the cascading render `setState` inside an effect costs.
@@ -53,6 +74,24 @@ That only works because **`changeTool` is now the sole caller of `setTool`** —
 `tool === "crop"` therefore implies `panel === "export"`, which is what lets the footer's toggle exit crop mode without reading the current panel at all.
 
 Verified in a browser across the whole matrix — footer toggles, tool switches, close-and-reopen, and a tool change out of a tool-owned drawer: never more than one `<aside>` on screen, and no path that leaves a drawer stranded.
+
+### Layer names
+
+**Renaming is in place, on double-click**, in `LayerPanel`. A single click has to stay "select this layer" — it is what the whole row is for — so the second click is the only gesture free to mean something else, and it is the one every other layer panel uses. The draft lives in the panel's own state and `onRenameLayer` fires **once, on the way out** (Enter, or blur); a commit per keystroke would spend a dozen of the 50 history entries on one word. Escape discards. A blank name is refused in `renameLayer` itself, not just in the UI: the row would otherwise become an unclickable sliver with no way back.
+
+The rename input calls `stopPropagation` on keydown. The global shortcuts already bail on a focused `INPUT` — **except Escape, which is handled before that guard**, so without it, cancelling a rename would also clear the hex selection. The two naming dialogs do the same, for the same reason. React's `stopPropagation` reaches the native event and the hook listens on `window` in the bubble phase, so this is enough.
+
+**Two of the three layer-creating actions ask for a name first** (`NameLayerDialog`), because both make a layer *out of something that already exists* and so have a suggestion worth offering:
+
+| Action | Suggests | Why it asks |
+|---|---|---|
+| Duplicate layer (Copy icon) | `{name} copy` | The copy is about to be edited into something else |
+| Move selection to a new layer | `{name} selection` | The user picked that region for a reason |
+| Add layer (+) | — | Makes an **empty** layer: nothing to name it after, and a modal on the panel's commonest action is a toll |
+
+The name is collected **before** the edit runs, so the split or duplicate lands in the undo stack as one entry already carrying it. Renaming afterwards would be a second entry to undo.
+
+`nextLayerName(layers)` is the fallback for a blank name, and is a *suggestion, not a uniqueness guarantee*: it parses the "Layer N" prefix, so a stack renamed to "Sky" and "Sea" hands out "Layer 1" however many times it is asked. That is fine — `id` is identity and a shared name is cosmetic. Every layer-creating path funnels through one `layerName(layers, name?)` helper, so an all-spaces name is impossible whichever dialog asked.
 
 ## Canvas background
 

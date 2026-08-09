@@ -41,7 +41,23 @@ The drawing is always `{ stroke: true, merge: true }`, not the user's `svgExport
 
 Re-saving a project SVG from another editor is **lossy and unsupported** — Inkscape rewrites `<metadata>` with its own RDF and may not preserve foreign children. The reader searches the whole document rather than only under `<metadata>`, which mitigates a relocation but not a deletion.
 
-The two menu items are "Save Project" (`.trixel.svg`, reloadable) and "Export Image (SVG)..." (`.svg`, not reloadable) — both write SVG now, so the labels have to say which is which.
+The two are "Save Project" in the hamburger (`.trixel.svg`, reloadable) and "Image (SVG)..." in the Export menu (`.svg`, not reloadable) — both write SVG, so the labels have to say which is which. Being in different menus helps but does not say it.
+
+### Save Selection
+
+Last item of the hamburger menu, next to Save Project because it writes the **same format**: a project file, loadable through the ordinary importer. Disabled with no hex selection.
+
+`selectionPayload(payload, regions, opts)` is the whole of it — a **payload transform, not a second format**. It runs `clipLayersToSelection` (see [exports.md](exports.md)) over the layers and hands the result to `buildProjectSVG` like any other save, so the thumbnail is the selection and the data is the selection and neither can drift from the other. Everything else the payload carries rides along untouched: divisions, hex mode, symmetry, the palette offsets and the orientation all have to match, or the piece reopens meaning something different.
+
+The dialog collects only what the narrowing cannot decide on its own:
+
+- **Name** — becomes both `payload.name` and, slugged, the filename. The dialog shows the slugged result, which saves a trip through the download folder to find out what it was.
+- **Include stamps** — the stamp palette (`selections`). Off by default: they are workspace furniture, not part of the selected artwork.
+- **Include empty layers** — the clip empties any layer that had nothing inside the selection. Off by default, so the file is just the layers that contribute; on, the stack's shape survives the save. Either way **one layer always survives**, because a project with none cannot be opened — and it is the active one, emptied, so the file stays honest about where the selection came from.
+
+`SaveSelectionDialog` is mounted only while open (`{saveSelectionOpen && …}`) rather than self-closing on an `open` prop like its neighbours. Every visit then starts from a fresh suggested name and fresh checkboxes with no effect to synchronise them — which is the whole reason: the project can be renamed, or a different selection made, between two visits.
+
+`handleExport` and `handleSaveSelection` both go through one `writeProject(payload)` in `TrixelGrid`, so the two saves cannot diverge as formats.
 
 ### Example projects
 

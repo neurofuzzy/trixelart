@@ -5,6 +5,8 @@ import { useCanvasSize } from "@/hooks/use-canvas-size";
 import {
   useHistory,
   layerKind,
+  splitLayerAt,
+  MAX_LAYERS,
   type ProjectSnapshot,
   type Layer,
   type LayerKind,
@@ -55,7 +57,12 @@ import {
   buildProjectSVG,
   projectFileName,
   readProjectFile,
+  selectionPayload,
+  type ProjectPayload,
+  type SelectionSaveOptions,
 } from "@/lib/project-file";
+import { SaveSelectionDialog } from "@/components/SaveSelectionDialog";
+import { NameLayerDialog } from "@/components/NameLayerDialog";
 import { fetchExample, type Example } from "@/lib/examples";
 import { ExampleGallery } from "@/components/ExampleGallery";
 import {
@@ -77,6 +84,7 @@ import {
   remapHex,
   shiftHexPalettes,
   regionTrixels,
+  regionMembership,
   spreadHexArtwork,
 } from "@/lib/hex-flower";
 import { isToolAllowed, type Tool } from "@/lib/tools";
@@ -162,6 +170,7 @@ export default function TrixelGrid() {
     addLayer,
     deleteLayer,
     duplicateLayer,
+    renameLayer,
     toggleLayerVisibility,
     setLayerEffects,
     moveLayer,
@@ -179,6 +188,8 @@ export default function TrixelGrid() {
   const [hueOffset, setHueOffset] = useState(0);
   const [satOffset, setSatOffset] = useState(0);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [saveSelectionOpen, setSaveSelectionOpen] = useState(false);
+  const [nameSplitLayerOpen, setNameSplitLayerOpen] = useState(false);
   const [export3DOpen, setExport3DOpen] = useState(false);
   const [exportCutOpen, setExportCutOpen] = useState(false);
   const [svgExport, setSvgExport] =
@@ -1093,39 +1104,48 @@ export default function TrixelGrid() {
     pushHistory(snapshotWithPainted(next));
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
+  const buildPayload = useCallback(
+    (): ProjectPayload => ({
+      ...buildSnapshot(),
+      name: projectName,
+      svgExport,
+      // View state, but it shifts every resolved colour — without it a project
+      // reopens in different colours from the ones its own thumbnail shows.
+      hueOffset,
+      saturationOffset: satOffset,
+      // Likewise the lattice's quarter turn: the same trixels pointy-top are a
+      // different picture. The other grid settings ride along inside the
+      // snapshot already.
+      gridOrientation,
+      version: 1,
+    }),
+    [buildSnapshot, projectName, svgExport, hueOffset, satOffset, gridOrientation],
+  );
+
+  /** The one place a project file is written. Both saves go through it, so a
+   *  saved selection and a saved project cannot drift apart as formats. */
+  const writeProject = useCallback(
+    (payload: ProjectPayload) => {
+      const svg = buildProjectSVG(payload, noisePeriod, gridRotation);
+      downloadBlob(
+        new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
+        projectFileName(payload.name),
+      );
+    },
+    [noisePeriod, gridRotation],
+  );
+
   const handleExport = useCallback(() => {
-    const svg = buildProjectSVG(
-      {
-        ...buildSnapshot(),
-        name: projectName,
-        svgExport,
-        // View state, but it shifts every resolved colour — without it a project
-        // reopens in different colours from the ones its own thumbnail shows.
-        hueOffset,
-        saturationOffset: satOffset,
-        // Likewise the lattice's quarter turn: the same trixels pointy-top are a
-        // different picture. The other grid settings ride along inside the
-        // snapshot already.
-        gridOrientation,
-        version: 1,
-      },
-      noisePeriod,
-      gridRotation,
-    );
-    downloadBlob(
-      new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
-      projectFileName(projectName),
-    );
-  }, [
-    buildSnapshot,
-    projectName,
-    svgExport,
-    noisePeriod,
-    hueOffset,
-    satOffset,
-    gridOrientation,
-    gridRotation,
-  ]);
+    writeProject(buildPayload());
+  }, [buildPayload, writeProject]);
+
+  const handleSaveSelection = useCallback(
+    (opts: SelectionSaveOptions) => {
+      if (selectedHexes.length === 0) return;
+      writeProject(selectionPayload(buildPayload(), selectedHexes, opts));
+    },
+    [selectedHexes, buildPayload, writeProject],
+  );
 
   const handleExportSVG = useCallback(() => {
     setExportDialogOpen(true);
@@ -1528,6 +1548,51 @@ export default function TrixelGrid() {
   }, [selectedHexes, gridDivisions, setPainted, pushHistory]);
 
   /**
+   * Lifts everything the selection covers off the active layer and into a new
+   * layer of its own, directly above it.
+   *
+   * Like `applyHatchify` this cannot go through `setPainted`: two layers change
+   * at once and that only ever addresses the active one. So the whole array is
+   * rebuilt and pushed as a single history entry — the cells leaving one layer
+   * and arriving in the other are one edit and must undo as one.
+   */
+  const onMoveSelectionToLayer = useCallback(
+    (name: string) => {
+      if (selectedHexes.length === 0 || gridDivisions <= 0) return;
+      const inside = regionMembership(selectedHexes);
+      if (!inside) return;
+
+      const idx = activeLayerIdxRef.current;
+      const src = layersRef.current[idx];
+      if (!src) return;
+
+      const moved: Record<string, string> = {};
+      for (const [key, value] of Object.entries(src.painted)) {
+        if (inside(stringToTri(key))) moved[key] = value;
+      }
+
+      // Null covers both "the selection is empty of paint" and "the stack is
+      // full" — neither is an edit, so neither pushes.
+      const next = splitLayerAt(layersRef.current, idx, moved, name);
+      if (!next) return;
+
+      setLayers(next);
+      setActiveLayerIdx(idx + 1);
+      pushHistory({ ...buildSnapshot(), layers: next, activeLayerIdx: idx + 1 });
+    },
+    [
+      selectedHexes,
+      gridDivisions,
+      setLayers,
+      setActiveLayerIdx,
+      pushHistory,
+      buildSnapshot,
+      layersRef,
+      activeLayerIdxRef,
+    ],
+  );
+
+  /**
    * Rewrites the selected hexes as hatch marks derived from the fills below.
    *
    * Reduce mode writes into layers *other* than the active one, so this cannot
@@ -1713,6 +1778,8 @@ export default function TrixelGrid() {
         onToolChange={changeTool}
         activeLayerKind={activeLayerKind}
         onExport={handleExport}
+        onSaveSelection={() => setSaveSelectionOpen(true)}
+        hasSelection={selectedHexes.length > 0}
         onExportSVG={handleExportSVG}
         onExport3D={handleExport3D}
         onExportCut={handleExportCut}
@@ -1792,6 +1859,8 @@ export default function TrixelGrid() {
             onFlip={onFlipSelection}
             onFlipHorizontal={onFlipHorizontal}
             onPaletteShift={onPaletteShift}
+            onMoveToLayer={() => setNameSplitLayerOpen(true)}
+            canMoveToLayer={layers.length < MAX_LAYERS}
             hasSelection={selectedHexes.length > 0}
             onPointerEnter={() => setHoveredTri(null)}
             gridOrientation={gridOrientation}
@@ -1916,6 +1985,7 @@ export default function TrixelGrid() {
             onAddLayer={addLayer}
             onDeleteLayer={deleteLayer}
             onDuplicateLayer={duplicateLayer}
+            onRenameLayer={renameLayer}
             onToggleVisibility={toggleLayerVisibility}
             onSetLayerEffects={setLayerEffects}
             onMoveLayer={moveLayer}
@@ -1970,7 +2040,39 @@ export default function TrixelGrid() {
         onSettingsChange={updateSvgExport}
         noisePeriod={noisePeriod}
         gridRotation={gridRotation}
+        selection={selectedHexes}
       />
+
+      {/* The whole stack, not `visibleLayers`: this writes a project file, and
+          a hidden layer is part of the project even though the thumbnail
+          skips it. */}
+      {saveSelectionOpen && (
+        <SaveSelectionDialog
+          onOpenChange={setSaveSelectionOpen}
+          onSave={handleSaveSelection}
+          layers={layers}
+          selection={selectedHexes}
+          stampCount={selections.length}
+          projectName={projectName}
+        />
+      )}
+
+      {/* The name is collected before the edit runs, so the split lands in the
+          undo stack as one entry already carrying it — renaming afterwards
+          would be a second entry to undo. */}
+      {nameSplitLayerOpen && (
+        <NameLayerDialog
+          title="Move selection to a new layer"
+          description={`Lifts what the selection covers off “${layers[activeLayerIdx]?.name ?? "this layer"}” onto a new layer directly above it.`}
+          suggestion={`${layers[activeLayerIdx]?.name ?? "Layer"} selection`}
+          confirmLabel="Move"
+          onCancel={() => setNameSplitLayerOpen(false)}
+          onConfirm={(name) => {
+            onMoveSelectionToLayer(name);
+            setNameSplitLayerOpen(false);
+          }}
+        />
+      )}
 
       {/* 3D and cutting consume solid regions, so they take the fill-only
           flatten — hatch has no meaning as an extruded body or a cut path. */}
@@ -2055,6 +2157,7 @@ export default function TrixelGrid() {
         projectName={projectName}
         settings={plotterSettings}
         onSettingsChange={setPlotterSettings}
+        selection={selectedHexes}
       />
 
       <HatchifyDialog
