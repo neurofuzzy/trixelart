@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeHexMode } from "@/components/Footer";
 import { isIdentityAdjustment } from "@/lib/color-adjust";
+import type { BlendMode } from "@/lib/blend";
 import type { SubdivisionMode } from "@/lib/subdivision-noise";
 
 /** What a layer's `painted` values mean. Absent is `"fill"`, so every document
@@ -109,6 +110,22 @@ export interface SubdivisionNoiseEffect {
   enabled: boolean;
 }
 
+/**
+ * How the layer's finished result combines with the artwork beneath it.
+ *
+ * The one effect that is about the layer's *relationship* to what is below
+ * rather than about its own content, so it is applied a level up from the
+ * others: each backend composites a whole render step at a time. It therefore
+ * does nothing at all on the bottom of the stack, which is why `LayerPanel`
+ * says so — the same courtesy the glow gets there. See `lib/blend.ts`.
+ */
+export interface BlendModeEffect {
+  type: "blend";
+  /** A separable Compositing-1 mode; the same string canvas and CSS both take. */
+  mode: BlendMode;
+  enabled: boolean;
+}
+
 /** A non-destructive per-layer geometry filter. `painted` is never touched —
  *  effects are applied when geometry is built for rendering, so switching one
  *  off restores the artwork exactly. */
@@ -117,7 +134,8 @@ export type LayerEffect =
   | OutlineEffect
   | GlowEffect
   | AdjustColorEffect
-  | SubdivisionNoiseEffect;
+  | SubdivisionNoiseEffect
+  | BlendModeEffect;
 
 /** Reads a layer's effects, defaulting an absent field to none. Use this rather
  *  than touching `.effects` directly, exactly as with `layerKind`. */
@@ -141,6 +159,10 @@ export const activeEffects = (l: { effects?: LayerEffect[] }): LayerEffect[] =>
         return !isIdentityAdjustment(e);
       case "subdivisionNoise":
         return e.amount > 0;
+      // Every mode offered is a real one — "normal" is spelled by disabling or
+      // removing the effect, so there is no no-op value to filter out here.
+      case "blend":
+        return true;
     }
   });
 

@@ -5,12 +5,16 @@ import {
   buildRenderPlan,
   drawHatchLayer,
   glowReceivers,
+  planBlends,
+  stepBlendMode,
   stepColorAdjust,
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
   stepSubdivisionNoise,
+  type RenderStep,
 } from "@/lib/hatch-render";
+import { drawComposited } from "@/lib/blend";
 import {
   drawSubFills,
   noiseRegionFills,
@@ -115,13 +119,17 @@ export function drawArtworkPlan(
   const receivers =
     options.glow === false ? plan.map(() => null) : glowReceivers(plan);
 
-  // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
-  for (let si = 0; si < plan.length; si++) {
-    const step = plan[si];
+  // Painted into whatever context it is handed — the caller's, or a buffer
+  // belonging to a blend layer or to the isolation pass below.
+  const drawStep = (
+    ctx: CanvasRenderingContext2D,
+    step: RenderStep,
+    si: number,
+  ) => {
     if (step.kind === "hatch") {
       // No zoom clamp: exports use the true world weight.
       drawHatchLayer(ctx, step.painted);
-      continue;
+      return;
     }
 
     // Corner rounding draws whole regions rather than triangles, and the outline
@@ -197,7 +205,7 @@ export function drawArtworkPlan(
         ctx.lineJoin = "round";
         ctx.stroke();
       }
-      continue;
+      return;
     }
 
     const byColor = new Map<string, [number, number][][]>();
@@ -256,7 +264,30 @@ export function drawArtworkPlan(
       }
       ctx.stroke();
     }
-  }
+  };
+
+  // Bottom-to-top through the plan, so hatch interleaves with fills correctly.
+  const drawPlan = (ctx: CanvasRenderingContext2D) => {
+    for (let si = 0; si < plan.length; si++) {
+      const step = plan[si];
+      // A blended layer is flattened into its own buffer and composited whole;
+      // see `drawComposited`.
+      const blend = stepBlendMode(step);
+      if (blend) drawComposited(ctx, blend, (b) => drawStep(b, step, si));
+      else drawStep(ctx, step, si);
+    }
+  };
+
+  // **The artwork is isolated from whatever is already on the surface.** Both
+  // raster callers paint an opaque background before this runs — the fabric
+  // export's page colour, the apparel export's garment — and a blend reaching
+  // that would make the bottom layer multiply against the shirt while the
+  // on-screen preview (a transparent canvas) showed it plain. The SVG exporters
+  // draw the same line with `isolation: isolate`, so all four agree: a blend
+  // sees the artwork below it and nothing else. Paid for only when something
+  // actually blends, which keeps every other export on the path it always took.
+  if (planBlends(plan)) drawComposited(ctx, "source-over", drawPlan);
+  else drawPlan(ctx);
 }
 
 /**

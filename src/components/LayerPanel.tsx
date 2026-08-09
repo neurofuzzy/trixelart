@@ -17,6 +17,7 @@ import {
   subdivisionMode,
   type SubdivisionMode,
 } from "@/lib/subdivision-noise";
+import { BLEND_MODES, type BlendMode } from "@/lib/blend";
 import { ColorPickerDialog } from "@/components/ColorPickerDialog";
 import { NameLayerDialog } from "@/components/NameLayerDialog";
 import {
@@ -113,6 +114,18 @@ function SubdivisionNoiseGlyph({ className }: { className?: string }) {
   );
 }
 
+/** Two overlapping circles, the lens shaded: the blend-mode glyph. */
+function BlendGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className ?? "w-3.5 h-3.5"}>
+      <circle cx="6" cy="8" r="4.5" fill="currentColor" opacity="0.35" />
+      <circle cx="10" cy="8" r="4.5" fill="currentColor" opacity="0.35" />
+      <circle cx="6" cy="8" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="10" cy="8" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 const DEFAULT_ROUND_RADIUS = 0.5;
 const DEFAULT_OUTLINE_WEIGHT = 0.15;
 const DEFAULT_GLOW_RADIUS = 0.3;
@@ -123,6 +136,9 @@ const DEFAULT_GLOW_COLOR = encodeColor(0, 0);
  *  the colour it was painted in. */
 const DEFAULT_NOISE_AMOUNT = 50;
 const DEFAULT_NOISE_SEED = 0;
+/** The mode that reads as "blended" at a glance on almost any artwork, so the
+ *  effect does something visible the moment it is added — as the other four do. */
+const DEFAULT_BLEND_MODE: BlendMode = "multiply";
 
 /** The split modes, in the order they are offered. Labelled by the shape each
  *  one cuts rather than by its name, since that is what the user is picking. */
@@ -149,6 +165,7 @@ const EFFECT_LABEL: Record<LayerEffect["type"], string> = {
   glow: "Glow",
   adjustColor: "Adjust colour",
   subdivisionNoise: "Subdivision noise",
+  blend: "Blend mode",
 };
 
 /**
@@ -186,6 +203,8 @@ const EFFECT_SLIDERS: Record<LayerEffect["type"], EffectSlider[]> = {
     { key: "amount", label: "Amount", min: 0, max: 100, step: 1, scale: 1, unit: "" },
     { key: "seed", label: "Seed", min: 0, max: 99, step: 1, scale: 1, unit: "" },
   ],
+  // The only effect with nothing to slide: it is a choice, not a quantity.
+  blend: [],
 };
 
 function EffectGlyph({
@@ -200,6 +219,7 @@ function EffectGlyph({
   if (type === "adjustColor") return <AdjustColorGlyph className={className} />;
   if (type === "subdivisionNoise")
     return <SubdivisionNoiseGlyph className={className} />;
+  if (type === "blend") return <BlendGlyph className={className} />;
   return <GlowGlyph className={className} />;
 }
 
@@ -287,12 +307,16 @@ export function LayerPanel({
   const hasGlow = effects.some((e) => e.type === "glow");
   const hasAdjust = effects.some((e) => e.type === "adjustColor");
   const hasNoise = effects.some((e) => e.type === "subdivisionNoise");
+  const hasBlend = effects.some((e) => e.type === "blend");
   const allAdded =
-    hasRound && hasOutline && hasGlow && hasAdjust && hasNoise;
+    hasRound && hasOutline && hasGlow && hasAdjust && hasNoise && hasBlend;
 
   // A glow is clipped to the solid cells beneath it, so on the bottom layer it
   // renders nothing at all. That is correct, but it looks like a broken slider
-  // unless the panel says so — `layers[0]` is the bottom of the stack.
+  // unless the panel says so — `layers[0]` is the bottom of the stack. A blend
+  // has the same dead spot for a different reason (it composites against the
+  // artwork below, and on the bottom layer there is none), so it reads the same
+  // flag.
   const hasSurfaceBelow = layers
     .slice(0, activeLayerIdx)
     .some(
@@ -582,6 +606,24 @@ export function LayerPanel({
                   <SubdivisionNoiseGlyph className="w-3.5 h-3.5 opacity-60" />
                   Subdivision noise
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={hasBlend}
+                  onClick={() =>
+                    commit(() =>
+                      onSetLayerEffects(activeLayerIdx, [
+                        ...effects,
+                        {
+                          type: "blend",
+                          mode: DEFAULT_BLEND_MODE,
+                          enabled: true,
+                        },
+                      ]),
+                    )
+                  }
+                >
+                  <BlendGlyph className="w-3.5 h-3.5 opacity-60" />
+                  Blend mode
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -692,6 +734,38 @@ export function LayerPanel({
                     ))}
                   </div>
                 </label>
+              )}
+
+              {effect.type === "blend" && (
+                <>
+                  {/* Two rows of three rather than a dropdown: picking a blend
+                      mode is a compare-them-all gesture, and the whole set fits.
+                      One commit per click, like the split toggle above. */}
+                  <div className="grid grid-cols-3 gap-1">
+                    {BLEND_MODES.map(({ mode, label, title }) => (
+                      <button
+                        key={mode}
+                        className={cn(
+                          "min-w-0 h-6 px-1 rounded border text-xs truncate transition-colors disabled:opacity-40",
+                          effect.mode === mode
+                            ? "border-cyan-500 bg-cyan-500/20 text-white"
+                            : "border-border/60 text-muted-foreground hover:bg-accent",
+                        )}
+                        disabled={!effect.enabled}
+                        onClick={() => commit(() => patchEffect(i, { mode }))}
+                        title={title}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {!hasSurfaceBelow && (
+                    <span className="text-xs leading-snug text-amber-400/80">
+                      Nothing below to blend with — a blend mode combines the
+                      layer with the artwork underneath it.
+                    </span>
+                  )}
+                </>
               )}
 
               {effect.type === "glow" && (
