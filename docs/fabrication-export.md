@@ -181,7 +181,7 @@ Ship **planner + exploded preview first**; SVG export lands second (cut paper on
 
 **Phase 3 — SVG cut export. ✅ built** (`src/lib/cut-svg.ts`). `traceUnionLoops` walks boundary edges (reverse-edge-absent test) into closed loops, merges collinear runs → **one compound path per layer** (outer + holes as sub-paths, opposite winding, `fill-rule: evenodd`) so the cutter cuts the union silhouette, never internal triangle edges. `buildCutSVG` auto-tiles the layers into a grid, each a labeled inkscape layer (`Sᵢ ∪ frame`; the mat is the frame alone), sized in mm from the width control. Wired to a **Download SVG** button in `CutExportDialog`.
 
-**Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding/feature-size guards · budget>0 auto-splits · bridge-hint surfacing.
+**Phase 4+ (deferred).** Cardstock-swatch mapping UI · live layerability feedback while drawing · weeding guards · budget>0 auto-splits · bridge-hint surfacing. (Tab-and-slot joints landed separately — §10.)
 
 ---
 
@@ -260,3 +260,131 @@ area against the flat renderer's:
   the sub-loops that wind with the parent. Filtering earcut's output triangles by
   the winding number at their centroid does **not** work — the ears straddle the
   crossing.
+
+---
+
+## 10. Tab-and-slot joints (`src/lib/cut-joints.ts`)
+
+Optional, off by default, one toggle in `CutExportDialog`. It answers the
+question §3 leaves open: the planner minimises islands and then **reports the
+ones it cannot remove**, and until now the only answer for those was glue.
+
+### What holds a piece, and what does not
+
+Every colour sheet is `Sᵢ ∪ frame`, so with a mat on, the component containing
+the frame is held by the frame. Everything else is a **loose facet**: it rests on
+solid paper — the sheets are nested, so there is always material beneath — but
+nothing stops it sliding or lifting off. Which facets qualify:
+
+- **Mat on** — every component of `Sᵢ ∪ frame` that does not contain a frame
+  triangle.
+- **Mat off** — every component except the largest, which is taken as the piece.
+
+### The joint
+
+A tab folds down at the lattice edge, passes through a **line slot** cut in the
+first sheet below with paper there, and folds flat underneath it. Two fold lines
+per tab — the root and the top of the riser — emitted as a stroked, dashed
+`… — folds` layer so a machine scores them; a tab cut free at its root is just a
+hole.
+
+Three decisions here were wrong first time round and are worth stating as
+decisions:
+
+- **Every boundary edge gets a tab.** The first version scored candidate sites
+  on a distance-to-boundary heatmap and spread a handful of them by
+  farthest-point sampling. That was solving the wrong problem: one tab is a
+  pivot, two are a hinge, and a single-cell facet on one tab simply lifts off.
+  With a tab on every edge there is no scoring, no sampling and no count
+  heuristic — the rule *is* the algorithm, and the module lost about half its
+  code.
+- **The tab tapers inward, not outward.** A dovetail — wider at the tip — is
+  what a part slid into place sideways wants. A tab dropped straight down a slot
+  only has to find the opening, so `TAB_TIP < TAB_ROOT` and it guides itself in.
+- **One tab per hole, though.** Two facet cells can face the same neighbour
+  cell, and their tabs are then cut from the same paper — measured at 36
+  overlapping pairs on `basketweave` and 204 on `purple_cabbage` before the rule
+  went in, 0 after, and it drops exactly as many tabs as there were overlaps.
+  `MAX_TAB_REACH` keeps every tab inside the one cell it reaches into, which is
+  what makes "one tab per cell reached into" sufficient by construction rather
+  than by margin. The second edge onto a hole was redundant anyway — both tabs
+  pin the facet through the same opening.
+
+  Worth knowing how this hid: the area invariant that catches every other splice
+  error cannot see it. Two overlapping lobes wound the same way contribute their
+  overlap twice to the shoelace, and the expected total counts it twice as well,
+  so the numbers agree to 1e-13 while the outline is self-intersecting. It takes
+  a direct pairwise test — and one that demands a *proper* crossing, since a
+  lattice is full of exactly-collinear edges that a sign test admitting zero
+  reports as hits.
+- **The slot is a line, not a pocket.** The first version cut the tab's own
+  footprint out of the sheet below, which left nothing to lap into and the tab
+  rattling in a window. A slot needs *length* — a little more than the tab is
+  wide — and no width at all: cardstock flexes to admit paper. It sits on the
+  lattice edge, pushed out by half a material thickness (`SLOT_OUTWARD`),
+  because folded paper does not turn on a zero radius and the descending riser
+  stands slightly outboard of its fold line.
+
+### Depth, and sharing
+
+The tab drops to the **first sheet below with paper under that cell**, not
+necessarily the next one. The sheets in between have no paper there either —
+that is precisely why they are not the host — so the tab passes through an
+opening that already exists and only the host is cut. On an interleaved design
+this is not an edge case: 41% of boundary edges on `purple_cabbage` have nothing
+directly below them.
+
+Where the sheet below is *also* missing paper there, it has a tab on that same
+lattice edge aimed at the same host, and **the two share one slot** — a line
+admits any number of tabs. Slots are therefore pooled by undirected lattice edge
+across all sheets and cut once at the end, which on `purple_cabbage` turns 1095
+tabs into 879 slots.
+
+What actually bounds the drop is not the stack but the flat pattern: riser plus
+tongue has to fit the one cell the tab reaches into, whose half-width narrows to
+nothing over the triangle's height. `MAX_TAB_REACH` is that curve solved for
+`TAB_SIDE_MARGIN`, so retuning the tab cannot quietly push it out through the
+side of the cell. Measured on every example, no boundary edge lacks a host
+entirely — the only thing that turns an edge down is this reach.
+
+`CUT_MATERIAL_MM` (0.3) is the **physical** cardstock, deliberately not
+`sheetThicknessMm`, which is the preview's fat slab. Using the preview value
+would draw risers an order of magnitude too long.
+
+### Where it plugs in
+
+Planned once by the dialog and handed to **both** builders, the way `CutPlan`
+already is — the preview is only worth looking at if it places the joints the
+file will cut. Then:
+
+- `traceUnionLoops` gains `tabs`, spliced by directed edge key. The splice
+  happens **inside** `hexNeck`, not as a later pass: a tab's root points lie on
+  the original edge line and the collinear filter would otherwise drop them.
+  Emitting them explicitly after the vertex they follow bypasses that test.
+- **Rounding needs no special case.** Tab vertices are not lattice vertices, so
+  `latticeVertexIdAt` returns null and they stay sharp for free — the same
+  mechanism that keeps the necks straight. And splicing *before* rounding is what
+  makes it safe: the tab shortens the straight run either side, so
+  `roundPolygon`'s own clamp already stops an arc reaching past the tab root.
+  Measured across the full radius range on `purple_cabbage`, all 1152 tabs
+  survive intact and the outline moves by under 0.15% at the very top of the
+  slider, which is that clamp and nothing else.
+- **Slots get their own SVG layer**, not a sub-path of the sheet's compound
+  path. Same geometry for the machine either way, but a slot drawn as one more
+  sub-path is indistinguishable from the artwork's own negative space — there
+  was no way to tell which holes were joinery. It is also the only honest shape
+  for it: a slot is a line, and a line cannot be a hole.
+- **The 3D preview cuts slots as thin openings** (`slotRects`) where the file
+  cuts a zero-width line, and a slot forces `sheetBody` onto the traced-loop path
+  whatever the rounding radius — overlapping lattice prisms have nowhere to put
+  an absence. An invisible slot would defeat the point of previewing them.
+- **Tabs stay with their own sheet in the preview**, spliced and extruded at its
+  Z rather than drawn folded down where the assembled paper really puts them.
+  Folded reads as a tab on the wrong layer, especially exploded, and the question
+  the preview has to answer is *which piece is this tab holding*.
+- Sites adjacent to a **neck** pinch are rejected only when they would actually
+  collide: the neck reaches `min(neck, 0.45·len)` from the vertex and the tab
+  root sits half a root width in from the midpoint. Rejecting every pinched edge
+  outright, without measuring, loses most of the sites on a woven design — and
+  the dialog has to *pass* `neck` for the test to mean anything, which it did
+  not at first.

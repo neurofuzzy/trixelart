@@ -20,6 +20,7 @@ import {
 } from "@/lib/mesh-export";
 import type { CutPlan } from "@/lib/cut-export";
 import { neckFillTriangles, traceUnionLoops } from "@/lib/cut-svg";
+import type { CutJoints, SheetJoints } from "@/lib/cut-joints";
 import { boundaryVertexDegrees } from "@/lib/round-corners";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,9 @@ export interface CutStackOptions {
    *  The same value `CutSVGOptions.round` takes, so the previewed sheet and the
    *  cut sheet are the same outline. */
   round?: number;
+  /** Tab-and-slot joints from `planCutJoints`. Planned once by the caller and
+   *  given to both builders, so the preview and the file place the same ones. */
+  joints?: CutJoints;
 }
 
 export const DEFAULT_CUT_STACK_OPTIONS: CutStackOptions = {
@@ -203,6 +207,19 @@ interface SheetShape {
  * The rounded path deliberately does **not** also add `neckFillTriangles` — the
  * traced loops already run through each neck, and extruding the fans on top
  * would put solid paper across the notch the necks are there to leave open.
+ *
+ * **A joint slot forces the traced path** whatever the radius, because a slot
+ * is an absence and only the loops can carry one: overlapping lattice prisms
+ * union together and have nowhere to put a hole. The preview cuts its slots as
+ * thin openings where the file cuts a zero-width line, since an invisible slot
+ * would defeat the point of previewing them.
+ *
+ * **Tabs stay with the sheet they belong to**, spliced into its boundary
+ * exactly as the flat pattern splices them, and extruded at its own Z. Drawing
+ * them folded — down where the assembled paper really puts them — reads as a
+ * tab on the wrong layer, especially exploded, and the question the preview has
+ * to answer is *which piece is this tab holding*. The slot below shows where it
+ * goes through.
  */
 function sheetBody(
   layer: CutLayer,
@@ -210,6 +227,7 @@ function sheetBody(
   zLow: number,
   zHigh: number,
   shape: SheetShape,
+  joints: SheetJoints | undefined,
 ): ExportBody {
   const mesh = new MeshBuilder();
   const polys: Pt[][] = [];
@@ -218,13 +236,17 @@ function sheetBody(
     polys.push(poly);
   };
 
-  if (shape.round > 0) {
+  const hasJoints =
+    (joints?.slotRects.length ?? 0) > 0 || (joints?.tabs.size ?? 0) > 0;
+  if (shape.round > 0 || hasJoints) {
     const loops = traceUnionLoops(layer.keys, {
       merge: shape.merge,
       neck: shape.neck,
       round: shape.round,
       sagitta: shape.sagitta,
       degrees: shape.degrees,
+      tabs: joints?.tabs,
+      holes: joints?.slotRects,
     });
     for (const tri of triangulateLoops(loops)) push(tri.map(toModel));
   } else {
@@ -238,6 +260,7 @@ function sheetBody(
   }
 
   addSlab(mesh, polys, zLow, zHigh);
+
   return {
     name: layer.label,
     colorKey: layer.colorKey,
@@ -273,12 +296,16 @@ export interface CutLayer {
  * region Sᵢ plus the shared frame (every layer is framed), then the black
  * outline mat (frame alone) on top. Shared by the 3D preview and the SVG export
  * so both cut identical shapes.
+ *
+ * The frame keys come back alongside because the joint planner needs them to
+ * answer "is this piece already held?" — the component of a sheet that contains
+ * the frame is anchored by it, and only the others need a tab.
  */
 export function cutLayers(
   plan: CutPlan,
   painted: Record<string, string>,
   frame: CutFrame,
-): CutLayer[] {
+): { layers: CutLayer[]; frameKeys: string[] } {
   const frameKeys = frame === "mat" ? matTriangles(painted) : [];
   const hasFrame = frameKeys.length > 0;
   const layers: CutLayer[] = [];
@@ -307,7 +334,7 @@ export function cutLayers(
       isFrame: true,
     });
   }
-  return layers;
+  return { layers, frameKeys };
 }
 
 export interface CutStackModel {
@@ -343,20 +370,23 @@ export function buildCutStackModel(
     // Read off the artwork once, before any sheet has merged its colours.
     degrees: boundaryVertexDegrees(painted),
   };
-  const layers = cutLayers(plan, painted, options.frame);
+  const { layers } = cutLayers(plan, painted, options.frame);
   const bodies: ExportBody[] = [];
   const sheets: CutSheetGeometry[] = [];
 
-  for (const layer of layers) {
+  layers.forEach((layer, i) => {
     const zLow = (layer.level - 1) * step;
-    bodies.push(sheetBody(layer, toModel, zLow, zLow + T, shape));
+    const joints = options.joints?.perLayer[i];
+    bodies.push(
+      sheetBody(layer, toModel, zLow, zLow + T, shape, joints),
+    );
     sheets.push({
       level: layer.level,
       colorHex: layer.colorHex,
       triCount: layer.keys.length,
       isFrame: layer.isFrame,
     });
-  }
+  });
 
   const triangleCount = bodies.reduce((s, b) => s + b.indices.length / 3, 0);
   const topLevel = layers.length ? layers[layers.length - 1].level : 1;

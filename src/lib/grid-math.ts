@@ -130,6 +130,28 @@ export function connectedComponents(keys: string[]): string[][] {
 }
 
 /**
+ * Quantizes a world point to a stable integer key (1e-3 world units).
+ *
+ * Lives here, rather than in the one module that walks boundaries, because the
+ * cut export's *joint* planner has to name the very same boundary edges that
+ * `cut-svg.ts` chains into loops — and it has to name them without importing
+ * from the module that will later import it back.
+ */
+export function worldKey(p: { x: number; y: number }): string {
+  return `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
+}
+
+/** Identifies one *directed* boundary edge a→b. The direction matters: the two
+ *  triangles either side of a lattice edge name it in opposite orders, and only
+ *  one of them is the piece the boundary walk is tracing. */
+export function dirEdgeKey(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): string {
+  return `${worldKey(a)}->${worldKey(b)}`;
+}
+
+/**
  * Returns the analytical coordinates for a triangle.
  * Useful for math-based symmetry rules.
  * Redefined so Up(0,0) = (0,0,0)

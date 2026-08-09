@@ -20,6 +20,7 @@ import {
   type CutFrame,
 } from "@/lib/cut-mesh";
 import { buildCutSVG } from "@/lib/cut-svg";
+import { planCutJoints } from "@/lib/cut-joints";
 import { ROUND_RADIUS_AT_FULL } from "@/lib/round-corners";
 import { normalizeProjectFilename } from "@/lib/utils";
 
@@ -73,6 +74,7 @@ export function CutExportDialog({
   const [frame, setFrame] = useState<CutFrame>(DEFAULT_CUT_STACK_OPTIONS.frame);
   const [mergeIslands, setMergeIslands] = useState(true);
   const [joinSize, setJoinSize] = useState(0.6);
+  const [tabJoints, setTabJoints] = useState(false);
 
   const plan = useMemo(
     () => (open ? planCut(painted) : null),
@@ -86,6 +88,22 @@ export function CutExportDialog({
   // fed to both the preview stack and the SVG so they cut the same outline.
   const round = roundFraction * ROUND_RADIUS_AT_FULL;
 
+  // Planned once, like the cut plan itself, and handed to both builders: the
+  // preview is only worth looking at if it shows the joints the file will cut.
+  const joints = useMemo(
+    () =>
+      open && plan && tabJoints
+        ? planCutJoints(plan, painted, {
+            frame,
+            widthMm,
+            mergeIslands,
+            neck,
+            gridRotation,
+          })
+        : undefined,
+    [open, plan, painted, tabJoints, frame, widthMm, mergeIslands, neck, gridRotation],
+  );
+
   const stack = useMemo(
     () =>
       open && plan
@@ -97,9 +115,10 @@ export function CutExportDialog({
             mergeIslands,
             neck,
             round,
+            joints,
           }, gridRotation)
         : null,
-    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck, round, gridRotation],
+    [open, plan, painted, widthMm, explode, frame, mergeIslands, neck, round, joints, gridRotation],
   );
 
   const commitWidth = () => {
@@ -117,7 +136,7 @@ export function CutExportDialog({
     const svg = buildCutSVG(
       plan,
       painted,
-      { widthMm, frame, mergeIslands, neck, round },
+      { widthMm, frame, mergeIslands, neck, round, joints },
       gridRotation,
     );
     if (!svg) return;
@@ -277,6 +296,61 @@ export function CutExportDialog({
                     Bridges corner-touching pieces with a tiny hexagon at each
                     join so the sheet cuts as one.
                   </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Tab &amp; slot joints
+                    </span>
+                    <button
+                      role="switch"
+                      aria-checked={tabJoints}
+                      onClick={() => setTabJoints((v) => !v)}
+                      className={`h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                        tabJoints
+                          ? "border-primary bg-primary/70"
+                          : "border-input bg-muted"
+                      }`}
+                    >
+                      <span
+                        className={`block h-4 w-4 rounded-full bg-white transition-transform ${
+                          tabJoints ? "translate-x-4" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/60">
+                    Every edge of a loose piece grows a tab that folds down,
+                    passes through a slot in the sheet below and folds flat
+                    underneath — no glue. Score the dashed blue lines instead of
+                    cutting them.
+                  </p>
+                  {joints && (
+                    <div className="flex flex-col gap-0.5 text-[11px] text-muted-foreground/80">
+                      <span>
+                        {joints.count} tab{joints.count === 1 ? "" : "s"},{" "}
+                        {joints.slotCount} slot
+                        {joints.slotCount === 1 ? "" : "s"}
+                        {joints.unanchored.length > 0
+                          ? ` — ${joints.unanchored.length} piece${
+                              joints.unanchored.length === 1 ? "" : "s"
+                            } still need${
+                              joints.unanchored.length === 1 ? "s" : ""
+                            } glue`
+                          : joints.count > 0
+                            ? " — every loose piece is held"
+                            : " — nothing floats, none needed"}
+                      </span>
+                      {joints.count > 0 && joints.minFeatureMm < 1 && (
+                        <span className="text-amber-300/80">
+                          Narrowest cut feature is{" "}
+                          {joints.minFeatureMm.toFixed(2)} mm — below what most
+                          machines hold. Increase the width.
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5">

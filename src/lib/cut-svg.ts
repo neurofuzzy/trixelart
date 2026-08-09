@@ -1,4 +1,4 @@
-import { getTriVertices, stringToTri } from "@/lib/grid-math";
+import { getTriVertices, stringToTri, worldKey } from "@/lib/grid-math";
 import {
   FAB_CHORD_MM,
   signedArea,
@@ -7,6 +7,7 @@ import {
 } from "@/lib/mesh-export";
 import { cutLayers, type CutFrame } from "@/lib/cut-mesh";
 import type { CutPlan } from "@/lib/cut-export";
+import type { CutJoints } from "@/lib/cut-joints";
 import {
   boundaryVertexDegrees,
   flattenRoundedRing,
@@ -32,11 +33,6 @@ import { rotatePoint } from "@/lib/crop";
 // smoothing — giving each join a clean, robust bridge.
 // ---------------------------------------------------------------------------
 
-/** Quantize a world point to a stable integer key (1e-3 world units). */
-function vkey(p: Pt): string {
-  return `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
-}
-
 interface DEdge {
   a: Pt;
   b: Pt;
@@ -60,8 +56,8 @@ function boundaryEdges(keys: string[]): DEdge[] {
     for (let i = 0; i < 3; i++) {
       const a = v[i];
       const b = v[(i + 1) % 3];
-      edges.push({ a, b, ak: vkey(a), bk: vkey(b) });
-      present.add(`${vkey(a)}->${vkey(b)}`);
+      edges.push({ a, b, ak: worldKey(a), bk: worldKey(b) });
+      present.add(`${worldKey(a)}->${worldKey(b)}`);
     }
   }
   return edges.filter((e) => !present.has(`${e.bk}->${e.ak}`));
@@ -72,6 +68,16 @@ function outDegree(edges: DEdge[]): Map<string, number> {
   const deg = new Map<string, number>();
   for (const e of edges) deg.set(e.ak, (deg.get(e.ak) ?? 0) + 1);
   return deg;
+}
+
+/**
+ * Outgoing-boundary-edge count per vertex of a triangle set, keyed by
+ * `worldKey`. Exported for the joint planner, which has to keep its tabs off
+ * the edges that meet at a pinch: a neck hexagon replaces the pinch vertex and
+ * can reach further along the edge than a tab root sits, so the two cross.
+ */
+export function boundaryOutDegrees(keys: string[]): Map<string, number> {
+  return outDegree(boundaryEdges(keys));
 }
 
 const ekey = (e: DEdge) => `${e.ak}->${e.bk}`;
@@ -191,26 +197,37 @@ function pinchRing(prev: Pt, cur: Pt, next: Pt, neck: number): Pt[] | null {
 }
 
 /**
- * Converts a raw loop to render points: drops collinear points, and (when
- * merging with `neck > 0`) replaces each pinch corner with a tiny-hexagon neck —
- * i.e. the union boundary of a small regular hexagon at the touch vertex.
+ * Converts a raw loop to render points: drops collinear points, (when merging
+ * with `neck > 0`) replaces each pinch corner with a tiny-hexagon neck — i.e.
+ * the union boundary of a small regular hexagon at the touch vertex — and
+ * splices in any tab this loop's edges carry.
+ *
+ * The tab splice has to happen **here**, not as a later pass over the points:
+ * a tab's root points lie on the original edge line, so the collinear filter
+ * above would drop them. Emitting them explicitly, after the vertex they follow,
+ * bypasses that test — and keeps the tab addressed by the edge it belongs to
+ * rather than by a geometric search over an already-flattened polyline.
  */
 function hexNeck(
   loop: { p: Pt; vk: string }[],
   deg: Map<string, number>,
   neck: number,
+  tabs: Map<string, Pt[]> | null,
 ): Pt[] {
   const n = loop.length;
   const out: Pt[] = [];
   for (let i = 0; i < n; i++) {
     const prev = loop[(i - 1 + n) % n].p;
     const cur = loop[i];
-    const next = loop[(i + 1) % n].p;
+    const nextNode = loop[(i + 1) % n];
+    const next = nextNode.p;
     const col = collinear(prev, cur.p, next);
     const pinch = (deg.get(cur.vk) ?? 0) > 1;
     const ring = pinch && !col ? pinchRing(prev, cur.p, next, neck) : null;
     if (ring) for (const p of ring) out.push(p);
     else if (!col) out.push(cur.p);
+    const tab = tabs?.get(`${cur.vk}->${nextNode.vk}`);
+    if (tab) for (const p of tab) out.push(p);
   }
   return out.length >= 3 ? out : loop.map((nd) => nd.p);
 }
@@ -230,6 +247,18 @@ export interface UnionLoopOptions {
    * faithful — see below.
    */
   degrees?: Map<number, number>;
+  /**
+   * Tab outlines to splice into the boundary, keyed by directed edge
+   * (`dirEdgeKey`). From `planCutJoints`. The flat pattern passes these; the
+   * 3D preview does not, because a folded tab is not in the sheet's plane.
+   */
+  tabs?: Map<string, Pt[]>;
+  /**
+   * Extra hole loops to add to the result — the 3D preview's slot openings.
+   * Appended after rounding: a slot is machined, not part of the artwork's
+   * silhouette, and has no lattice vertices to round against.
+   */
+  holes?: Pt[][];
 }
 
 /**
@@ -272,20 +301,32 @@ export function traceUnionLoops(
   keys: string[],
   options: UnionLoopOptions = {},
 ): Pt[][] {
-  const { merge = false, neck = 0, round = 0, sagitta, degrees } = options;
+  const {
+    merge = false,
+    neck = 0,
+    round = 0,
+    sagitta,
+    degrees,
+    tabs,
+    holes,
+  } = options;
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
   const raw = walkLoops(edges, merge);
-  const loops = raw.map((loop) => hexNeck(loop, deg, merge ? neck : 0));
-  if (round <= 0 || !degrees) return loops;
-  return loops.map((loop) => {
+  const loops = raw.map((loop) =>
+    hexNeck(loop, deg, merge ? neck : 0, tabs ?? null),
+  );
+  const extra = holes ?? [];
+  if (round <= 0 || !degrees) return extra.length ? loops.concat(extra) : loops;
+  const rounded = loops.map((loop) => {
     const eligible = (i: number) => {
       const v = latticeVertexIdAt(loop[i].x, loop[i].y);
       return v !== null && degrees.get(v) === 2;
     };
-    const rounded = roundPolygon(loop, round, eligible);
-    return flattenRoundedRing(rounded, sagitta).map(([x, y]) => ({ x, y }));
+    const corners = roundPolygon(loop, round, eligible);
+    return flattenRoundedRing(corners, sagitta).map(([x, y]) => ({ x, y }));
   });
+  return extra.length ? rounded.concat(extra) : rounded;
 }
 
 /**
@@ -328,6 +369,9 @@ export interface CutSVGOptions {
   neck?: number;
   /** Corner-rounding radius in world units (0 = sharp), from the layer effect. */
   round?: number;
+  /** Tab-and-slot joints from `planCutJoints`. Planned once by the caller and
+   *  given to both builders, so the preview and the file place the same ones. */
+  joints?: CutJoints;
 }
 
 /** Gap between tiled layers, in mm. */
@@ -356,11 +400,16 @@ export function buildCutSVG(
 ): string | null {
   const transform = computeModelTransform(painted, options.widthMm, gridRotation);
   if (!transform) return null;
-  const layers = cutLayers(plan, painted, options.frame);
+  const { layers } = cutLayers(plan, painted, options.frame);
   if (layers.length === 0) return null;
   const scale = transform.scale;
   const merge = options.mergeIslands ?? false;
   const neck = options.neck ?? 0;
+  const joints = options.joints;
+  const turn = (p: Pt): Pt => {
+    const [x, y] = rotatePoint(p.x, p.y, gridRotation);
+    return { x, y };
+  };
 
   // Turned before the tile is measured, not after: the sheet layout sizes its
   // tiles from these bounds, so a pointy-top design has to be the right way
@@ -370,20 +419,23 @@ export function buildCutSVG(
   // From the artwork, not from any sheet: a sheet has already merged colours
   // together, and this is what remembers where their boundaries were.
   const degrees = boundaryVertexDegrees(painted);
-  const traced = layers.map((l) =>
+  const traced = layers.map((l, i) =>
     traceUnionLoops(l.keys, {
       merge,
       neck,
       round: options.round ?? 0,
       sagitta: FAB_CHORD_MM / scale,
       degrees,
-    }).map((loop) =>
-      loop.map((p) => {
-        const [x, y] = rotatePoint(p.x, p.y, gridRotation);
-        return { x, y };
-      }),
-    ),
+      tabs: joints?.perLayer[i].tabs,
+    }).map((loop) => loop.map(turn)),
   );
+  // Turned the same way, on the same pass. Neither needs a part in the bounds:
+  // a fold sits on its tab's root and a slot inside its sheet, and the tabs are
+  // already in the traced loops.
+  const turnSegs = (segs: [Pt, Pt][]) =>
+    segs.map(([a, b]) => [turn(a), turn(b)] as [Pt, Pt]);
+  const folds = layers.map((_l, i) => turnSegs(joints?.perLayer[i].folds ?? []));
+  const slots = layers.map((_l, i) => turnSegs(joints?.perLayer[i].slots ?? []));
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -432,6 +484,28 @@ export function buildCutSVG(
         `    <path d="${d}" fill="${layer.colorHex}" fill-opacity="0.85" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>\n` +
         `  </g>`,
     );
+    const line = (seg: [Pt, Pt]) =>
+      `M${tx(seg[0].x, ox)} ${ty(seg[0].y, oy)} L${tx(seg[1].x, ox)} ${ty(seg[1].y, oy)}`;
+    // Slots get their own layer rather than joining the sheet's compound path.
+    // Same geometry for the machine either way, but a slot drawn as one more
+    // sub-path is indistinguishable from the artwork's own negative space —
+    // there was no way to tell which holes were joinery. It is also the only
+    // honest shape for it: a slot is a *line*, and a line cannot be a hole.
+    if (slots[i].length > 0) {
+      parts.push(
+        `  <g inkscape:groupmode="layer" inkscape:label="${label} — slots" id="cut-slots-${i + 1}">\n` +
+          `    <path d="${slots[i].map(line).join(" ")}" fill="none" stroke="#000000" stroke-width="0.1"/>\n` +
+          `  </g>`,
+      );
+    }
+    // Folds are scored, not cut: a tab cut free at its root is just a hole.
+    if (folds[i].length > 0) {
+      parts.push(
+        `  <g inkscape:groupmode="layer" inkscape:label="${label} — folds" id="cut-folds-${i + 1}">\n` +
+          `    <path d="${folds[i].map(line).join(" ")}" fill="none" stroke="#0066ff" stroke-width="0.2" stroke-dasharray="1 1"/>\n` +
+          `  </g>`,
+      );
+    }
   });
 
   return (
