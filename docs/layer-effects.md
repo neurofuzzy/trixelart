@@ -100,13 +100,16 @@ radius too, through `layersRoundFraction` (largest enabled wins, since they all
 merge the fill stack before looking at geometry). They cannot extrude a ring
 directly, so `mesh-export.ts` flattens it to a polyline and triangulates it
 (`triangulateLoops`, ear-clipping with holes); the extruders keep taking
-triangles and nothing downstream changes. The two paths reach that ring
-differently, and the difference is the whole reason `roundPolygon` exists apart
-from `roundRing`: the 3D print rounds **per colour region** and must obey the
-degree-2 eligibility rule, or the filament bodies stop meeting airtight, while a
-cut sheet has no such neighbour — the sheets are nested, so a rounded piece sits
-on a strictly larger one — and rounds **every** non-collinear corner of the
-sheet's union boundary. See [fabrication-export.md](fabrication-export.md). The arc's centre and sweep are
+triangles and nothing downstream changes.
+
+**Both obey the degree-2 rule; they differ only in how they can ask.** The 3D
+print rounds per colour region, so `roundRing` reads the ring's own lattice
+vertex ids. A cut sheet is a *union of colours* — its boundary has forgotten
+which ones — so it recovers each vertex with `latticeVertexIdAt` and looks it up
+in the original artwork's degree map. Skipping that (a sheet has no airtightness
+constraint, so every corner *looks* fair game) rounds the junctions the artwork
+keeps sharp and turns a scattered upper sheet into blobs. See
+[fabrication-export.md](fabrication-export.md). The arc's centre and sweep are
 recovered from the two tangent points (`cornerArc`); canvas draws it with `arc`
 from the entry tangent, SVG emits explicit `A` commands with the sweep flag taken
 from the turn direction, and the cropped SVG flattens arcs to chords first,

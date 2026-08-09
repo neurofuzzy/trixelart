@@ -64,6 +64,31 @@ const vertexId = (i: number, j: number) =>
   (i + VERTEX_BIAS) * VERTEX_STRIDE + (j + VERTEX_BIAS);
 
 /**
+ * The lattice vertex id at a world point, or null if the point is not on the
+ * lattice.
+ *
+ * The inverse of the `(i, j) → (x, y)` mapping every ring point is built from,
+ * for consumers that hold world geometry and need to ask `boundaryVertexDegrees`
+ * about it. The cutting export is the one that does: a cut sheet is traced as a
+ * *union of colours*, so its boundary has no colour identity of its own, and the
+ * only way to round it the way the artwork rounds is to look each vertex back up
+ * in the original artwork's degree map.
+ *
+ * Returning null for anything off-lattice is the point of the round trip rather
+ * than a formality — the same loops carry points that were never lattice
+ * vertices at all (the tiny-hexagon necks), and silently snapping one of those
+ * to a neighbouring vertex would hand it that vertex's degree.
+ */
+export function latticeVertexIdAt(x: number, y: number): number | null {
+  const j = Math.round(y / H);
+  const i = Math.round((x - (j * SIDE) / 2) / SIDE);
+  const eps = SIDE * 1e-6;
+  if (Math.abs(j * H - y) > eps) return null;
+  if (Math.abs(i * SIDE + (j * SIDE) / 2 - x) > eps) return null;
+  return vertexId(i, j);
+}
+
+/**
  * Packs an undirected lattice edge into one number.
  *
  * An edge cannot be keyed by combining two vertex ids — each is already ~2^42,
@@ -491,12 +516,21 @@ export function roundRing(
  * The geometry half of rounding, with no opinion about *which* vertices are
  * eligible — the caller supplies that.
  *
- * The split matters because the two consumers answer that question completely
- * differently. Flat artwork must round only where exactly two colour regions
- * meet, or neighbouring polygons stop meeting airtight. The cutting export has
- * no such constraint: its sheets are nested, so a rounded piece simply sits on a
- * larger one and every non-collinear corner is fair game. Only the clamp is
- * shared, and it is the part that is easy to get wrong.
+ * The split matters because the two consumers arrive at that question from
+ * different directions. Flat artwork walks one colour's rings and asks the
+ * degree map about the ring's own lattice vertices, which `roundRing` does for
+ * it. A cut sheet is the union of *several* colours, so its boundary has no
+ * colour identity and its ring points carry no vertex ids — some of them
+ * (the tiny-hexagon necks) are not lattice vertices at all — and it has to look
+ * each one back up through `latticeVertexIdAt`.
+ *
+ * **What it must not do is skip the question.** Rounding every non-collinear
+ * corner looks defensible — a cut sheet has no airtightness constraint, since
+ * the sheets are nested and a rounded piece sits on a strictly larger one — but
+ * airtightness was never the only thing the degree rule bought. It is also what
+ * keeps a corner where three colours meet sharp, and a sheet that ignores it
+ * rounds every one of those, turning a scattered upper sheet into a handful of
+ * discs that look nothing like the artwork.
  */
 export function roundPolygon(
   ring: { x: number; y: number }[],

@@ -127,7 +127,11 @@ reaches it its own way: the plotter switches to the polygon representation in
 async) and keeps its original `RawSeg` path byte-for-byte for the square-cornered
 hatch; the 3D print rounds per colour region through `stepRegionGeometry`'s
 building blocks; and the cutting stack rounds its sheets' union boundary in
-`traceUnionLoops`. The two mesh paths then go through `triangulateLoops`
+`traceUnionLoops`. **A cut sheet has merged its colours away, and still has to
+round as if it had not** — it recovers each boundary vertex with
+`latticeVertexIdAt` and applies the artwork's own degree-2 rule, or every corner
+where three colours meet rounds and the sheets come out as blobs. The two mesh
+paths then go through `triangulateLoops`
 (`mesh-export.ts`) — a rounded outline is not a lattice cell, and the extruders
 take triangles. Reaching for `buildRenderPlan` in a fabrication path is still the
 wrong move; reaching for `stepRegionGeometry` is not.

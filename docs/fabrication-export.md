@@ -194,16 +194,42 @@ geometry, so a per-layer radius could not survive the merge. It is not a dialog
 setting in either export: a print or a cut that disagreed with the picture on
 screen would be a bug, not an option.
 
-**Rounding a cut sheet is a different question from rounding the artwork.** The
-flat renderer may only round a vertex where exactly two colour regions meet, or
-neighbouring polygons stop meeting airtight. A cut sheet has no such constraint —
-the sheets are *nested* (`S₁ ⊇ … ⊇ S_K`), so a rounded piece always sits on a
-strictly larger one and cannot open a gap — so `traceUnionLoops` rounds **every**
-non-collinear corner of the sheet's union boundary. That split is exactly why
-`round-corners.ts` exposes `roundPolygon` (geometry only, caller decides
-eligibility) underneath `roundRing` (geometry + the degree-2 rule). The 3D print
-is on the *other* side of it: its colour bodies abut, so it rounds per region
-with `roundRing` and the filament bodies still meet with no gap and no overlap.
+**A cut sheet must round as if its colours had never been merged.** This is the
+one place in the app holding geometry that has forgotten what colour it came
+from: `Sᵢ` unions every colour at level i and above, so its boundary runs along
+colour seams that are invisible in the artwork, and its corners have no region to
+be a corner *of*.
+
+Rounding that boundary on its own terms is the trap, and the argument for it is
+seductive: a cut sheet genuinely has no airtightness constraint, because the
+sheets are nested (`S₁ ⊇ … ⊇ S_K`) and a rounded piece always sits on a strictly
+larger one. But airtightness was never the only thing the degree-2 rule bought.
+It is also what keeps a corner where three colours meet sharp — and a sheet that
+rounds everything turns each scattered upper sheet into a handful of discs that
+look nothing like the picture. (Observed: on an interleaved four-colour design,
+every sheet above the first came out as blobs.)
+
+So `traceUnionLoops` takes the **original artwork's** `boundaryVertexDegrees`
+and looks each of its vertices back up through `latticeVertexIdAt`, rounding only
+under the same rule the screen applies. Neck points are not lattice vertices, so
+they come back null and stay sharp — which is what a deliberate straight bridge
+wants anyway. Without the degree map nothing rounds at all: rounding everything
+is the failure the parameter exists to prevent, so it is not the fallback.
+
+That is what `round-corners.ts` exposes `roundPolygon` for (geometry only, caller
+decides eligibility) underneath `roundRing` (geometry + the degree-2 rule): the
+two consumers do not differ on the *rule*, they differ on how they can ask. A
+colour ring carries its own lattice vertex ids; a sheet has to recover them.
+
+The 3D print never faced this, because it never merges colours: it rounds per
+colour region with `roundRing` directly, and its abutting filament bodies still
+meet with no gap and no overlap.
+
+The one residual difference from the screen is the **clamp**, not the shape. Run
+lengths are measured along the sheet's boundary, which can pass straight through
+a junction where the colour's own ring turned, so a corner just before such a
+junction may take a slightly larger radius than it does in the artwork. Both
+corners at the junction itself stay sharp either way.
 
 **Rounding runs after the necks are inserted**, and the run clamp is what makes
 that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at

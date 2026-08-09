@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-09 07:23:37
+# Last updated: 2026-08-09 17:37:37
 # Files: 96
-# Lines of code: ~26860
+# Lines of code: ~26939
 ```
 - **/app**
   - **/lib**
@@ -288,6 +288,7 @@
     - Interface: `CutStackModel`
     - Function: `buildCutStackModel` - Builds the cut stack from a plan: nested color ...
   - [cut-svg.ts](../src/lib/cut-svg.ts)
+    - Interface: `UnionLoopOptions`
     - Function: `traceUnionLoops` - Traces the union boundary of a triangle set as ...
     - Function: `neckFillTriangles` - The extra "neck fill" triangles (world coords) ...
     - Interface: `CutSVGOptions`
@@ -532,6 +533,7 @@
   - [round-corners.ts](../src/lib/round-corners.ts)
     - Interface: `RingPoint` - One ring vertex: its world position, and the id...
     - Type: `Ring` - A closed ring. Outer rings wind CW, holes CCW (...
+    - Function: `latticeVertexIdAt` - The lattice vertex id at a world point, or null...
     - Interface: `RegionRings`
     - Interface: `RoundedCorner` - One ring vertex after rounding. `radius` 0 mean...
     - Type: `RoundedRing`

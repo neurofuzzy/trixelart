@@ -20,6 +20,7 @@ import {
 } from "@/lib/mesh-export";
 import type { CutPlan } from "@/lib/cut-export";
 import { neckFillTriangles, traceUnionLoops } from "@/lib/cut-svg";
+import { boundaryVertexDegrees } from "@/lib/round-corners";
 
 // ---------------------------------------------------------------------------
 // Cut plan → exploded 3D stack of cardstock sheets (see docs/fabrication-export
@@ -181,6 +182,9 @@ interface SheetShape {
   round: number;
   /** Chord tolerance for flattening those corners, world units. */
   sagitta: number;
+  /** The original artwork's boundary-vertex degrees — what lets a sheet round
+   *  like the picture instead of like a single-colour blob. */
+  degrees: Map<number, number>;
 }
 
 /**
@@ -215,13 +219,13 @@ function sheetBody(
   };
 
   if (shape.round > 0) {
-    const loops = traceUnionLoops(
-      layer.keys,
-      shape.merge,
-      shape.neck,
-      shape.round,
-      shape.sagitta,
-    );
+    const loops = traceUnionLoops(layer.keys, {
+      merge: shape.merge,
+      neck: shape.neck,
+      round: shape.round,
+      sagitta: shape.sagitta,
+      degrees: shape.degrees,
+    });
     for (const tri of triangulateLoops(loops)) push(tri.map(toModel));
   } else {
     for (const key of layer.keys) {
@@ -336,6 +340,8 @@ export function buildCutStackModel(
     neck: merge ? (options.neck ?? 0) : 0,
     round: options.round ?? 0,
     sagitta: FAB_CHORD_MM / transform.scale,
+    // Read off the artwork once, before any sheet has merged its colours.
+    degrees: boundaryVertexDegrees(painted),
   };
   const layers = cutLayers(plan, painted, options.frame);
   const bodies: ExportBody[] = [];
