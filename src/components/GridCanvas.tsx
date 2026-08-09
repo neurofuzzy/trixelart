@@ -12,20 +12,29 @@ import {
   buildRenderPlan,
   drawHatchLayer,
   glowReceivers,
+  stepBlendMode,
   stepColorAdjust,
   stepGlow,
   stepRoundRadius,
   stepOutlineWeight,
   stepSubdivisionNoise,
+  type RenderStep,
 } from "@/lib/hatch-render";
-import { stepRegionGeometry, traceRoundedRing } from "@/lib/round-corners";
+import { drawComposited } from "@/lib/blend";
+import {
+  stepRegionGeometry,
+  traceRoundedRing,
+  type RoundedRing,
+} from "@/lib/round-corners";
+import type { Box } from "@/lib/hatch";
 import {
   drawSubFills,
   noiseRegionFills,
   noiseSubFills,
+  type NoisePeriod,
   type SubFill,
 } from "@/lib/subdivision-noise";
-import { drawGlow, silhouetteGeometry } from "@/lib/glow";
+import { drawGlow, silhouetteGeometry, type GlowSpec } from "@/lib/glow";
 
 /**
  * The hexagon the stamp and select hover cues outline: the region their next
@@ -77,6 +86,171 @@ function stampSelectHoverRegion(a: {
   }
 
   return null;
+}
+
+/** The geometry a step with a rounding, outline or grain effect draws with —
+ *  memoised on the plan by the component, since none of it changes on a pan. */
+interface StepGeometry {
+  radius: number;
+  outline: number;
+  adjust: ((hex: string) => string) | undefined;
+  regionFills: Map<string, SubFill[]> | null;
+  regions: { fill: string; base: string; rings: RoundedRing[] }[];
+}
+
+/** The two shapes a glow needs: what casts it, and what catches it. */
+interface StepGlow {
+  spec: GlowSpec;
+  caster: RoundedRing[];
+  receiver: RoundedRing[];
+}
+
+/** What the draw is culled to: the visible world box, the lattice index range
+ *  covering it, and the zoom the hatch weights are clamped against. */
+interface DrawView extends Box {
+  zoom: number;
+  minR: number;
+  maxR: number;
+  minQ: number;
+  maxQ: number;
+}
+
+/**
+ * One render step of the artwork, painted into whatever context it is handed —
+ * the live one normally, or a blend layer's buffer.
+ *
+ * Module level rather than a closure inside the draw effect, and everything it
+ * needs comes in as an argument: a nested function that both captures the
+ * effect's locals and takes a plan step as a parameter reads to the React
+ * compiler as one that may mutate the memoised plan, which is an error rather
+ * than a warning. Taking the memo's *contents* as parameters says the same
+ * thing to a reader and nothing untrue to the compiler.
+ *
+ * Fill steps group by colour for fewer `fillStyle` changes; hatch steps draw
+ * line work. The branch is not optional: a hatch value fed to `resolveColor`
+ * comes back as the raw string, and canvas silently *keeps the previous*
+ * fillStyle rather than erroring, so the marks would paint as solid colour.
+ */
+function drawArtworkStep(
+  ctx: CanvasRenderingContext2D,
+  step: RenderStep,
+  geom: StepGeometry | null,
+  glow: StepGlow | null,
+  view: DrawView,
+  noisePeriod: NoisePeriod | undefined,
+): void {
+  if (step.kind === "hatch") {
+    drawHatchLayer(ctx, step.painted, view, view.zoom);
+    return;
+  }
+
+  // Under this step's own fills, and clipped to the layers below: the layer
+  // casts the shadow, it does not receive it.
+  if (glow) drawGlow(ctx, glow.spec, glow.caster, glow.receiver);
+
+  // Corner rounding and outlines draw whole regions, so they cannot be
+  // viewport-culled the way loose triangles are — a region reaches past the
+  // visible box and its ring has to be closed. The geometry is memoised on the
+  // plan instead, so the cost lands on an edit rather than on every pan and
+  // hover redraw.
+  if (geom) {
+    for (const { fill, base, rings } of geom.regions) {
+      const grain = geom.regionFills?.get(base);
+      if (grain?.length) {
+        // Solid first, grain clipped over it: the clip is antialiased, so
+        // painting only the sub-triangles would feather the region's edge.
+        ctx.save();
+        ctx.beginPath();
+        for (const ring of rings) traceRoundedRing(ctx, ring);
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.clip();
+        drawSubFills(ctx, grain, geom.adjust);
+        ctx.restore();
+        continue;
+      }
+      ctx.beginPath();
+      for (const ring of rings) traceRoundedRing(ctx, ring);
+      if (geom.outline > 0) {
+        // The outline effect swaps the solid for a stroke of the region
+        // boundary at the layer's selected weight; the interior stays empty.
+        // Round joins land exactly on the stroke edge; miter pokes 2x past it
+        // and bevel cuts back to the midpoint.
+        ctx.strokeStyle = fill;
+        ctx.lineWidth = geom.outline;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+    }
+    return;
+  }
+
+  // Built once per step so its memo covers the whole layer; `undefined` unless
+  // a colour-adjust effect is on, which keeps the common case on the path it
+  // has always taken. The rounded/outlined branch above needs no equivalent —
+  // `stepRegionGeometry` has already applied it.
+  const adjust = stepColorAdjust(step);
+  const noise = stepSubdivisionNoise(step, noisePeriod);
+
+  // Subdivision noise emits four fills per cell instead of one, so it gets its
+  // own gather rather than widening the plain one. Still viewport-culled — the
+  // sub-triangles live inside the cell that produced them, so the same bounds
+  // hold — which is why this is not memoised the way the rounded path above
+  // has to be.
+  if (noise) {
+    const fills: SubFill[] = [];
+    for (let r = view.minR; r <= view.maxR; r++) {
+      for (let q = view.minQ; q <= view.maxQ; q++) {
+        for (const type of ["up", "down"] as const) {
+          const encoded = step.painted[`${q},${r},${type}`];
+          if (encoded) {
+            fills.push(...noiseSubFills(q, r, type, encoded, noise));
+          }
+        }
+      }
+    }
+    drawSubFills(ctx, fills, adjust);
+    return;
+  }
+
+  const colorGroups = new Map<string, TriKey[]>();
+  for (let r = view.minR; r <= view.maxR; r++) {
+    for (let q = view.minQ; q <= view.maxQ; q++) {
+      for (const type of ["up", "down"] as const) {
+        const key = `${q},${r},${type}`;
+        const fill = step.painted[key];
+        // A no-print marker never joins the artwork; it gets its own pass in
+        // the component. Skipping it here is not cosmetic — `resolveColor`
+        // hands back the raw marker string, and canvas *silently keeps the
+        // previous `fillStyle`* for a value it cannot parse, so the cell would
+        // paint in whatever colour happened to be current.
+        if (fill && !isNoPrint(fill)) {
+          const resolved = resolveColor(fill);
+          const hex = adjust ? adjust(resolved) : resolved;
+          const list = colorGroups.get(hex);
+          if (list) list.push({ q, r, type });
+          else colorGroups.set(hex, [{ q, r, type }]);
+        }
+      }
+    }
+  }
+
+  for (const [fillColor, tris] of colorGroups) {
+    ctx.fillStyle = fillColor;
+    ctx.beginPath();
+    for (const tri of tris) {
+      const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+    }
+    ctx.fill();
+  }
 }
 
 export function GridCanvas({
@@ -288,131 +462,21 @@ export function GridCanvas({
     // layers coalesce. That matters for effects: a rounded step finds its region
     // boundaries in the coalesced map, so rounding what the plan merged is the
     // only way the preview matches the export.
-    // Fill steps group by colour for fewer fillStyle changes; hatch steps draw
-    // line work. The branch is not optional: a hatch value fed to `resolveColor`
-    // comes back as the raw string, and canvas silently *keeps the previous*
-    // fillStyle rather than erroring, so the marks would paint as solid colour.
+    const drawView = { minX, minY, maxX, maxY, minR, maxR, minQ, maxQ, zoom: view.zoom };
     for (let si = 0; si < plan.length; si++) {
       const step = plan[si];
-
-      if (step.kind === "hatch") {
-        drawHatchLayer(ctx, step.painted, {
-          minX,
-          minY,
-          maxX,
-          maxY,
-        }, view.zoom);
-        continue;
-      }
-
-      // Under this step's own fills, and clipped to the layers below: the layer
-      // casts the shadow, it does not receive it.
-      const glow = glowPlan[si];
-      if (glow) drawGlow(ctx, glow.spec, glow.caster, glow.receiver);
-
-      // Corner rounding and outlines draw whole regions, so they cannot be
-      // viewport-culled the way loose triangles are — a region reaches past the
-      // visible box and its ring has to be closed. The geometry is memoised on
-      // the plan instead, so the cost lands on an edit rather than on every pan
-      // and hover redraw.
-      const eff = effectPlan[si];
-      if (eff) {
-        for (const { fill, base, rings } of eff.regions) {
-          const grain = eff.regionFills?.get(base);
-          if (grain?.length) {
-            // Solid first, grain clipped over it: the clip is antialiased, so
-            // painting only the sub-triangles would feather the region's edge.
-            ctx.save();
-            ctx.beginPath();
-            for (const ring of rings) traceRoundedRing(ctx, ring);
-            ctx.fillStyle = fill;
-            ctx.fill();
-            ctx.clip();
-            drawSubFills(ctx, grain, eff.adjust);
-            ctx.restore();
-            continue;
-          }
-          ctx.beginPath();
-          for (const ring of rings) traceRoundedRing(ctx, ring);
-          if (eff.outline > 0) {
-            // The outline effect swaps the solid for a stroke of the region
-            // boundary at the layer's selected weight; the interior stays empty.
-            // Round joins land exactly on the stroke edge; miter pokes 2x past
-            // it and bevel cuts back to the midpoint.
-            ctx.strokeStyle = fill;
-            ctx.lineWidth = eff.outline;
-            ctx.lineJoin = "round";
-            ctx.lineCap = "round";
-            ctx.stroke();
-          } else {
-            ctx.fillStyle = fill;
-            ctx.fill();
-          }
-        }
-        continue;
-      }
-
-      // Built once per step so its memo covers the whole layer; `undefined`
-      // unless a colour-adjust effect is on, which keeps the common case on the
-      // path it has always taken. The rounded/outlined branch above needs no
-      // equivalent — `stepRegionGeometry` has already applied it.
-      const adjust = stepColorAdjust(step);
-      const noise = stepSubdivisionNoise(step, noisePeriod);
-
-      // Subdivision noise emits four fills per cell instead of one, so it gets
-      // its own gather rather than widening the plain one. Still viewport-culled
-      // — the sub-triangles live inside the cell that produced them, so the
-      // same bounds hold — which is why this is not memoised the way the
-      // rounded path above has to be.
-      if (noise) {
-        const fills: SubFill[] = [];
-        for (let r = minR; r <= maxR; r++) {
-          for (let q = minQ; q <= maxQ; q++) {
-            for (const type of ["up", "down"] as const) {
-              const encoded = step.painted[`${q},${r},${type}`];
-              if (encoded) {
-                fills.push(...noiseSubFills(q, r, type, encoded, noise));
-              }
-            }
-          }
-        }
-        drawSubFills(ctx, fills, adjust);
-        continue;
-      }
-
-      const colorGroups = new Map<string, TriKey[]>();
-      for (let r = minR; r <= maxR; r++) {
-        for (let q = minQ; q <= maxQ; q++) {
-          for (const type of ["up", "down"] as const) {
-            const key = `${q},${r},${type}`;
-            const fill = step.painted[key];
-            // A no-print marker never joins the artwork; it gets its own pass
-            // below. Skipping it here is not cosmetic — `resolveColor` hands
-            // back the raw marker string, and canvas *silently keeps the
-            // previous `fillStyle`* for a value it cannot parse, so the cell
-            // would paint in whatever colour happened to be current.
-            if (fill && !isNoPrint(fill)) {
-              const resolved = resolveColor(fill);
-              const hex = adjust ? adjust(resolved) : resolved;
-              const list = colorGroups.get(hex);
-              if (list) list.push({ q, r, type });
-              else colorGroups.set(hex, [{ q, r, type }]);
-            }
-          }
-        }
-      }
-
-      for (const [fillColor, tris] of colorGroups) {
-        ctx.fillStyle = fillColor;
-        ctx.beginPath();
-        for (const tri of tris) {
-          const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(c.x, c.y);
-          ctx.closePath();
-        }
-        ctx.fill();
+      // A blended layer is flattened into its own buffer and composited whole —
+      // see `drawComposited` for why blending each shape as it is drawn is not
+      // the same thing. Nothing has been painted yet at this point (the artwork
+      // is the first thing after the clear), so the backdrop a blend sees is the
+      // artwork below it and nothing else, exactly as in an export.
+      const blend = stepBlendMode(step);
+      if (blend) {
+        drawComposited(ctx, blend, (c) =>
+          drawArtworkStep(c, step, effectPlan[si], glowPlan[si], drawView, noisePeriod),
+        );
+      } else {
+        drawArtworkStep(ctx, step, effectPlan[si], glowPlan[si], drawView, noisePeriod);
       }
     }
 

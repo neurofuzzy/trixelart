@@ -13,13 +13,17 @@ import {
   glowReceivers,
   hatchStrokes,
   hatchStrokesBounds,
+  planBlends,
+  stepBlendMode,
   stepColorAdjust,
   stepGlow,
   stepOutlineWeight,
   stepRoundRadius,
   stepSubdivisionNoise,
   type HatchStroke,
+  type RenderStep,
 } from "@/lib/hatch-render";
+import type { BlendMode } from "@/lib/blend";
 import {
   noiseRegionFills,
   noiseSubFills,
@@ -420,6 +424,41 @@ function hatchMarkup(
 const EMPTY_SIZE = 100;
 
 /**
+ * Wraps one step's markup in a group that blends it with the artwork below.
+ *
+ * `mix-blend-mode` is a CSS property rather than an SVG 1.1 attribute, and it
+ * is the *only* representation available: the blend is a per-pixel function of
+ * two paints, so — like the glow's `feGaussianBlur`, and unlike everything else
+ * this file emits — there is no polygon that expresses the result. **Browsers
+ * and Inkscape (1.x) honour it; Illustrator and Affinity Designer ignore it on
+ * import** and show the layer plain. Same trade-off as the glow filter, known
+ * and accepted.
+ *
+ * The whole layer goes in one group, so the shapes inside it composite with
+ * each other normally and only the finished layer meets the backdrop — the
+ * vector twin of `drawComposited`'s buffer.
+ */
+function blendGroup(markup: string, mode: BlendMode | null): string {
+  if (!mode || !markup) return markup;
+  return `  <g style="mix-blend-mode:${mode}">\n${markup}\n  </g>`;
+}
+
+/**
+ * Puts the artwork in its own stacking context when anything in it blends, so a
+ * blend sees the layers below it and not the page or a background rect.
+ *
+ * Without this the bottom layer would blend against whatever the document is
+ * opened over, which is nothing the file itself states — and the canvas preview,
+ * whose artwork sits on a transparent surface, would disagree with it. The
+ * raster exports isolate for the same reason. Emitted only when a blend is
+ * present, so every other file stays byte-identical.
+ */
+function isolateBlends(body: string, plan: RenderStep[]): string {
+  if (!body || !planBlends(plan)) return body;
+  return `  <g style="isolation:isolate">\n${body}\n  </g>`;
+}
+
+/**
  * The one place the document is assembled, so `background` and `metadata` reach
  * the empty document as well as a drawn one.
  *
@@ -574,7 +613,7 @@ export function generateSVG(
   const defs: string[] = [];
 
   const body = resolved
-    .map((step, si) => {
+    .map((step, si): string => {
       if (step.kind === "hatch") return hatchMarkup(step.strokes, ox, oy);
       if (step.tris.length === 0) return "";
 
@@ -688,12 +727,13 @@ export function generateSVG(
           .join("\n")
       );
     })
+    .map((markup, si) => blendGroup(markup, stepBlendMode(plan[si])))
     .filter(Boolean)
     .join("\n");
 
   if (!body) return wrap(EMPTY_SIZE, EMPTY_SIZE, "", options);
 
-  return wrap(w, h, body, options, defs.join("\n"));
+  return wrap(w, h, isolateBlends(body, plan), options, defs.join("\n"));
 }
 
 /* ------------------------------------------------------------------ */
@@ -856,7 +896,7 @@ export function generateCroppedSVG(
   const cropClip = `    <clipPath id="glow-crop"><rect x="0" y="0" width="${w}" height="${h}"/></clipPath>`;
 
   const body = plan
-    .map((step, si) => {
+    .map((step, si): string => {
       if (step.kind === "hatch") {
         // Clipped to the crop in world space, then rotated into display space —
         // the same order the fill path uses below.
@@ -1020,6 +1060,7 @@ export function generateCroppedSVG(
         )
         .join("\n");
     })
+    .map((markup, si) => blendGroup(markup, stepBlendMode(plan[si])))
     .filter(Boolean)
     .join("\n");
 
@@ -1029,5 +1070,5 @@ export function generateCroppedSVG(
   const defsMarkup = defs.length
     ? `  <defs>\n${cropClip}\n${defs.join("\n")}\n  </defs>\n`
     : "";
-  return `${open}\n${defsMarkup}${body}\n</svg>`;
+  return `${open}\n${defsMarkup}${isolateBlends(body, plan)}\n</svg>`;
 }

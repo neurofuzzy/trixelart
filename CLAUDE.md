@@ -18,7 +18,7 @@ and the per-module/per-symbol map is generated — do not restate either here.
 | [docs/ui.md](docs/ui.md) | Keyboard shortcuts, zoom & touch, symmetry function panel, fullscreen |
 | [docs/pattern-brush.md](docs/pattern-brush.md) | The procedural pattern brush and its layer stack |
 | [docs/hatch-layers.md](docs/hatch-layers.md) | Hatch layers, the hatch brush, convert-to-hatches |
-| [docs/layer-effects.md](docs/layer-effects.md) | Round corners, outline, glow, adjust colour, subdivision noise |
+| [docs/layer-effects.md](docs/layer-effects.md) | Round corners, outline, glow, adjust colour, subdivision noise, blend mode |
 | [docs/exports.md](docs/exports.md) | Crop & export (PNG/SVG), plotter export, apparel export |
 | [docs/persistence.md](docs/persistence.md) | localStorage keys, `ProjectSnapshot`, the `.trixel.svg` project file, examples |
 | [docs/fabrication-export.md](docs/fabrication-export.md) | Design spec for the cutting-machine export (not implemented) |
@@ -99,9 +99,9 @@ both SVG exporters — walks the **same plan**: `buildRenderPlan(layers)`
 (`src/lib/hatch-render.ts`) returns visible layers bottom-to-top with
 consecutive effect-free fill layers coalesced, and hatch layers as their own
 steps. Per-step readers (`stepRoundRadius`, `stepOutlineWeight`, `stepGlow`,
-`stepColorAdjust`, `stepSubdivisionNoise`, `glowReceivers`) hand each backend
-what that step needs. A new effect or a new backend goes through the plan, or the
-preview and the file will disagree. See
+`stepColorAdjust`, `stepSubdivisionNoise`, `stepBlendMode`, `glowReceivers`) hand
+each backend what that step needs. A new effect or a new backend goes through the
+plan, or the preview and the file will disagree. See
 [docs/layer-effects.md](docs/layer-effects.md).
 
 Colours resolve at the last moment and geometry is shared: `stepRegionGeometry`
@@ -110,7 +110,11 @@ where an arc begins, `subdivideTri` the one definition of how a cell splits.
 The two effects that are not silhouette — colour adjust and subdivision noise —
 both ride `generateTriangles`' optional parameters rather than each emit site,
 which is what lets one change carry the PNG exporter and both SVG exporters at
-once. The fabrication paths (3D, cutting, plotter, apparel cut)
+once. **Blend mode is the one effect applied a level up from all of these**: it
+describes how the finished step meets the artwork below, so a backend consumes it
+*around* its step loop — a canvas one through `drawComposited` (`src/lib/blend.ts`),
+an SVG one as `mix-blend-mode` on the step's group — never inside the emit code.
+The fabrication paths (3D, cutting, plotter, apparel cut)
 deliberately do **not** run the plan — see the per-export notes for what each one
 ignores and why. They merge the fill stack first, so where one of them *does*
 honour a geometry effect it reads the setting through `layersRoundFraction`

@@ -2,6 +2,7 @@ import { getTriVertices, stringToTri, type TriKey } from "@/lib/grid-math";
 import { regionMembership, type HexRegion } from "@/lib/hex-flower";
 import { resolveColor } from "@/lib/constants";
 import { colorAdjuster } from "@/lib/color-adjust";
+import type { BlendMode } from "@/lib/blend";
 import type {
   NoisePeriod,
   SubdivisionNoiseSpec,
@@ -146,6 +147,35 @@ export function stepSubdivisionNoise(
     }
   }
   return null;
+}
+
+/**
+ * How a fill step composites against the artwork below it, or `null` for the
+ * ordinary source-over.
+ *
+ * The odd one out even among the two non-geometry readers: `stepColorAdjust`
+ * and `stepSubdivisionNoise` hand a backend something to apply *while* it draws
+ * the step, whereas this describes what to do with the step once it is drawn.
+ * Backends therefore consume it around their step loop rather than inside it —
+ * a canvas one through `drawComposited`, an SVG one as `mix-blend-mode` on the
+ * step's group.
+ *
+ * `null` for anything but an enabled blend effect, which is what keeps every
+ * other document on exactly the path it walked before this existed.
+ */
+export function stepBlendMode(step: RenderStep): BlendMode | null {
+  if (step.kind !== "fill") return null;
+  for (const e of step.effects) {
+    if (e.type === "blend" && e.enabled) return e.mode;
+  }
+  return null;
+}
+
+/** Whether any step in the plan blends — i.e. whether the artwork has to be
+ *  isolated from whatever the backend painted behind it. A blend reaching the
+ *  export's background rect would make the preview and the file disagree. */
+export function planBlends(plan: RenderStep[]): boolean {
+  return plan.some((step) => stepBlendMode(step) !== null);
 }
 
 /**

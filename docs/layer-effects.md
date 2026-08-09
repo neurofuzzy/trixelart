@@ -3,7 +3,7 @@
 > Detail doc. Index and the rules that apply everywhere: [CLAUDE.md](../CLAUDE.md). Module/symbol map: [CODEMAP.md](../CODEMAP.md).
 
 Non-destructive per-layer filters — three of geometry, one of colour, one of
-texture.
+texture, one of compositing.
 `Layer.effects` is optional and
 **absent means none** — read it through `layerEffects(l)` / `activeEffects(l)`
 (`use-history.ts`), never `l.effects` directly, exactly as with `layerKind`, and
@@ -16,9 +16,9 @@ zero-radius effect produces identical SVG output).
 `trixel-save` and the `.trixel.svg` payload **with no new snapshot field**. That
 is the reason they live on the layer rather than in `trixel-settings`: they are
 authored content, and putting them there costs nothing to persist. They are a
-list so further effects can be added without re-plumbing; today there are five
-(round corners, outline, glow, adjust colour and subdivision noise) and all five
-may sit on the same layer. Hatch layers are excluded — line work has no filled
+list so further effects can be added without re-plumbing; today there are six
+(round corners, outline, glow, adjust colour, subdivision noise and blend mode)
+and all six may sit on the same layer. Hatch layers are excluded — line work has no filled
 region to reshape, and the colour and texture filters follow them out rather than
 being the one effect with a different eligibility rule.
 
@@ -486,6 +486,87 @@ and discolours the whole row. Subdivision puts flat edges at `(r + ½)H` too,
 which is *not* pixel-aligned and does need the stroke — so the test became "flat
 **and** on a lattice row" (`onLatticeRow`). Without noise every flat edge is on a
 row, so it reduces to the condition it always was.
+
+## Blend mode
+
+How the layer's finished result combines with the artwork beneath it: **multiply,
+screen, overlay, soft light, hard light, difference**. `src/lib/blend.ts` holds
+the mode list and the canvas half; the UI is a sixth Effects row in `LayerPanel`,
+a 2×3 grid of buttons rather than sliders — it is a choice, not a quantity, and
+picking one is a compare-them-all gesture.
+
+**An effect rather than a field on `Layer`.** It could have been a per-layer
+setting, and in most editors it is; putting it here costs nothing to persist
+(effects already ride `ProjectSnapshot`), keeps the layer rows uncluttered, and
+gets three things for free that a new field would each have needed by hand: the
+enable/disable eye, undo/redo, and — the load-bearing one — **`activeEffects`
+breaking `buildRenderPlan`'s coalescing**, which is exactly what a blend
+requires. A layer that composites differently from its neighbour cannot be
+flattened into the same map as that neighbour. Every mode offered is a real one,
+so `activeEffects` keeps any enabled blend; "normal" is spelled by disabling the
+effect.
+
+**The one effect applied a level up.** The other five change what a step draws;
+this changes what happens to the step once drawn. So the step readers' usual
+shape does not fit: `stepBlendMode` is consumed *around* a backend's step loop,
+never inside its emit code. Nothing in `generateTriangles`, `stepRegionGeometry`
+or any emit site knows this effect exists.
+
+**One string drives all four backends.** Canvas's `globalCompositeOperation` and
+CSS's `mix-blend-mode` name the separable modes identically — both are Compositing
+and Blending Level 1 — so the stored value goes straight into either with no
+translation table to drift out of sync.
+
+### A step is flattened before it blends
+
+`drawComposited` paints the step into an offscreen canvas and composites the
+result in one operation. Setting the composite op on the live context and drawing
+the step's shapes into it is **not** the same thing, and fails in three places
+that all exist today:
+
+- the seam-closing **overdraw stroke** laps onto its neighbour, so `multiply`
+  grows a dark line along every seam;
+- a rounded region's **grain** sits on top of its own solid fill, so every noised
+  cell blends with itself;
+- a **glow** is painted under the very layer that casts it, so the layer burns
+  through its own shadow.
+
+Inside the buffer those overlaps stay ordinary source-over draws, exactly as they
+are without the effect, and only the finished layer meets the backdrop. The SVG
+side gets the same semantics from putting the whole step in one `<g>`. The buffer
+inherits the caller's transform, so no drawing code changed; the cost is one
+full-size canvas per blended step, paid only when a document blends.
+
+### The artwork is isolated from the background
+
+**A blend sees the layers below it and nothing else.** The canvas preview gets
+this for free — the artwork is the first thing painted after the clear, on a
+transparent surface. The raster exports do not: both paint an opaque background
+first (the fabric page colour, the apparel garment), so `drawArtworkPlan` renders
+the whole plan into a buffer of its own when `planBlends` is true. The SVG
+exporters wrap their drawing in `isolation: isolate`, a sibling of the background
+rect rather than its parent.
+
+Without that, the bottom layer would blend against whatever the document happens
+to be opened over — which the file does not state, and which the preview cannot
+show. The rule as chosen is the one all four backends can honour identically.
+Both isolation paths are conditional, so a blend-free export is byte-identical to
+before this existed (verified, full and cropped SVG).
+
+**A blend on the bottom layer does nothing**, for the same reason a glow there
+does: there is no artwork underneath. The panel says so inline, reusing the glow's
+surface test.
+
+**Inkscape honours `mix-blend-mode`; Illustrator and Affinity Designer ignore it**
+and open the layer plain. Same trade-off as the glow's `feGaussianBlur`, and made
+the same way — there is no polygon that expresses a per-pixel function of two
+paints, so this is the only representation, not a shortcut around one.
+
+Honoured in the canvas preview, the fabric PNG, the apparel print (which is
+`drawArtworkPlan`) and both SVG exporters. Not in the fabrication paths — the 3D,
+cutting and plotter exports walk `painted` directly and see no colour effect at
+all — nor in the apparel *cut*, which is `RawSeg` geometry with no compositing to
+speak of.
 
 ## Rounding in the cutting export
 
