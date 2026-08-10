@@ -84,31 +84,57 @@ Only two shapes exist, so a colour's sheet is not a picture of anything — it o
 needs the right *count* of each orientation. Pieces are packed into a patch of
 the tiling and the maps say where they go.
 
-The sheet rectangle is chosen first, in world units, and the `(Q, R)` range is
-derived from it by inverting the tiling basis. Candidates are ordered by **banded
-y, then x** — not raw y, because an up piece and the down piece beside it sit at
-slightly different heights, so exact-y ordering runs every up in a band ahead of
-every down and a block then has to overshoot badly on one orientation to collect
-enough of the other.
+**Sheet size defaults to the mat's** and can be set separately. The mat is sized
+from the artwork; the cardstock often is not, and cutting the colours from
+smaller offcuts under a full-size mat is the case the override exists for. Omit
+`sheetWidthMm`/`sheetHeightMm` and the plan resolves them to the mat.
 
-Each sheet restarts at the same corner, because each sheet is a fresh piece of
-card. A block is filled until *both* needs are met; the overshoot is reported as
-spares rather than cut around, since cutting around it would put a ragged free
-edge through the block and hand back the weeding this export exists to avoid.
+Two things about the packing are load-bearing, and both were bugs first.
+
+**Blocks are grown outward from a seed over real tiling adjacency, not scanned
+in reading order.** Reading order looked right and was not: the tiling's rows are
+not horizontal bands, so an x-sorted sweep hops between parts of the sheet that
+do not touch. Blocks came out in fragments — for one twelve-piece colour, a
+single piece stranded on its own beside the group. Growing from a seed makes
+contiguity structural: a piece is only ever added because it touches one already
+placed, so every internal line really is shared and the sheet really does cut in
+one pass.
+
+**Adjacency is `nestedNeighbors`, not `triEdgeNeighbors`.** The tiling is
+isomorphic to a triangular lattice, but the down pieces are offset inside it by
+`NESTED_DOWN_OFFSET`, so `up(q, r)` sits against `down(q−1, r−1)`,
+`down(q−1, r)` and `down(q, r−1)` — never `down(q, r)`. Using the lattice's own
+neighbours is what scattered the blocks in the first place. The steps are derived
+from the outlines at first use, by finding which pieces share boundary segments,
+so they cannot drift from the templates.
+
+The candidate set is every tiling position **wholly inside** the sheet rectangle.
+That containment test is the only thing holding a block to its sheet — the growth
+stops at the edge of the candidate set — and testing merely that a piece is
+*smaller* than the sheet let blocks run clean off the card.
+
+At each step the frontier is searched for a piece of the orientation still
+wanted, falling back to any. That is what keeps the overshoot at zero for whole
+sheets and near it for partial ones. Each sheet restarts from the same seed,
+because each sheet is a fresh piece of card.
 
 ## Mats
 
-- **Backing — solid, no window, only slots.** Every tab but the outermost is
-  already hidden under a neighbouring piece, so there is no fringe for a window
-  to clear: the assembled mosaic's visible edge *is* the artwork's plain
-  silhouette. What the border tabs need is somewhere to go, and that is a slot —
-  one per exposed tab, along its root half-edge and standing a little outboard of
-  it, the same arrangement `cut-joints.ts` uses for a folded tab. Cutting a
-  window instead would remove exactly the paper the border pieces rest on.
-- **Top mat — the cut export's mat, unchanged.** A frame at `MAT_BORDER`
-  (`1.6 · SIDE`, matching `FRAME_MARGIN_SIDES`) whose window is the plain
-  silhouette. It needs no inset, because nothing pokes out past that silhouette
-  once the slots have taken the border tabs.
+Both mats share an outer rectangle and differ only in what is cut out of it, so
+they register when stacked.
+
+- **Backing — a plain rectangle, nothing in it but slots.** No window, and no
+  silhouette either: the mosaic *rests* on the backing, so any shape cut out of
+  it removes the very paper the pieces sit on. (An earlier version cut the
+  silhouette and produced the negative of the top mat, which is exactly wrong.)
+  Every tab except the ones on the border is already buried under a neighbouring
+  piece; what the border tabs need is somewhere to go, and that is a slot along
+  the tab's root half-edge, standing a little outboard of it — the same
+  arrangement `cut-joints.ts` uses for a folded tab.
+- **Top mat — the cut export's mat, unchanged.** The same rectangle with the
+  plain silhouette as its window, at `MAT_BORDER` (`1.6 · SIDE`, matching
+  `FRAME_MARGIN_SIDES`). It needs no inset, because nothing pokes out past that
+  silhouette once the slots have taken the border tabs.
 
 `exposedTabs` is the one function that decides which tabs are visible: a tab
 whose named neighbour is unpainted. It is also what makes interior holes work —
@@ -140,7 +166,7 @@ One SVG, Inkscape layers:
   stroked with the deduplicated cut path. The fill is how a sheet is identified
   at a glance; it has to be per piece, because the cut path is a set of open
   polylines and an open polyline has no inside.
-- `Backing mat` — the solid silhouette, with the slots as a stroked line set.
+- `Backing mat` — the plain rectangle, with the slots as a stroked line set.
 - `Top mat` — the outline frame.
 - `Assembly map` — the artwork as built: whole pieces first, then every cell's
   plain triangle over the top. That second pass is what buries the tabs, and it

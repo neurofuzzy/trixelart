@@ -136,6 +136,10 @@ export function InterlockDialog({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [widthMm, setWidthMm] = useState(160);
+  // Undefined until the user opts out of matching the mat, so the default
+  // really is "whatever the mat came out as" rather than a number that happens
+  // to agree with it today.
+  const [matchMat, setMatchMat] = useState(true);
   const [sheetWidthMm, setSheetWidthMm] = useState(200);
   const [sheetHeightMm, setSheetHeightMm] = useState(280);
   const [clearanceMm, setClearanceMm] = useState(0);
@@ -148,8 +152,8 @@ export function InterlockDialog({
   const options = useMemo<InterlockOptions>(
     () => ({
       widthMm,
-      sheetWidthMm,
-      sheetHeightMm,
+      sheetWidthMm: matchMat ? undefined : sheetWidthMm,
+      sheetHeightMm: matchMat ? undefined : sheetHeightMm,
       clearanceMm,
       backingMat,
       topMat,
@@ -157,6 +161,7 @@ export function InterlockDialog({
     }),
     [
       widthMm,
+      matchMat,
       sheetWidthMm,
       sheetHeightMm,
       clearanceMm,
@@ -319,24 +324,44 @@ export function InterlockDialog({
               )}
             </Section>
 
-            <Section title="Sheet">
-              <NumberMm
-                label="Cut width"
-                value={sheetWidthMm}
-                min={40}
-                max={1200}
-                onChange={setSheetWidthMm}
-              />
-              <NumberMm
-                label="Cut height"
-                value={sheetHeightMm}
-                min={40}
-                max={1200}
-                onChange={setSheetHeightMm}
-              />
+            <Section title="Colour sheets">
+              <Check
+                checked={matchMat}
+                onChange={(v) => {
+                  if (!v && metrics) {
+                    setSheetWidthMm(Math.round(metrics.matWidthMm));
+                    setSheetHeightMm(Math.round(metrics.matHeightMm));
+                  }
+                  setMatchMat(v);
+                }}
+              >
+                Match mat size
+                {metrics
+                  ? ` (${metrics.matWidthMm.toFixed(0)} × ${metrics.matHeightMm.toFixed(0)} mm)`
+                  : ""}
+              </Check>
+              {!matchMat && (
+                <>
+                  <NumberMm
+                    label="Sheet width"
+                    value={sheetWidthMm}
+                    min={40}
+                    max={1200}
+                    onChange={setSheetWidthMm}
+                  />
+                  <NumberMm
+                    label="Sheet height"
+                    value={sheetHeightMm}
+                    min={40}
+                    max={1200}
+                    onChange={setSheetHeightMm}
+                  />
+                </>
+              )}
               <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-                Pieces of one colour are nested into the interlocking lattice, so
-                neighbours share a cut line: one pass, no weeding, no waste.
+                Pieces of one colour are nested into the interlocking tiling, so
+                neighbours share a cut line: one pass, no weeding, no waste. Set
+                a smaller sheet than the mat to cut the colours from offcuts.
               </p>
             </Section>
 

@@ -3,7 +3,6 @@ import {
   SIDE,
   getTriVertices,
   stringToTri,
-  triCenter,
   triToString,
   worldKey,
   type TriKey,
@@ -19,6 +18,7 @@ import {
   PIECE_AREA_RATIO,
   assertTiles,
   exposedTabs,
+  nestedNeighbors,
   pieceOutline,
 } from "@/lib/interlock-geometry";
 
@@ -84,8 +84,17 @@ export interface InterlockPlan {
   colours: InterlockColour[];
   /** Every painted cell that becomes a piece. */
   cells: string[];
-  /** World-space extent of the assembled mosaic, computed once. */
+  /** World-space extent of the assembled mosaic, border tabs included. */
   box: Box;
+  /** World-space extent of the artwork's own cells — no tabs. The mat is built
+   *  round this, and "artwork width" means this, not the tabbed extent. */
+  cellBox: Box;
+  /** Outer size of both mats, mm. */
+  matWidthMm: number;
+  matHeightMm: number;
+  /** Colour-sheet size actually used, mm — the mat's, unless overridden. */
+  sheetWidthMm: number;
+  sheetHeightMm: number;
   pieceCount: number;
   /** Pieces cut beyond the count the artwork needs, because a nested block
    *  fills a lattice and the two orientations rarely come out even. */
@@ -95,9 +104,11 @@ export interface InterlockPlan {
 export interface InterlockOptions {
   /** Overall artwork width in mm; sets the scale for everything else. */
   widthMm: number;
-  /** Usable cutting area, mm. */
-  sheetWidthMm: number;
-  sheetHeightMm: number;
+  /** Usable cutting area for the colour sheets, mm. Omit to match the mat —
+   *  the default, and what you want unless the cardstock is smaller than the
+   *  finished piece, which is exactly when you would set it. */
+  sheetWidthMm?: number;
+  sheetHeightMm?: number;
   /** Extra gap per piece for zero-kerf machines, mm. 0 keeps shared cut lines. */
   clearanceMm?: number;
   backingMat?: boolean;
@@ -141,7 +152,12 @@ export function planInterlock(
   assertTiles(cells);
 
   const box = artworkBox(cells);
-  const scale = options ? scaleFor(box, options.widthMm) : 0;
+  const cellBox = artworkCellBox(cells);
+  const scale = options ? scaleFor(cellBox, options.widthMm) : 0;
+  const matWidthMm = (cellBox.maxX - cellBox.minX + 2 * MAT_BORDER) * scale;
+  const matHeightMm = (cellBox.maxY - cellBox.minY + 2 * MAT_BORDER) * scale;
+  const sheetWidthMm = options?.sheetWidthMm ?? matWidthMm;
+  const sheetHeightMm = options?.sheetHeightMm ?? matHeightMm;
   let spareCount = 0;
   const colours: InterlockColour[] = [];
   for (const [encoded, list] of byColour) {
@@ -153,7 +169,12 @@ export function planInterlock(
     }
     const sheets =
       options && scale > 0
-        ? nestSheets(upCount, downCount, options, scale)
+        ? nestSheets(
+            upCount,
+            downCount,
+            { sheetWidthMm, sheetHeightMm },
+            scale,
+          )
         : [];
     for (const sheet of sheets) spareCount += sheet.length;
     spareCount -= list.length;
@@ -171,6 +192,11 @@ export function planInterlock(
     colours,
     cells,
     box,
+    cellBox,
+    matWidthMm,
+    matHeightMm,
+    sheetWidthMm,
+    sheetHeightMm,
     pieceCount: cells.length,
     spareCount: Math.max(0, spareCount),
   };
@@ -187,6 +213,17 @@ export function planInterlock(
 function artworkBox(cellKeys: string[]): Box {
   const pts: Pt[] = [];
   for (const key of cellKeys) pts.push(...pieceOutline(stringToTri(key)));
+  return bbox(pts);
+}
+
+/** Extent of the artwork's own cells, with no tabs — what "artwork width"
+ *  means, and what the mat is sized around. */
+function artworkCellBox(cellKeys: string[]): Box {
+  const pts: Pt[] = [];
+  for (const key of cellKeys) {
+    const t = stringToTri(key);
+    pts.push(...(getTriVertices(t.q, t.r, t.type) as Pt[]));
+  }
   return bbox(pts);
 }
 
@@ -277,7 +314,16 @@ function nestCandidates(usableW: number, usableH: number): NestCandidate[] {
       for (const type of ["up", "down"] as const) {
         const tri: TriKey = { q, r, type };
         const box = bbox(pieceOutline(tri, "nested"));
-        if (box.maxX - box.minX > usableW || box.maxY - box.minY > usableH) {
+        // Containment, not just "small enough". The block is grown by walking
+        // neighbours and stops at the edge of this set, so this filter is the
+        // only thing holding a sheet to its size — testing merely that a piece
+        // is smaller than the sheet let blocks run clean off the card.
+        if (
+          box.minX < -1e-6 ||
+          box.maxX > usableW + 1e-6 ||
+          box.minY < -1e-6 ||
+          box.maxY > usableH + 1e-6
+        ) {
           continue;
         }
         rows.push({
@@ -296,18 +342,23 @@ function nestCandidates(usableW: number, usableH: number): NestCandidate[] {
 /**
  * Packs `upNeeded` + `downNeeded` pieces into as few sheets as they take.
  *
- * A nested block is a patch of the interlocking tiling, so every internal line
- * in it is shared with a neighbour and the sheet cuts in one pass with nothing
- * to weed. The two orientations alternate through the tiling and the artwork
- * rarely wants them in equal numbers, so a block is filled until *both* needs
- * are met and the overshoot is reported as spares rather than cut around —
- * cutting around it would put a ragged free edge through the block and hand back
- * the weeding this export exists to avoid.
+ * A block is **grown outward from a seed over real tiling adjacency**, not
+ * scanned in reading order. Reading order looked right and was not: the tiling's
+ * rows are not horizontal bands, so an x-sorted sweep hops between parts of the
+ * sheet that do not touch, and blocks came out in fragments with pieces stranded
+ * on their own — visible in the file as one loose piece beside the group.
+ * Growing from a seed makes contiguity structural: a piece is only ever added
+ * because it touches one already placed, so every internal line really is shared
+ * and the sheet really does cut in one pass.
+ *
+ * At each step the frontier is searched for a piece of the orientation still
+ * wanted, falling back to any. That is what keeps the overshoot near zero when
+ * a colour wants unequal numbers of the two.
  */
 export function nestSheets(
   upNeeded: number,
   downNeeded: number,
-  options: Pick<InterlockOptions, "sheetWidthMm" | "sheetHeightMm">,
+  options: { sheetWidthMm: number; sheetHeightMm: number },
   scale: number,
 ): string[][] {
   const usableW = (options.sheetWidthMm - 2 * SHEET_MARGIN_MM) / scale;
@@ -316,34 +367,54 @@ export function nestSheets(
 
   const candidates = nestCandidates(usableW, usableH);
   if (candidates.length === 0) return [];
-  // The rectangle is `[0, usableW] × [0, usableH]` — the very region the
-  // `(Q, R)` range was derived from. Re-deriving it from the candidates instead
-  // takes the minimum over a *padded* range that deliberately overhangs the
-  // sheet, which shifts the window off the corner and admits a sliver.
-  const fits = (b: Box) =>
-    b.minX >= -1e-6 &&
-    b.maxX <= usableW + 1e-6 &&
-    b.minY >= -1e-6 &&
-    b.maxY <= usableH + 1e-6;
+  const order = new Map<string, number>();
+  candidates.forEach((c, i) => order.set(c.key, i));
 
   const sheets: string[][] = [];
   let up = upNeeded;
   let down = downNeeded;
   while (up > 0 || down > 0) {
-    // Every sheet restarts at the same corner, because every sheet is a fresh
-    // piece of card. Carrying a cursor across sheets instead put sheet two at
-    // wherever sheet one stopped — off the far side of its own sheet — and then
-    // ran out of candidates and silently under-cut the job.
+    // Every sheet restarts from the same seed, because every sheet is a fresh
+    // piece of card.
     const block: string[] = [];
+    const placed = new Set<string>();
+    const frontier = new Set<string>([candidates[0].key]);
     let placedUp = 0;
     let placedDown = 0;
-    for (const { key, box } of candidates) {
-      if (placedUp >= up && placedDown >= down) break;
-      if (!fits(box)) continue;
+
+    while (frontier.size > 0 && (placedUp < up || placedDown < down)) {
+      const wantUp = placedUp < up;
+      const wantDown = placedDown < down;
+      let pick: string | null = null;
+      let pickRank = Infinity;
+      let fallback: string | null = null;
+      let fallbackRank = Infinity;
+      for (const key of frontier) {
+        const rank = order.get(key) ?? Infinity;
+        const isUp = stringToTri(key).type === "up";
+        if ((isUp && wantUp) || (!isUp && wantDown)) {
+          if (rank < pickRank) {
+            pick = key;
+            pickRank = rank;
+          }
+        } else if (rank < fallbackRank) {
+          fallback = key;
+          fallbackRank = rank;
+        }
+      }
+      const key = pick ?? fallback;
+      if (!key) break;
+      frontier.delete(key);
+      placed.add(key);
       block.push(key);
       if (stringToTri(key).type === "up") placedUp++;
       else placedDown++;
+      for (const n of nestedNeighbors(stringToTri(key))) {
+        const nk = triToString(n);
+        if (!placed.has(nk) && order.has(nk)) frontier.add(nk);
+      }
     }
+
     if (block.length === 0) break; // nothing fits at all; give up rather than spin
     sheets.push(block);
     up -= placedUp;
@@ -432,40 +503,48 @@ export function cleanOutline(cellKeys: string[]): Pt[][] {
 }
 
 export interface InterlockMats {
-  /** Solid sheet the mosaic is laid onto — no window. */
-  backing: Pt[][];
-  /** Slots in it, one per exposed tab: two points, a straight cut. */
+  /** Outer rectangle, shared by both mats so they register when stacked. */
+  frame: Pt[];
+  /** Slots cut in the backing, one per exposed tab. Straight cuts, two points. */
   slots: [Pt, Pt][];
-  /** Frame whose window is the plain artwork silhouette. */
-  top: Pt[][];
+  /** The top mat's window: the artwork's plain silhouette. */
+  window: Pt[][];
 }
 
 /**
- * Builds the two mats.
+ * Builds the two mats. They share an outer rectangle and differ only in what is
+ * cut out of it.
  *
- * **The backing is solid and has no window.** Every tab except the ones on the
- * border is already hidden under a neighbouring piece, so there is no fringe for
- * a window to clear — the assembled mosaic's visible edge *is* the artwork's
- * plain silhouette. What the border tabs need is somewhere to go, and that is a
- * slot: one per exposed tab, along its root half-edge and standing a little
- * outboard of it, the same arrangement `cut-joints.ts` uses for a folded tab.
- * Cutting a window instead would remove exactly the paper the border pieces rest
- * on.
+ * **The backing is a plain rectangle with nothing in it but slots.** No window,
+ * and no silhouette either — the mosaic *rests* on the backing, so any shape cut
+ * out of it removes the very paper the pieces sit on. Every tab except the ones
+ * on the border is already buried under a neighbouring piece; what the border
+ * tabs need is somewhere to go, and that is a slot along the tab's root
+ * half-edge, standing a little outboard of it, the same arrangement
+ * `cut-joints.ts` uses for a folded tab.
  *
- * **The top mat is the cut export's mat**, unchanged: a frame at
- * `MAT_BORDER` whose window is the plain silhouette. It needs no inset, because
- * nothing pokes out past that silhouette once the slots have taken the border
- * tabs.
+ * **The top mat is the cut export's mat**, unchanged: the same rectangle with
+ * the plain silhouette as its window. It needs no inset, because nothing pokes
+ * out past that silhouette once the slots have taken the border tabs.
  */
 export async function buildMats(
   cellKeys: string[],
   clearance = 0,
 ): Promise<InterlockMats> {
   const clean = cleanOutline(cellKeys);
-  const backing =
+  const window =
     clearance > 0
       ? (await loadClipper()).offset(clean.map(toPoly), clearance).map(toLoop)
       : clean;
+
+  const box = bbox(window.flat());
+  const frame: Pt[] = [
+    { x: box.minX - MAT_BORDER, y: box.minY - MAT_BORDER },
+    { x: box.maxX + MAT_BORDER, y: box.minY - MAT_BORDER },
+    { x: box.maxX + MAT_BORDER, y: box.maxY + MAT_BORDER },
+    { x: box.minX - MAT_BORDER, y: box.maxY + MAT_BORDER },
+  ];
+
   const slots: [Pt, Pt][] = [];
   for (const tab of exposedTabs(cellKeys)) {
     const [a, b] = tab.root;
@@ -481,20 +560,7 @@ export async function buildMats(
       { x: b.x + dx * SLOT_END + ox, y: b.y + dy * SLOT_END + oy },
     ]);
   }
-  return { backing, slots, top: clean };
-}
-
-/** A mat: a rectangular border with the window knocked out of it. */
-function matLoops(window: Pt[][]): Pt[][] {
-  if (window.length === 0) return [];
-  const box = bbox(window.flat());
-  const border: Pt[] = [
-    { x: box.minX - MAT_BORDER, y: box.minY - MAT_BORDER },
-    { x: box.maxX + MAT_BORDER, y: box.minY - MAT_BORDER },
-    { x: box.maxX + MAT_BORDER, y: box.maxY + MAT_BORDER },
-    { x: box.minX - MAT_BORDER, y: box.maxY + MAT_BORDER },
-  ];
-  return [border, ...window];
+  return { frame, slots, window };
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +605,7 @@ export async function buildInterlockSVG(
   options: InterlockOptions,
   gridRotation = 0,
 ): Promise<string | null> {
-  const scale = scaleFor(plan.box, options.widthMm);
+  const scale = scaleFor(plan.cellBox, options.widthMm);
   if (!(scale > 0)) return null;
   const turn = (p: Pt): Pt => {
     const [x, y] = rotatePoint(p.x, p.y, gridRotation);
@@ -578,7 +644,7 @@ export async function buildInterlockSVG(
     if (options.backingMat) {
       tiles.push({
         label: "Backing mat",
-        fills: [{ loops: turnAll(mats.backing), hex: "#888888", evenOdd: true }],
+        fills: [{ loops: turnAll([mats.frame]), hex: "#888888" }],
         lines: mats.slots.map(([a, b]) => [turn(a), turn(b)]),
         registered: true,
       });
@@ -587,7 +653,11 @@ export async function buildInterlockSVG(
       tiles.push({
         label: "Top mat",
         fills: [
-          { loops: turnAll(matLoops(mats.top)), hex: "#888888", evenOdd: true },
+          {
+            loops: turnAll([mats.frame, ...mats.window]),
+            hex: "#888888",
+            evenOdd: true,
+          },
         ],
         registered: true,
       });
@@ -819,6 +889,12 @@ export interface InterlockMetrics {
   coreMm: number;
   /** Edge of a tab — the smallest feature the machine has to hold, mm. */
   tabMm: number;
+  /** Outer size of both mats, mm. */
+  matWidthMm: number;
+  matHeightMm: number;
+  /** Colour-sheet size actually used, mm. */
+  sheetWidthMm: number;
+  sheetHeightMm: number;
   sheetCount: number;
   /** Card used per cell of picture. The tabs are overlap, not tiling, so a
    *  piece costs 1.75 cells of material for one cell of artwork. */
@@ -829,10 +905,14 @@ export function interlockMetrics(
   plan: InterlockPlan,
   options: InterlockOptions,
 ): InterlockMetrics {
-  const scale = scaleFor(plan.box, options.widthMm);
+  const scale = scaleFor(plan.cellBox, options.widthMm);
   return {
     scale,
-    heightMm: (plan.box.maxY - plan.box.minY) * scale,
+    heightMm: (plan.cellBox.maxY - plan.cellBox.minY) * scale,
+    matWidthMm: plan.matWidthMm,
+    matHeightMm: plan.matHeightMm,
+    sheetWidthMm: plan.sheetWidthMm,
+    sheetHeightMm: plan.sheetHeightMm,
     coreMm: CORE_SIDE * scale,
     tabMm: FINE_SIDE * scale,
     sheetCount: plan.colours.reduce((n, c) => n + c.sheets.length, 0),

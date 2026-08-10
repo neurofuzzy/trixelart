@@ -304,6 +304,58 @@ export function pieceOutline(
   }));
 }
 
+let nestedSteps: Record<TriType, { dq: number; dr: number; type: TriType }[]> | null =
+  null;
+
+/**
+ * The three pieces a nested piece touches, as steps in `(q, r)`.
+ *
+ * **Not `triEdgeNeighbors`.** The tiling is isomorphic to a triangular lattice,
+ * but the down pieces are offset by `NESTED_DOWN_OFFSET` inside it, so the piece
+ * at `up(q, r)` sits against `down(q−1, r−1)`, `down(q−1, r)` and
+ * `down(q, r−1)` — never `down(q, r)`. Growing a nested block on the lattice's
+ * own neighbours instead scatters it into fragments that only look like a block.
+ *
+ * Derived from the outlines rather than written down, by finding which pieces
+ * share boundary segments, so it cannot drift from the templates.
+ */
+export function nestedNeighbors(tri: TriKey): TriKey[] {
+  if (!nestedSteps) {
+    const segsOf = (t: TriKey) => {
+      const loop = pieceOutline(t, "nested");
+      const out = new Set<string>();
+      for (let i = 0; i < loop.length; i++) {
+        const a = loop[i];
+        const b = loop[(i + 1) % loop.length];
+        const ka = `${Math.round(a.x * 1000)},${Math.round(a.y * 1000)}`;
+        const kb = `${Math.round(b.x * 1000)},${Math.round(b.y * 1000)}`;
+        out.add(ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`);
+      }
+      return out;
+    };
+    nestedSteps = { up: [], down: [] };
+    for (const type of ["up", "down"] as const) {
+      const own = segsOf({ q: 0, r: 0, type });
+      for (let dq = -2; dq <= 2; dq++) {
+        for (let dr = -2; dr <= 2; dr++) {
+          const other: TriType = type === "up" ? "down" : "up";
+          if (dq === 0 && dr === 0 && other === type) continue;
+          let shared = 0;
+          for (const s of segsOf({ q: dq, r: dr, type: other })) {
+            if (own.has(s)) shared++;
+          }
+          if (shared > 0) nestedSteps[type].push({ dq, dr, type: other });
+        }
+      }
+    }
+  }
+  return nestedSteps[tri.type].map((s) => ({
+    q: tri.q + s.dq,
+    r: tri.r + s.dr,
+    type: s.type,
+  }));
+}
+
 /** One placed tab: its root half-edge, its outward normal, and the cell it
  *  reaches under (which may not be painted — those are the exposed ones). */
 export interface PlacedTab {
