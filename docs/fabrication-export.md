@@ -231,9 +231,27 @@ a junction where the colour's own ring turned, so a corner just before such a
 junction may take a slightly larger radius than it does in the artwork. Both
 corners at the junction itself stay sharp either way.
 
-**Rounding runs after the necks are inserted**, and the run clamp is what makes
-that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
-those vertices to nearly nothing and the tiny-hexagon bridge keeps its shape.
+**Rounding runs before the necks, and the necks are spliced into the finished
+polyline.** The other order is the obvious one and it was wrong: a neck inserted
+first becomes two more ring vertices, and `roundPolygon` clamps every radius
+against the straight run it sits on, so the corners flanking a join rounded less
+than the same corner elsewhere on the same sheet — the join silently reshaping
+the curve beside it. Rounding the plain boundary gives one radius rule for the
+whole sheet and costs the necks nothing: they are measured off the lattice loop
+either way, so the tiny hexagon keeps exactly its designed shape. What makes the
+splice findable afterwards is holding pinch vertices **ineligible for rounding**
+— which is right on its own terms, a pinch being a junction like any other.
+
+A pinch is bridged **per visit, not per vertex**. A merged loop passes through a
+`><` join twice, once per notch, and the two passes turn through opposite empty
+sectors — so they are two different hexagon rings that merely share a
+coordinate. Splicing the necks after rounding means finding them by coordinate,
+and storing them in a map keyed by point kept only the last: one notch got the
+other's ring and doubled back over itself, the other got none. They are recorded
+and consumed in traversal order instead, which is well-defined because rounding
+never reorders ring points and never removes a pinch. `etc/pinrose-test` has six
+such joins on its top colour sheet, and they are the regression test: six proper
+self-crossings when this is wrong, none when it is right.
 
 **Meshes need triangles, so a rounded loop is triangulated** —
 `triangulateLoops` (`mesh-export.ts`, ear-clipping with holes via the earcut

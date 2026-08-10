@@ -196,40 +196,129 @@ function pinchRing(prev: Pt, cur: Pt, next: Pt, neck: number): Pt[] | null {
   return ring;
 }
 
+/** One pinch corner's neck: the ring to route through, and how far back along
+ *  the boundary it reaches. */
+interface Neck {
+  d: number;
+  ring: Pt[];
+}
+
 /**
- * Converts a raw loop to render points: drops collinear points, (when merging
- * with `neck > 0`) replaces each pinch corner with a tiny-hexagon neck — i.e.
- * the union boundary of a small regular hexagon at the touch vertex — and
- * splices in any tab this loop's edges carry.
+ * A raw loop → the plain boundary polyline, plus the necks its pinches want.
  *
- * The tab splice has to happen **here**, not as a later pass over the points:
- * a tab's root points lie on the original edge line, so the collinear filter
- * above would drop them. Emitting them explicitly, after the vertex they follow,
- * bypasses that test — and keeps the tab addressed by the edge it belongs to
- * rather than by a geometric search over an already-flattened polyline.
+ * Collinear points are dropped, tabs are spliced, and **the necks are only
+ * measured, not applied** — they are computed here, off the lattice loop, so
+ * they keep the tiny-hexagon shape they were designed to have (radius `neck` on
+ * the grid's own 60° rays), and are handed to `applyNecks` to splice in after
+ * the curves are finished. See `traceUnionLoops` for why that order matters.
+ *
+ * The tab splice does have to happen here, before rounding, and for two
+ * reasons. A tab's root points lie on the original edge line, so the collinear
+ * filter above would drop them if they were merely appended. And they *should*
+ * shorten the run: without the tab in the ring, `roundPolygon`'s clamp does not
+ * know it is there and an arc at a high radius will swallow the tab root whole.
  */
-function hexNeck(
+function plainRing(
   loop: { p: Pt; vk: string }[],
   deg: Map<string, number>,
   neck: number,
   tabs: Map<string, Pt[]> | null,
-): Pt[] {
+): { pts: Pt[]; necks: Map<string, Neck[]>; pinches: Set<string> } {
   const n = loop.length;
   const out: Pt[] = [];
+  const necks = new Map<string, Neck[]>();
+  const pinches = new Set<string>();
   for (let i = 0; i < n; i++) {
     const prev = loop[(i - 1 + n) % n].p;
     const cur = loop[i];
     const nextNode = loop[(i + 1) % n];
     const next = nextNode.p;
     const col = collinear(prev, cur.p, next);
-    const pinch = (deg.get(cur.vk) ?? 0) > 1;
-    const ring = pinch && !col ? pinchRing(prev, cur.p, next, neck) : null;
-    if (ring) for (const p of ring) out.push(p);
-    else if (!col) out.push(cur.p);
+    if (!col) {
+      out.push(cur.p);
+      if ((deg.get(cur.vk) ?? 0) > 1) {
+        const k = worldKey(cur.p);
+        pinches.add(k);
+        const ring = pinchRing(prev, cur.p, next, neck);
+        if (ring) {
+          const d = Math.hypot(ring[0].x - cur.p.x, ring[0].y - cur.p.y);
+          // **Per visit, not per vertex.** A merged loop passes through a `><`
+          // pinch twice, once per notch, and the two passes turn through
+          // opposite sectors — so they are two different hexagon rings that
+          // happen to share a coordinate. Keying them by point kept only the
+          // last: one notch got a ring belonging to the other (doubled back on
+          // itself) and the other got none. They are stored, and consumed, in
+          // traversal order.
+          const list = necks.get(k);
+          if (list) list.push({ d, ring });
+          else necks.set(k, [{ d, ring }]);
+        }
+      }
+    }
     const tab = tabs?.get(`${cur.vk}->${nextNode.vk}`);
     if (tab) for (const p of tab) out.push(p);
   }
-  return out.length >= 3 ? out : loop.map((nd) => nd.p);
+  return {
+    pts: out.length >= 3 ? out : loop.map((nd) => nd.p),
+    necks,
+    pinches,
+  };
+}
+
+/**
+ * Splices each neck into a finished boundary polyline, replacing the pinch
+ * vertex and everything within that neck's own radius of it.
+ *
+ * Applied last, on the flattened ring, so the necks cannot influence the
+ * curves. The pinch vertex is guaranteed to still be there to find: it is held
+ * ineligible for rounding precisely so this pass can locate it by coordinate.
+ * The cut is walked outward by index rather than tested radially, so a distant
+ * part of the boundary that happens to pass near the pinch is never eaten; a
+ * neighbouring pinch is never eaten either.
+ *
+ * A pinch coordinate can appear **more than once** in the ring — that is what a
+ * `><` join is — so the necks recorded for it are consumed in the same order
+ * the ring visits them. Rounding never reorders points and never removes a
+ * pinch, so the n-th visit here is the n-th visit on the plain loop.
+ */
+function applyNecks(ring: Pt[], necks: Map<string, Neck[]>): Pt[] {
+  if (necks.size === 0) return ring;
+  const n = ring.length;
+  const keys = ring.map(worldKey);
+  const drop = new Array<boolean>(n).fill(false);
+  const insert = new Map<number, Pt[]>();
+  const visits = new Map<string, number>();
+
+  for (let i = 0; i < n; i++) {
+    const list = necks.get(keys[i]);
+    if (!list) continue;
+    const visit = visits.get(keys[i]) ?? 0;
+    visits.set(keys[i], visit + 1);
+    const neck = list[Math.min(visit, list.length - 1)];
+    insert.set(i, neck.ring);
+    const reach = (step: -1 | 1) => {
+      for (let s = 1; s < n; s++) {
+        const j = (i + step * s + n) % n;
+        if (necks.has(keys[j])) break; // never consume another join
+        const far = Math.hypot(ring[j].x - ring[i].x, ring[j].y - ring[i].y);
+        if (far >= neck.d) break;
+        drop[j] = true;
+      }
+    };
+    reach(-1);
+    reach(1);
+  }
+
+  const out: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const pts = insert.get(i);
+    if (pts) {
+      for (const p of pts) out.push(p);
+      continue;
+    }
+    if (!drop[i]) out.push(ring[i]);
+  }
+  return out.length >= 3 ? out : ring;
 }
 
 export interface UnionLoopOptions {
@@ -292,10 +381,16 @@ export interface UnionLoopOptions {
  * extrusion) keeps working on plain points. A cutter follows a dense polyline
  * as happily as an arc.
  *
- * Rounding runs *after* the necks are inserted, and the run clamp is what makes
- * that safe: a neck's edges are `neck`-sized, so the clamp drives the radius at
- * those vertices to nearly nothing on its own and the tiny-hexagon bridge keeps
- * the shape it was designed to have.
+ * **Rounding runs before the necks**, which are spliced into the finished
+ * polyline afterwards. Inserting them first put two more vertices on the ring,
+ * and `roundPolygon` clamps every radius against the straight run it sits on —
+ * so the corners flanking a join rounded less than the same corner elsewhere on
+ * the sheet, the join reshaping the curve beside it. Pinch vertices are held
+ * ineligible for rounding, which keeps them findable by coordinate afterwards.
+ *
+ * Tabs are the exception and stay spliced *before* rounding, deliberately: the
+ * clamp they cause is load-bearing. Without the tab in the ring, an arc at a
+ * high radius simply swallows the tab root.
  */
 export function traceUnionLoops(
   keys: string[],
@@ -313,20 +408,35 @@ export function traceUnionLoops(
   const edges = boundaryEdges(keys);
   const deg = outDegree(edges);
   const raw = walkLoops(edges, merge);
-  const loops = raw.map((loop) =>
-    hexNeck(loop, deg, merge ? neck : 0, tabs ?? null),
+  const rings = raw.map((loop) =>
+    plainRing(loop, deg, merge ? neck : 0, tabs ?? null),
   );
-  const extra = holes ?? [];
-  if (round <= 0 || !degrees) return extra.length ? loops.concat(extra) : loops;
-  const rounded = loops.map((loop) => {
+
+  // Curves first, joins after. A neck used to be spliced in before rounding, so
+  // it became two more vertices on the ring — and `roundPolygon` clamps every
+  // radius against the straight run it sits on, so the corners flanking a join
+  // rounded *less* than the same corner elsewhere on the same sheet. The join
+  // was silently reshaping the curve it sat next to. Rounding the plain boundary
+  // and splicing the necks into the finished polyline gives one radius rule for
+  // the whole sheet, and costs the necks nothing: they are measured off the
+  // lattice loop either way, so they keep the tiny-hexagon shape exactly.
+  const flat = rings.map(({ pts, pinches }) => {
+    if (round <= 0 || !degrees) return pts;
     const eligible = (i: number) => {
-      const v = latticeVertexIdAt(loop[i].x, loop[i].y);
+      // A pinch is a junction and stays sharp, as junctions do everywhere else
+      // here — and that is also what guarantees `applyNecks` can still find it
+      // by coordinate once the arcs have been flattened away.
+      if (pinches.has(worldKey(pts[i]))) return false;
+      const v = latticeVertexIdAt(pts[i].x, pts[i].y);
       return v !== null && degrees.get(v) === 2;
     };
-    const corners = roundPolygon(loop, round, eligible);
+    const corners = roundPolygon(pts, round, eligible);
     return flattenRoundedRing(corners, sagitta).map(([x, y]) => ({ x, y }));
   });
-  return extra.length ? rounded.concat(extra) : rounded;
+
+  const loops = flat.map((ring, i) => applyNecks(ring, rings[i].necks));
+  const extra = holes ?? [];
+  return extra.length ? loops.concat(extra) : loops;
 }
 
 /**

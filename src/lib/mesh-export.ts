@@ -270,15 +270,28 @@ function properCross(
 }
 
 /**
- * A self-overlapping loop → the simple loops that make up the region it winds
- * around, folded-back lobes dropped.
+ * A self-overlapping loop → the simple loops that make up it.
  *
  * The loop is cut at every proper self-crossing and walked with a stack: each
  * time the walk revisits a vertex it has on the stack, everything since that
- * visit is a closed sub-loop and comes off. The sub-loops that wind *against*
- * the parent are exactly the folds — the material the boundary crossed back
- * over — so keeping only the ones with the parent's orientation leaves the
- * nonzero-filled region, which is what canvas and SVG already show.
+ * visit is a closed sub-loop and comes off.
+ *
+ * **Every sub-loop is kept, whichever way it winds.** The split preserves the
+ * winding field exactly — the sub-loops' winding numbers sum to the original's
+ * at every point — so handing them all back and letting `earcutLoops` sort them
+ * by sign reproduces the filled region on its own: a lobe that winds against its
+ * parent becomes a hole of it and cancels to winding 0, and one that lies
+ * outside every outer loop is contained by nothing and dropped. That is the same
+ * answer the old rule gave for the case it was written for, an outer boundary
+ * folding back over itself.
+ *
+ * Filtering to the parent's orientation instead was wrong for the mirror case,
+ * and silently: a **hole** that self-crosses throws off lobes that wind
+ * *positive*, and those are islands of solid material sitting inside the hole,
+ * not folds. Canvas and SVG both fill them — winding +1, parity odd — so only
+ * the mesh lost them, which is exactly how it presented: pieces missing from the
+ * 3D preview while the SVG was right. Measured on `etc/pinrose-test`, four
+ * two-cell islands, 3.9% of that sheet.
  *
  * Quadratic in the loop's length, and deliberately only reached for a loop that
  * has been *shown* to need it.
@@ -287,7 +300,6 @@ function splitSimpleLoops(loop: Pt[]): Pt[][] {
   const n = loop.length;
   const cuts: { t: number; p: Pt }[][] = Array.from({ length: n }, () => []);
   const at = (i: number) => loop[i % n];
-  let found = false;
 
   for (let i = 0; i < n; i++) {
     const a = at(i),
@@ -306,10 +318,15 @@ function splitSimpleLoops(loop: Pt[]): Pt[][] {
       if (!hit) continue;
       cuts[i].push({ t: hit.t1, p: hit.p });
       cuts[j].push({ t: hit.t2, p: hit.p });
-      found = true;
     }
   }
-  if (!found) return [loop];
+  // Deliberately no early exit when nothing crossed. A boundary can also
+  // *touch* itself at a vertex without crossing — which is what a cut sheet
+  // does at every corner-touching pinch when island merging is off — and
+  // `properCross` ignores those on purpose. The stack walk below splits on a
+  // revisited vertex, so it decomposes a pinch as readily as a crossing;
+  // returning early left earcut to fill straight across the notch. The walk is
+  // linear, against the quadratic scan already done.
 
   const pts: Pt[] = [];
   for (let i = 0; i < n; i++) {
@@ -336,10 +353,7 @@ function splitSimpleLoops(loop: Pt[]): Pt[][] {
   }
   if (stack.length >= 3) parts.push(stack);
 
-  const want = Math.sign(signedArea(loop));
-  const kept = parts.filter(
-    (part) => part.length >= 3 && Math.sign(signedArea(part)) === want,
-  );
+  const kept = parts.filter((part) => part.length >= 3);
   return kept.length ? kept : [loop];
 }
 
@@ -416,8 +430,18 @@ function earcutLoops(loops: Pt[][]): Pt[][] {
   const outerArea = outers.map((o) => Math.abs(signedArea(o)));
   const holesOf: Pt[][][] = outers.map(() => []);
   for (const hole of holes) {
+    const holeArea = Math.abs(signedArea(hole));
     let best = -1;
     for (let i = 0; i < outers.length; i++) {
+      // A container is bigger than what it contains. Without this, the ray cast
+      // below decides nesting on its own — and `hole[0]` is a *vertex*, which
+      // loops readily share: a cut sheet with island merging off touches at
+      // lattice points, and a self-crossing loop hands its sub-loops the very
+      // crossing points they were split at. Point-in-polygon is undefined on a
+      // boundary, so one arbitrary answer was enough to file a whole sheet's
+      // hole inside a two-cell island, and the hole then never subtracted from
+      // the sheet at all.
+      if (outerArea[i] <= holeArea) continue;
       if (best >= 0 && outerArea[i] >= outerArea[best]) continue;
       if (pointInLoop(hole[0], outers[i])) best = i;
     }
