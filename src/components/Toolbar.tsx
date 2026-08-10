@@ -121,6 +121,7 @@ export function Toolbar({
   onExportSVG,
   onExport3D,
   onExportCut,
+  onExportInterlock,
   onExportPlotter,
   onExportApparel,
   onImportClick,
@@ -154,6 +155,7 @@ export function Toolbar({
   onExportSVG: () => void;
   onExport3D: () => void;
   onExportCut: () => void;
+  onExportInterlock: () => void;
   onExportPlotter: () => void;
   onExportApparel: () => void;
   onImportClick: () => void;
@@ -332,6 +334,18 @@ export function Toolbar({
             >
               <Scissors className="w-4 h-4" />
               <span>Cutting...</span>
+            </DropdownMenuItem>
+            {/* Beside Cutting rather than inside it: same machine, but it
+                stacks nothing and joins nothing — every cell is one flat
+                interlocking piece. See docs/interlock-export.md. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setExportOpen(false);
+                onExportInterlock();
+              }}
+            >
+              <Puzzle className="w-4 h-4" />
+              <span>Interlocking...</span>
             </DropdownMenuItem>
             {/* A dialog, not a canvas mode: a plot takes the whole artwork, so
                 unlike fabric there is no region to drag out on the canvas. */}

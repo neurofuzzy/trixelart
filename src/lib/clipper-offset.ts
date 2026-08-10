@@ -53,6 +53,14 @@ export interface ClipperApi {
   offset(rings: PlotPoly[], delta: number): PlotPoly[];
   /** The parts of each segment that fall inside the region the rings bound. */
   clipLines(segs: Seg[], rings: PlotPoly[]): Seg[];
+  /**
+   * Merges overlapping ring sets into one, outer loops and holes together.
+   *
+   * Non-zero fill, so the winding `traceUnionLoops` already produces — outer
+   * loops one way, holes the other — is what tells a hole from a solid. Rings
+   * that arrive wound inconsistently will union as solids.
+   */
+  union(rings: PlotPoly[]): PlotPoly[];
 }
 
 let pending: Promise<ClipperApi> | null = null;
@@ -114,6 +122,39 @@ function makeApi(C: typeof ClipperNS): ClipperApi {
 
       const out: PlotPoly[] = [];
       for (const path of cleaned) {
+        if (path.length < 3) continue;
+        out.push(
+          path.map(
+            (p) =>
+              [p.X / CLIPPER_SCALE, p.Y / CLIPPER_SCALE] as [number, number],
+          ),
+        );
+      }
+      return out;
+    },
+
+    union(rings) {
+      if (rings.length === 0) return [];
+
+      const clipper = new C.Clipper();
+      let added = false;
+      for (const ring of rings) {
+        if (ring.length < 3) continue;
+        clipper.AddPath(toPath(ring), C.PolyType.ptSubject, true);
+        added = true;
+      }
+      if (!added) return [];
+
+      const solution: ClipperNS.Paths = [];
+      clipper.Execute(
+        C.ClipType.ctUnion,
+        solution,
+        C.PolyFillType.pftNonZero,
+        C.PolyFillType.pftNonZero,
+      );
+
+      const out: PlotPoly[] = [];
+      for (const path of C.Clipper.CleanPolygons(solution)) {
         if (path.length < 3) continue;
         out.push(
           path.map(

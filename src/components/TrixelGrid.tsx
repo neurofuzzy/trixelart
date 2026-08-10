@@ -91,6 +91,7 @@ import { isToolAllowed, type Tool } from "@/lib/tools";
 import { ExportDialog } from "@/components/ExportDialog";
 import { Export3DDialog } from "@/components/Export3DDialog";
 import { CutExportDialog } from "@/components/CutExportDialog";
+import { InterlockDialog } from "@/components/InterlockDialog";
 import type { SVGExportOptions } from "@/lib/svg-export";
 import { LayerPanel } from "@/components/LayerPanel";
 import {
@@ -192,6 +193,7 @@ export default function TrixelGrid() {
   const [nameSplitLayerOpen, setNameSplitLayerOpen] = useState(false);
   const [export3DOpen, setExport3DOpen] = useState(false);
   const [exportCutOpen, setExportCutOpen] = useState(false);
+  const [exportInterlockOpen, setExportInterlockOpen] = useState(false);
   const [svgExport, setSvgExport] =
     useState<SVGExportOptions>(DEFAULT_SVG_EXPORT);
   const updateSvgExport = useCallback(
@@ -1159,6 +1161,10 @@ export default function TrixelGrid() {
     setExportCutOpen(true);
   }, []);
 
+  const handleExportInterlock = useCallback(() => {
+    setExportInterlockOpen(true);
+  }, []);
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -1783,6 +1789,7 @@ export default function TrixelGrid() {
         onExportSVG={handleExportSVG}
         onExport3D={handleExport3D}
         onExportCut={handleExportCut}
+        onExportInterlock={handleExportInterlock}
         onExportPlotter={() => setPlotterOpen(true)}
         onExportApparel={() => setApparelOpen(true)}
         onImportClick={handleImportClick}
@@ -2090,6 +2097,17 @@ export default function TrixelGrid() {
         onOpenChange={setExportCutOpen}
         painted={mergedFillPainted}
         roundFraction={mergedFillRoundFraction}
+        projectName={projectName}
+        gridRotation={gridRotation}
+      />
+
+      {/* No `roundFraction`: an interlocking cut deliberately does not honour
+          corner rounding — every segment is a cut line shared between two
+          pieces, convex to one and concave to the other. */}
+      <InterlockDialog
+        open={exportInterlockOpen}
+        onOpenChange={setExportInterlockOpen}
+        painted={mergedFillPainted}
         projectName={projectName}
         gridRotation={gridRotation}
       />

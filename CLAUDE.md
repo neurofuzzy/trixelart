@@ -22,6 +22,7 @@ and the per-module/per-symbol map is generated — do not restate either here.
 | [docs/exports.md](docs/exports.md) | Crop & export (PNG/SVG), plotter export, apparel export |
 | [docs/persistence.md](docs/persistence.md) | localStorage keys, `ProjectSnapshot`, the `.trixel.svg` project file, examples |
 | [docs/fabrication-export.md](docs/fabrication-export.md) | Design spec for the cutting-machine export (not implemented) |
+| [docs/interlock-export.md](docs/interlock-export.md) | The interlocking ("weave") cut — one piece per cell, tabs hidden under its neighbours |
 
 ## Quick start
 
@@ -135,3 +136,16 @@ paths then go through `triangulateLoops`
 (`mesh-export.ts`) — a rounded outline is not a lattice cell, and the extruders
 take triangles. Reaching for `buildRenderPlan` in a fabrication path is still the
 wrong move; reaching for `stepRegionGeometry` is not.
+
+**The interlocking cut honours nothing** — not the plan, and not round corners
+either, which makes it the one exception to the rule above. Each cell becomes one
+piece: the cell's own triangle plus three half-size tabs that slide *under* the
+neighbouring pieces, so the built mosaic is the artwork and the tabs are never
+seen. Rounding is undefined here because on a cut sheet every segment is a line
+*shared* between two pieces, convex to one and concave to the other. The tile is
+laid two ways and they must not be confused: **assembled**, cores on their cells
+and pieces overlapping, and **nested**, the `√7`-scaled 19.1°-rotated tiling used
+to pack a sheet with shared cut lines. It builds on the ordinary lattice
+machinery via a half-scale fine lattice, feeding ordinary `TriKey`s to the
+ordinary `traceUnionLoops`. See
+[docs/interlock-export.md](docs/interlock-export.md).
