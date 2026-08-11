@@ -565,12 +565,14 @@ export function PlotterDialog({
                     </span>
                   </label>
 
-                  {/* Kept because it is a state nothing else reveals: with no
-                      gap the line ends sit on the boundary, the connectors have
-                      nowhere to go, and most links are silently refused. */}
+                  {/* Linking erodes nothing, so with no gap the turns land on
+                      the boundary — on top of the outline the Outlines layer
+                      draws there, which the preview cannot show at this size.
+                      The picture is unchanged; the pen goes over it twice. */}
                   {settings.linkHatchEnds && settings.hatchInsetMm <= 0 && (
                     <p className="text-[11px] leading-snug text-amber-200/70">
-                      Needs an edge gap — connectors have no room otherwise.
+                      With no edge gap the turns land on the outlines and go
+                      over them a second time.
                     </p>
                   )}
                 </>

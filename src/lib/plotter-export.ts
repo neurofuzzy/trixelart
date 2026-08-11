@@ -21,7 +21,13 @@ import {
 } from "@/lib/hatch";
 import { WEDGE_DIR } from "@/lib/hatchify";
 import { fmt } from "@/lib/svg-export";
-import { H, triEdgeNeighbors, triToString, type TriKey } from "@/lib/grid-math";
+import {
+  H,
+  triEdgeNeighbors,
+  triToString,
+  worldToTri,
+  type TriKey,
+} from "@/lib/grid-math";
 import { ROUND_RADIUS_AT_FULL } from "@/lib/round-corners";
 import { layersRoundFraction } from "@/lib/hatch-render";
 import { loadClipper, type ClipperApi, type PlotPoly } from "@/lib/clipper-offset";
@@ -814,6 +820,27 @@ interface HatchBucket {
   segs: RawSeg[];
 }
 
+/**
+ * Every `(trixel, density)` pair the plot lays hatch on.
+ *
+ * The lattice's own account of the tone map, and the only thing the linker needs
+ * to decide whether a connector is ink its tone already owns — see
+ * `connectorInTone`. Painted cells and the rounding fringe are both in it,
+ * because both hatch; a trixel in neither draws nothing.
+ *
+ * **A pair, not a lookup from trixel to density**, because one trixel can carry
+ * two. Where a region's rounded ring bulges past the lattice at a reflex corner
+ * the fringe hatches the crescent it left behind — inside a cell that is painted
+ * some other colour, at *the region's* density rather than that cell's. Keyed by
+ * the trixel alone, one of the two silently wins, and under rounding that
+ * refused every connector the fringe had a hand in: measured on basketweave at
+ * radius 0.6, **all** 2280 of them.
+ */
+type ToneMap = Set<string>;
+
+const toneKey = (tri: TriKey, density: number) =>
+  `${triToString(tri)}|${density}`;
+
 function hatchBuckets(
   marks: Record<string, string>,
   fills: Record<string, string>,
@@ -822,7 +849,7 @@ function hatchBuckets(
   radius: number,
   gridDivisions: number,
   api: ClipperApi,
-): HatchBucket[] {
+): { buckets: HatchBucket[]; toneOf: ToneMap } {
   const regionOf = new Map<string, number>();
   regions.forEach((r, i) => regionOf.set(r.fill, i));
   const resolved = new Map<string, number | undefined>();
@@ -849,6 +876,9 @@ function hatchBuckets(
   cells.push(
     ...fringeCells(fills, indexFor, densities, radius, gridDivisions),
   );
+
+  const toneOf: ToneMap = new Set();
+  for (const cell of cells) toneOf.add(toneKey(cell.tri, cell.density));
 
   /** Emitting cells bucketed by the line geometry they share. */
   const families = new Map<
@@ -922,7 +952,7 @@ function hatchBuckets(
     }
     if (clipped.length > 0) out.push({ dir, density, region, segs: clipped });
   }
-  return out;
+  return { buckets: out, toneOf };
 }
 
 /** A joined run as a two-point polyline, so both geometry paths hand the
@@ -938,34 +968,17 @@ const segPoly = (seg: RawSeg): PlotPoly => {
  *
  * Adjacent lines are one spacing apart by construction, so a connector across a
  * boundary running square to the hatch is one spacing long and a shallow one is
- * longer. Two spacings admits every ordinary end-to-end hop and refuses the one
- * that matters: a leap across a notch or a hole, which is inside the region and
- * would pass the containment test but reads as a drawn line rather than a join.
+ * longer. On the lattice a turn is `1/sin 60°` = 1.155 spacings, because a
+ * boundary is a lattice direction and the hatch runs along another; two admits
+ * that with room to spare and still refuses a turn along a boundary shallow
+ * enough that the connector would read as a drawn line rather than a join. The
+ * leap across a notch — the other thing a cap catches — is now refused before
+ * this, by the walk: runs that do not overlap in `t` are not stacked, so they
+ * are never each other's continuation.
  */
 const LINK_MAX_SPACINGS = 2;
 
-/**
- * How far inside its region a connector must sit, as a fraction of the line
- * spacing.
- *
- * "Inside the region" is not a strict enough test on its own. Clipper drops a
- * connector lying *exactly* on the boundary, but two regions sharing an edge
- * both link along it from their own side, and with no edge gap their line ends
- * sit **on** that edge — so the two sets of connectors crowd the same stretch
- * and retrace each other and the hatch around them. Measured on mandala at gap
- * 0, with only the on-the-boundary case rejected: 54k world units of doubled
- * ink, near a tenth of the drawing.
- *
- * This is why **linking wants an edge gap**: a gap puts every line end `inset`
- * inside the outline, clearing this by a wide margin, while at gap 0 the ends
- * are on the boundary and far less can link. A hundredth of a cell stride is
- * far below any gap worth setting, so it never interferes with a deliberate
- * one — measured, it costs nothing at a 0.2 mm gap and removes 15k world units
- * of doubled ink at no gap. Tying it to the line spacing instead was tried and
- * is worse: it refuses legitimate links in coarse tones (basketweave 458 →
- * 1402 strokes) without removing any more overdraw.
- */
-const LINK_CLEARANCE = H / 100;
+
 
 /**
  * How close two hatch line ends must be to count as already joined, world
@@ -979,6 +992,89 @@ const LINK_CLEARANCE = H / 100;
 const WELD_TOL = 0.05;
 
 /**
+ * How finely `connectorInTone` walks a connector, world units.
+ *
+ * A sixteenth of a cell stride. The thing being looked for is a trixel of the
+ * wrong tone under the connector, and a trixel is `H` tall — so the only way to
+ * cross one between two samples is to clip a corner, and a corner narrower than
+ * this carries no ink worth the pen lifting for. A connector is at most
+ * `LINK_MAX_SPACINGS` spacings long, so this is a handful of lattice lookups
+ * against the Clipper call it replaced.
+ */
+const TONE_SAMPLE = H / 16;
+
+/**
+ * How far to either side of a sample `connectorInTone` looks, world units.
+ *
+ * **A connector's whole length usually lies exactly on a lattice edge**, since
+ * that is where the hatch lines it joins stopped, so the sample points sit on
+ * the one locus where "which trixel is this" has no answer — `worldToTri` hands
+ * back whichever side the arithmetic rounds into, which is the wrong one half
+ * the time. Asking both sides is the honest question anyway: an edge is shared,
+ * and ink laid along it belongs to a tone if *either* neighbour hatches at it.
+ *
+ * A thousandth of a cell stride. Seven orders above the noise in a coordinate
+ * that has been through Clipper, and far below anything the lattice can
+ * distinguish, so the only points where the two probes disagree are the ones
+ * genuinely on an edge.
+ */
+const EDGE_PROBE = H / 1000;
+
+/**
+ * Is the connector `p → q` ink this tone already owns?
+ *
+ * **The lattice answers this, not a polygon.** Every point of a connector falls
+ * in exactly one trixel, `worldToTri` says which, and `ToneMap` says what that
+ * trixel hatches at — so the question "may the pen draw here" reduces to "does
+ * the artwork hatch here, at this density", which is the same question the tone
+ * ladder already answered for every cell. No offset, no containment, no
+ * tolerance on a boundary, and nothing that depends on how Clipper rounded a
+ * ring.
+ *
+ * That is a different question from the polygon containment this replaced, and
+ * a better one in both directions. It **refuses** the connector that leaps a
+ * notch of another colour even when the two ends are close and the leap is
+ * inside the colour's own bounding ring, because the notch's trixels answer
+ * with a different density. And it **admits** the connector that runs from one
+ * colour into its neighbour where both landed on the same rung of the ladder —
+ * one field of tone that happens to be painted in two colours, which a
+ * per-region ring cannot see is one field.
+ *
+ * Only interior samples are taken. The ends sit on the tone's boundary by
+ * construction (that is where a hatch line stops), so asking which trixel owns
+ * them is asking which side of an edge a point exactly on it falls, and the
+ * answer is arbitrary.
+ */
+function connectorInTone(
+  p: [number, number],
+  q: [number, number],
+  density: number,
+  toneOf: ToneMap,
+): boolean {
+  const dx = q[0] - p[0];
+  const dy = q[1] - p[1];
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return false;
+
+  // The normal, so the two probes straddle the edge a connector running along
+  // one lies on. Along the connector they would both fall on the same side.
+  const nx = (-dy / len) * EDGE_PROBE;
+  const ny = (dx / len) * EDGE_PROBE;
+
+  const hatches = (x: number, y: number) =>
+    toneOf.has(toneKey(worldToTri(x, y), density));
+
+  const n = Math.max(3, Math.ceil(len / TONE_SAMPLE));
+  for (let k = 1; k < n; k++) {
+    const t = k / n;
+    const x = p[0] + dx * t;
+    const y = p[1] + dy * t;
+    if (!hatches(x + nx, y + ny) && !hatches(x - nx, y - ny)) return false;
+  }
+  return true;
+}
+
+/**
  * Adjacent hatch lines chained into one pen-down, joined at alternating ends.
  *
  * The saving is in pen-up travel, and it is large: a hatch band of *n* lines is
@@ -990,60 +1086,71 @@ const WELD_TOL = 0.05;
  * changes the picture rather than just the route — `orderForTravel` cannot, and
  * says so. Two rules keep that honest:
  *
- * - **The connector must lie inside the region**, tested against the region's
- *   *own* rings with `api.clipLines`, batched per bucket. Clipper hands a
- *   segment back unchanged when it is wholly inside and drops one lying exactly
- *   **on** the boundary, so the test also rejects — for free — the case that
- *   would otherwise retrace an outline: along a straight edge the connector
- *   between two line ends is collinear with the edge itself. That is why the
- *   rings passed here are the **un-eroded** ones even when the hatch was
- *   clipped to an inset copy: measured against the eroded ring a connector
- *   sitting on it would be dropped too, and the whole point of an edge gap is
- *   that it gives the connector room to sit inside the outline.
+ * - **The connector must be ink its tone already owns**, which `connectorInTone`
+ *   asks of the lattice rather than of a polygon.
  * - **The hop is capped** at `LINK_MAX_SPACINGS`, so a link is always a short
  *   step to the neighbouring line and never a traverse of the region.
  *
- * Links are taken shortest-first and each line end hosts at most one, so a run
- * has degree ≤ 2 and the accepted set is a union of simple paths. A union-find
- * refuses the closing link of a cycle, which would otherwise strand a ring of
- * runs with no end to start the pen at.
+ * Each line end hosts at most one link, so a run has degree ≤ 2 and the accepted
+ * set is a union of simple paths. A union-find refuses the closing link of a
+ * cycle, which would otherwise strand a ring of runs with no end to start the
+ * pen at — belt and braces next to the walk, which cannot propose one.
+ *
+ * **A tone at a time, not a colour at a time.** What fixes the line spacing —
+ * and so what makes two runs neighbours at all — is the density, and a density
+ * is a rung of the ladder that any number of colours can land on. Grouping by
+ * colour split a run in half at a boundary where the tone did not change,
+ * turned the pen round on both sides of it, and drew two connectors along an
+ * edge that reads as the middle of a flat field. Grouping by tone means the
+ * lattice's own answer — *does the trixel across this edge hatch at the same
+ * density?* — decides it, and where the answer is yes there is no join to make:
+ * `joinRuns` has already merged the two into one run, because the hatch was
+ * clipped to the tone's outline rather than to each colour's.
  */
 function linkHatchRuns(
   buckets: HatchBucket[],
-  regions: PlotRegion[],
-  api: ClipperApi,
+  toneOf: ToneMap,
 ): PlotPoly[] {
   const out: PlotPoly[] = [];
 
-  // A region at a time, across **all** its line families: a natural junction is
+  // A tone at a time, across **all** its line families: a natural junction is
   // where two families meet, so it is invisible from inside one of them.
-  const byRegion = new Map<number, HatchBucket[]>();
+  const byTone = new Map<number, Map<HatchDir, RawSeg[]>>();
   for (const b of buckets) {
-    const list = byRegion.get(b.region);
-    if (list) list.push(b);
-    else byRegion.set(b.region, [b]);
+    let fams = byTone.get(b.density);
+    if (!fams) byTone.set(b.density, (fams = new Map()));
+    const segs = fams.get(b.dir);
+    if (segs) segs.push(...b.segs);
+    else fams.set(b.dir, [...b.segs]);
   }
 
-  for (const [region, rbs] of byRegion) {
+  for (const [density, fams] of byTone) {
     /** A joined run, tagged with the family and the line of it that it sits on
      *  — only runs on neighbouring lines of one family can be connected. */
     interface Run {
+      /** `[0]` is the low-`t` end, `[1]` the high-`t` one — the order
+       *  `segToPoints` produces, which is what makes "the same end" mean the
+       *  same side of the band for every run of a family. */
       ends: [[number, number], [number, number]];
       fam: number;
       line: number;
+      t0: number;
+      t1: number;
     }
     const runs: Run[] = [];
-    rbs.forEach((b, fam) => {
-      const step = hatchStep(b.dir, b.density);
-      // Joined **within the bucket**, not across the whole plot as the unlinked
-      // path does: a link only means anything between runs of one region at one
-      // density, since that is what fixes the line spacing.
-      for (const seg of joinRuns(b.segs)) {
+    const dirs = [...fams.keys()];
+    dirs.forEach((dir, fam) => {
+      const step = hatchStep(dir, density);
+      // Joined across every region on this rung of the ladder, which is what
+      // carries a run through a colour boundary the tone does not change at.
+      for (const seg of joinRuns(fams.get(dir) as RawSeg[])) {
         const [a, c] = segToPoints(seg);
         runs.push({
           ends: [a, c],
           fam,
           line: step > 0 ? Math.round(seg.u / step) : 0,
+          t0: seg.t0,
+          t1: seg.t1,
         });
       }
     });
@@ -1127,62 +1234,86 @@ function linkHatchRuns(
     // Connectors, only between ends that are genuinely free — an end welded to
     // anything else is spoken for, whether or not the join above took it.
     const isFree = (id: number) => (welded.get(findE(id)) ?? []).length === 1;
+
+    // ---- The serpentine ---------------------------------------------------
+    //
+    // **A boustrophedon is walked, not matched.** The pen enters a run at one
+    // end, leaves by the other, and turns into its neighbour on the line above:
+    // so the end a run links *up* on is simply the end it has left, which is
+    // whichever of the two nothing has claimed yet. Lines are taken in order, so
+    // by the time a run is reached the link down into it has already been made
+    // and its exit end is decided.
+    //
+    // **Matching them by length is what went wrong.** Every candidate in a band
+    // is the same length — one spacing across the band, `1/sin 60°` of it along
+    // the boundary — so shortest-first was an arbitrary order, and arbitrary
+    // orders disagree: run 4 links left to run 5, run 2 links right to run 3,
+    // and runs 3 and 4 are left with one free end each on opposite sides and
+    // nothing that can join them. Measured on two trixels, 13 runs came out as 4
+    // strokes where 2 were possible, and it degraded with size, because a
+    // collision anywhere splits the band there. An exit end cannot collide: it
+    // is free by definition, and taking it is what makes the next one free.
     const byLine = new Map<string, number[]>();
+    const linesOf = new Map<number, number[]>();
     runs.forEach((r, i) => {
       const key = `${r.fam}|${r.line}`;
       const list = byLine.get(key);
       if (list) list.push(i);
-      else byLine.set(key, [i]);
+      else {
+        byLine.set(key, [i]);
+        const ls = linesOf.get(r.fam);
+        if (ls) ls.push(r.line);
+        else linesOf.set(r.fam, [r.line]);
+      }
     });
 
-    type Cand = { i: number; ie: number; j: number; je: number; len: number };
-    const cands: Cand[] = [];
-    for (const [key, here] of byLine) {
-      const [famStr, lineStr] = key.split("|");
-      const next = byLine.get(`${famStr}|${Number(lineStr) + 1}`);
-      if (!next) continue;
-      const maxHop =
-        LINK_MAX_SPACINGS * (H / Math.max(1, rbs[Number(famStr)].density));
-      for (const i of here) {
-        for (const j of next) {
-          for (let ie = 0; ie < 2; ie++) {
-            if (!isFree(i * 2 + ie)) continue;
-            for (let je = 0; je < 2; je++) {
-              if (!isFree(j * 2 + je)) continue;
-              const p = runs[i].ends[ie];
-              const q = runs[j].ends[je];
-              const len = Math.hypot(p[0] - q[0], p[1] - q[1]);
-              if (len <= maxHop) cands.push({ i, ie, j, je, len });
+    const maxHop = LINK_MAX_SPACINGS * (H / Math.max(1, density));
+    /** Free to host a connector: not already linked, and not welded to
+     *  anything — an end that meets another run is spoken for either way. */
+    const open = (i: number, e: number) => !taken[i][e] && isFree(i * 2 + e);
+
+    for (const [fam, lines] of linesOf) {
+      for (const line of lines.sort((a, b) => a - b)) {
+        const next = byLine.get(`${fam}|${line + 1}`);
+        if (!next) continue;
+        // One run on the line above is one run's continuation, so a line that
+        // arrives as two runs either side of a notch does not send both into
+        // the same neighbour.
+        const spoken = new Set<number>();
+
+        for (const i of byLine.get(`${fam}|${line}`) as number[]) {
+          // The exit: the end the pen has not already left by. Both free means
+          // this run starts a chain and either will do — `line & 1` so that an
+          // untouched band turns on alternating sides, which is the shape the
+          // walk produces everywhere else.
+          const e = open(i, line & 1) ? line & 1 : open(i, 1 - (line & 1)) ? 1 - (line & 1) : -1;
+          if (e < 0) continue;
+
+          // Which run above is this one's continuation: the one it shares the
+          // most of its span with. That is a question about the intervals — a
+          // line crossing a notch should carry on into whatever is actually
+          // above the stretch it is leaving, not into whichever endpoint
+          // happens to be nearest. No overlap at all means the two are not
+          // stacked and there is no band to turn in.
+          let best = -1;
+          let bestOverlap = 0;
+          for (const j of next) {
+            if (spoken.has(j) || !open(j, e)) continue;
+            const overlap =
+              Math.min(runs[i].t1, runs[j].t1) - Math.max(runs[i].t0, runs[j].t0);
+            if (overlap > bestOverlap) {
+              bestOverlap = overlap;
+              best = j;
             }
           }
-        }
-      }
-    }
+          if (best < 0) continue;
 
-    if (cands.length > 0) {
-      // One Clipper call for the whole region: setup dominates, the run does
-      // not. The rings are eroded by `LINK_CLEARANCE` — see its note.
-      const key = (p: [number, number], q: [number, number]) => {
-        const a = `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
-        const b = `${q[0].toFixed(3)},${q[1].toFixed(3)}`;
-        return a < b ? `${a}|${b}` : `${b}|${a}`;
-      };
-      const inside = new Set<string>();
-      for (const [x0, y0, x1, y1] of api.clipLines(
-        cands.map((c) => {
-          const p = runs[c.i].ends[c.ie];
-          const q = runs[c.j].ends[c.je];
-          return [p[0], p[1], q[0], q[1]] as Seg;
-        }),
-        api.offset(regions[region].rings, -LINK_CLEARANCE),
-      )) {
-        // Survived whole and unshortened, so its endpoints come back
-        // untouched; one that was clipped, split or dropped has no entry.
-        inside.add(key([x0, y0], [x1, y1]));
-      }
-      for (const c of cands.sort((a, b) => a.len - b.len)) {
-        if (!inside.has(key(runs[c.i].ends[c.ie], runs[c.j].ends[c.je]))) continue;
-        join(c.i, c.ie, c.j, c.je);
+          const p = runs[i].ends[e];
+          const q = runs[best].ends[e];
+          if (Math.hypot(p[0] - q[0], p[1] - q[1]) > maxHop) continue;
+          if (!connectorInTone(p, q, density, toneOf)) continue;
+          if (join(i, e, best, e)) spoken.add(best);
+        }
       }
     }
 
@@ -1255,28 +1386,27 @@ function boundsOf(polys: PlotPoly[]) {
 }
 
 /**
- * The hatch inset in world units, from the setting's millimetres on the page.
+ * World units per millimetre on the page, or 0 when there is no valid layout.
  *
  * The conversion needs `PlotterLayout.scale`, which is inches per world unit
- * and is normally read off a finished plot — but the inset has to be known
- * *while* the hatch is being built. It can be: `plotterLayout` reads nothing
- * but the extent, and on this path the hatch is clipped inside the region rings
- * while the outlines **are** those rings, so the outlines alone bound the plot
- * and give the identical figure. An invalid layout (the margin has eaten the
- * page) yields no scale and no inset; nothing can be exported there anyway.
+ * and is normally read off a finished plot — but the hatch inset has to be
+ * known *while* the hatch is being built. It can be: `plotterLayout` reads
+ * nothing but the extent, and on this path the hatch is clipped inside the
+ * region rings while the outlines **are** those rings, so the outlines alone
+ * bound the plot and give the identical figure. An invalid layout (the margin
+ * has eaten the page) yields no scale; nothing can be exported there anyway.
  */
-function hatchInsetWorld(
+function worldPerMm(
   outlinePolys: PlotPoly[],
   gridRotation: number,
   s: PlotterSettings,
 ): number {
-  if (!(s.hatchInsetMm > 0)) return 0;
   const b = boundsOf(rotate(outlinePolys, gridRotation));
   const { scale } = plotterLayout(
     { width: b.maxX - b.minX, height: b.maxY - b.minY },
     s,
   );
-  return scale > 0 ? s.hatchInsetMm / 25.4 / scale : 0;
+  return scale > 0 ? 1 / 25.4 / scale : 0;
 }
 
 /**
@@ -1404,14 +1534,24 @@ export async function buildPlotterPlot(
       // `api.offset` is the primitive `contourFill` insets with, and it returns
       // empty when a shape is consumed: a region thinner than the gap simply
       // plots as its own outline, which is the honest answer.
-      const inset = hatchInsetWorld(outlinePolys, gridRotation, s);
+      //
+      // **Linking erodes nothing of its own.** A gap of 0 means the hatch
+      // reaches the outline, whether or not the ends are being chained, so the
+      // ink a linked plot lays down is the ink the unlinked one lays down plus
+      // the connectors — and where a connector then runs along a boundary it
+      // runs along a line the outline layer is drawing anyway. What used to
+      // stand in the way was `connectorInTone` having to name the trixel under
+      // a sample sitting exactly on a lattice edge; it asks both sides now.
+      const inset = s.hatchInsetMm > 0
+        ? s.hatchInsetMm * worldPerMm(outlinePolys, gridRotation, s)
+        : 0;
       const hatchRegions =
         inset > 0
           ? regions.map((r) => ({ ...r, rings: api.offset(r.rings, -inset) }))
           : regions;
 
       const marks = plotterMarks(layers, gridDivisions, s);
-      const buckets = hatchBuckets(
+      const { buckets, toneOf } = hatchBuckets(
         marks,
         fills,
         hatchRegions,
@@ -1422,10 +1562,8 @@ export async function buildPlotterPlot(
       );
       rawCount += buckets.reduce((n, b) => n + b.segs.length, 0);
 
-      // The containment test for a link reads the **un-eroded** rings — see
-      // `linkHatchRuns`. The hatch itself was clipped to `hatchRegions`.
       hatchPolys = s.linkHatchEnds
-        ? linkHatchRuns(buckets, regions, api)
+        ? linkHatchRuns(buckets, toneOf)
         : joinRuns(buckets.flatMap((b) => b.segs)).map(segPoly);
     }
   }
