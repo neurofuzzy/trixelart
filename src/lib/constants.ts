@@ -69,6 +69,17 @@ export const PALETTE_DEFS: PaletteDef[] = [
     colorHues: [285, 292, 300, 308, 316, 324, 332, 340, 350],
     lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
   },
+  // Monochromatic palettes extrapolated from four yarn families in
+  // `etc/yarns.json`. Each family contributes a hue and saturation (the mean of
+  // its three levels) plus a 9-step lightness ramp whose mid tones land on the
+  // family's own dark/medium/light levels — at indices 3/6/8, except Salmon
+  // whose dark/medium sit higher (5/7/8) because its colours only start
+  // darkening late. Indices below the dark anchor are extrapolated darker, the
+  // rest interpolated between.
+  { name: "Salmon", hue: 14, saturation: 65, lightnesses: [8, 15, 23, 31, 38, 44, 53, 62, 75] },
+  { name: "Gold", hue: 36, saturation: 66, lightnesses: [10, 16, 23, 29, 35, 42, 48, 57, 66] },
+  { name: "Moss", hue: 66, saturation: 47, lightnesses: [7, 13, 19, 25, 31, 37, 43, 52, 62] },
+  { name: "Teal", hue: 158, saturation: 25, lightnesses: [7, 12, 18, 23, 28, 34, 39, 52, 64] },
 ];
 
 let _hueOffset = 0;

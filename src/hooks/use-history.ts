@@ -429,6 +429,12 @@ export function useHistory() {
     if (historyIdx <= 0) return;
     const from = history[historyIdx];
     const target = history[historyIdx - 1];
+    // `historyIdx` and `history` are a pair of independent state variables, so
+    // an index can drift past the array (a remount that reseeds one and not the
+    // other, an HMR failure, a mid-stroke keypress). Trusting the array over
+    // the index keeps a stale counter from crashing the restore callback on a
+    // snapshot that is not there.
+    if (!from || !target) return;
     setLayers(target.layers);
     keepActiveLayer(target);
     restoreRef.current(target, from);
@@ -439,6 +445,7 @@ export function useHistory() {
     if (historyIdx >= history.length - 1) return;
     const from = history[historyIdx];
     const target = history[historyIdx + 1];
+    if (!from || !target) return;
     setLayers(target.layers);
     keepActiveLayer(target);
     restoreRef.current(target, from);
