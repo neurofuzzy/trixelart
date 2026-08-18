@@ -28,6 +28,15 @@ export interface PaletteDef {
   saturation: number;
   colorHues?: number[];
   lightnesses?: number[];
+  /**
+   * Fixed swatches, used verbatim instead of deriving the ramp from hue/
+   * saturation/lightness. Present on the yarn palettes (whose colors come from
+   * `etc/yarns.json`, not from the HSL model) so they survive the round trip
+   * through `hslToHex` unchanged and stay put under the global
+   * `hueOffset`/`satOffset` shift. When set, `hue`/`saturation` above are
+   * unused.
+   */
+  hexes?: string[];
 }
 
 export const PALETTE_DEFS: PaletteDef[] = [
@@ -69,6 +78,78 @@ export const PALETTE_DEFS: PaletteDef[] = [
     colorHues: [285, 292, 300, 308, 316, 324, 332, 340, 350],
     lightnesses: [3, 12, 22, 32, 42, 50, 56, 62, 68],
   },
+  // Yarn palettes from `etc/yarns.json`. Grouped by family in the order asked
+  // (dark → medium → light within each family, so `colorIdx` still moves
+  // darker/lighter the same way as the derived palettes) rather than woven into
+  // one lightness ramp. The hexes are literal because `etc/yarns.json`'s HSL
+  // values are rounded and would not round-trip; `hexes` keeps each swatch
+  // exactly the yarn's colour.
+  {
+    name: "Warm Yarns",
+    hue: 0,
+    saturation: 0,
+    hexes: [
+      "#63293F", // Plum / Red-Violet Dark
+      "#9C4E6C", // Plum / Red-Violet Medium
+      "#C98FA8", // Plum / Red-Violet Light
+      "#A64E38", // Salmon / Pink Dark
+      "#DE7B5C", // Salmon / Pink Medium
+      "#F2A98C", // Salmon / Pink Light
+      "#7A4E1C", // Gold / Yellow-Orange Dark
+      "#C98A2E", // Gold / Yellow-Orange Medium
+      "#E8C06B", // Gold / Yellow-Orange Light
+    ],
+  },
+  {
+    name: "Cool Yarns",
+    hue: 0,
+    saturation: 0,
+    hexes: [
+      "#332963", // Indigo / Blue-Violet Dark
+      "#5F4E96", // Indigo / Blue-Violet Medium
+      "#9C8FC2", // Indigo / Blue-Violet Light
+      "#2A4A3F", // Teal / Blue-Green Dark
+      "#4C7C6C", // Teal / Blue-Green Medium
+      "#8FB9A8", // Teal / Blue-Green Light
+      "#565E22", // Moss / Yellow-Green Dark
+      "#93A039", // Moss / Yellow-Green Medium
+      "#C7CC6E", // Moss / Yellow-Green Light
+    ],
+  },
+  // Neon palettes from `etc/neons.json`, same shape as the yarn palettes above:
+  // grouped by family in the order asked, dark → medium → light within each.
+  {
+    name: "Warm Neons",
+    hue: 0,
+    saturation: 0,
+    hexes: [
+      "#850D5D", // Red-Violet Dark
+      "#BF1D89", // Red-Violet Medium
+      "#E650B4", // Red-Violet Light
+      "#732106", // Red-Orange Dark
+      "#BF370A", // Red-Orange Medium
+      "#E6420B", // Red-Orange Light
+      "#734506", // Yellow-Orange Dark
+      "#BF740A", // Yellow-Orange Medium
+      "#E68B0B", // Yellow-Orange Light
+    ],
+  },
+  {
+    name: "Cool Neons",
+    hue: 0,
+    saturation: 0,
+    hexes: [
+      "#3D0F99", // Blue-Violet Dark
+      "#6030BF", // Blue-Violet Medium
+      "#8250E6", // Blue-Violet Light
+      "#397364", // Blue-Green Dark
+      "#60BFA7", // Blue-Green Medium
+      "#95E6D1", // Blue-Green Light
+      "#587322", // Yellow-Green Dark
+      "#93BF39", // Yellow-Green Medium
+      "#B0E645", // Yellow-Green Light
+    ],
+  },
 ];
 
 let _hueOffset = 0;
@@ -86,16 +167,18 @@ export function computePaletteColors(
 ): { name: string; colors: string[] }[] {
   return defs.map((def) => ({
     name: def.name,
-    colors: (def.lightnesses ?? PALETTE_LIGHTNESSES).map((l, i) => {
-      const h = def.colorHues
-        ? def.colorHues[i]
-        : def.hue;
-      return hslToHex(
-        ((h + hueOffset) % 360 + 360) % 360,
-        Math.max(0, Math.min(100, def.saturation + satOffset)),
-        l,
-      );
-    }),
+    colors: def.hexes
+      ? def.hexes
+      : (def.lightnesses ?? PALETTE_LIGHTNESSES).map((l, i) => {
+          const h = def.colorHues
+            ? def.colorHues[i]
+            : def.hue;
+          return hslToHex(
+            ((h + hueOffset) % 360 + 360) % 360,
+            Math.max(0, Math.min(100, def.saturation + satOffset)),
+            l,
+          );
+        }),
   }));
 }
 
@@ -143,6 +226,8 @@ export function resolveColor(encoded: string): string {
   const d = decodeColor(encoded);
   if (d && PALETTE_DEFS[d.paletteIdx]) {
     const def = PALETTE_DEFS[d.paletteIdx];
+    const fixedHex = def.hexes?.[d.colorIdx];
+    if (fixedHex !== undefined) return fixedHex;
     const lightnesses = def.lightnesses ?? PALETTE_LIGHTNESSES;
     const l = lightnesses[d.colorIdx];
     if (l === undefined) return encoded;
