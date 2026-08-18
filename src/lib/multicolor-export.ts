@@ -21,17 +21,15 @@ import { rotatePoint } from "@/lib/crop";
 // polygon in each color, free to assemble any color arrangement — zero paper
 // wasted, because no color's sheet ever throws away a shape.
 //
+// Every tile is also cut as a mat — the sheet's own rectangle with the design
+// outline as its window — so the leftover cardstock around the pieces is
+// already a colored mat, ready to frame a color-cycled piece.
+//
 // Rounding is honoured (the polygons are `roundedRegions`, the same shapes the
 // on-screen SVG draws); paper-first sizing fits the design into a user-defined
-// sheet minus margins; and an optional second file holds the mats — one per
-// color, the design's outline cut out of a fixed border, ready to frame the
-// finished piece.
+// sheet minus margins; and an optional second file holds the mats alone — one
+// paper-sized tile per color — for a clean mat without the pieces.
 // ---------------------------------------------------------------------------
-
-/** Gap between tiled sheets in the output, mm. */
-const TILE_GAP_MM = 6;
-/** Thickness of the mat frame around the design outline, mm. */
-export const MAT_BORDER_MM = 12;
 
 export interface MulticolorOptions {
   /** Physical sheet width, mm. The design auto-fits *inside* this, minus margins. */
@@ -39,6 +37,8 @@ export interface MulticolorOptions {
   paperHeightMm: number;
   /** Margin on every side of the sheet, mm. */
   marginMm: number;
+  /** Gap between tiled sheets in the output, mm. */
+  pageSpacingMm: number;
   /** Build the separate mats file (with its own download button). */
   mat: boolean;
 }
@@ -75,7 +75,6 @@ export interface MulticolorPlan {
   designWmm: number;
   designHmm: number;
   colorCount: number;
-  matBorderMm: number;
 }
 
 function fitScale(
@@ -160,7 +159,6 @@ export function planMulticolor(
     designWmm: (maxX - minX) * scale,
     designHmm: (maxY - minY) * scale,
     colorCount: sheets.length,
-    matBorderMm: MAT_BORDER_MM,
   };
 }
 
@@ -219,10 +217,11 @@ function totalSize(
   rows: number,
   tileW: number,
   tileH: number,
+  gap: number,
 ): { w: number; h: number } {
   return {
-    w: cols * tileW + (cols - 1) * TILE_GAP_MM,
-    h: rows * tileH + (rows - 1) * TILE_GAP_MM,
+    w: cols * tileW + (cols - 1) * gap,
+    h: rows * tileH + (rows - 1) * gap,
   };
 }
 
@@ -236,14 +235,15 @@ function layoutCell(
   cols: number,
   tileW: number,
   tileH: number,
+  gap: number,
 ): { col: number; row: number; ox: number; oy: number } {
   const col = index % cols;
   const row = Math.floor(index / cols);
   return {
     col,
     row,
-    ox: col * (tileW + TILE_GAP_MM),
-    oy: row * (tileH + TILE_GAP_MM),
+    ox: col * (tileW + gap),
+    oy: row * (tileH + gap),
   };
 }
 
@@ -289,19 +289,22 @@ function designPathFor(
     .join(" ");
 }
 
-/** The mat's compound path placed at `ox, oy`: the frame rectangle drawn from
- *  the tile's own bounds, with the silhouette window cut out of it (evenodd). */
-function matPathFor(
+/** The frame rectangle at the tile's own bounds with the silhouette window cut
+ *  out of it (evenodd). The window's top-left lands at `winOx, winOy` — the mat
+ *  border for the mats file, or the centered design origin on a paper-sized
+ *  color sheet — while the frame always runs at the given tile bounds. */
+function frameWindowPath(
   plan: MulticolorPlan,
   map: DocMapper,
   ox: number,
   oy: number,
   tileW: number,
   tileH: number,
+  winOx: number,
+  winOy: number,
 ): string {
-  const b = plan.matBorderMm;
-  const px = (x: number) => rnd((x - map.minX) * map.scale + ox + b);
-  const py = (y: number) => rnd((y - map.minY) * map.scale + oy + b);
+  const px = (x: number) => rnd((x - map.minX) * map.scale + winOx);
+  const py = (y: number) => rnd((y - map.minY) * map.scale + winOy);
   const frame = `M${rnd(ox)} ${rnd(oy)} H${rnd(ox + tileW)} V${rnd(oy + tileH)} H${rnd(ox)} Z`;
   const window = plan.outline
     .map((loop) => {
@@ -317,8 +320,11 @@ function matPathFor(
 }
 
 /**
- * The color-sheets file: one tiled sheet per color, each carrying every polygon
- * of the design on a paper-sized tile.
+ * The color-sheets file: one tiled paper-sized sheet per color, carrying every
+ * polygon of the design **and the mat structure** — the sheet's own rectangle
+ * with the design outline cut out of it. The leftover cardstock of a cut sheet
+ * is therefore already a colored mat (the design window, the pieces from the
+ * middle), usable as a border mat on a color-cycled piece.
  */
 export function buildMulticolorSVG(
   plan: MulticolorPlan,
@@ -328,17 +334,24 @@ export function buildMulticolorSVG(
   if (plan.sheets.length === 0) return null;
   const tileW = options.paperWidthMm;
   const tileH = options.paperHeightMm;
+  const gap = options.pageSpacingMm;
   const { cols, rows } = layerCount(plan.sheets.length);
-  const { w, h } = totalSize(cols, rows, tileW, tileH);
+  const { w, h } = totalSize(cols, rows, tileW, tileH, gap);
   const map = docMap(plan, gridRotation);
 
   const parts: string[] = [];
   plan.sheets.forEach((sheet, i) => {
-    const { ox, oy } = layoutCell(i, cols, tileW, tileH);
-    const d = designPathFor(plan, map, ox, oy, tileW, tileH);
+    const { ox, oy } = layoutCell(i, cols, tileW, tileH, gap);
+    const cx = ox + (tileW - plan.designWmm) / 2;
+    const cy = oy + (tileH - plan.designHmm) / 2;
+    // The mat frame + window first (this is the leftover, a colored mat), then
+    // the pieces drawn on top, inside the window.
+    const matD = frameWindowPath(plan, map, ox, oy, tileW, tileH, cx, cy);
+    const piecesD = designPathFor(plan, map, ox, oy, tileW, tileH);
     parts.push(
       `  <g inkscape:groupmode="layer" inkscape:label="Sheet ${i + 1} — ${xmlEscape(sheet.hex)}" id="multicolor-${i + 1}">\n` +
-        `    <path d="${d}" fill="${sheet.hex}" fill-opacity="0.85" stroke="#000000" stroke-width="0.1"/>\n` +
+        `    <path d="${matD}" fill="${sheet.hex}" fill-opacity="0.85" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>\n` +
+        `    <path d="${piecesD}" fill="${sheet.hex}" fill-opacity="0.85" stroke="#000000" stroke-width="0.1"/>\n` +
         `  </g>`,
     );
   });
@@ -353,26 +366,29 @@ export function buildMulticolorSVG(
 }
 
 /**
- * The mats file: one tile per color — the design's outline cut out of a
- * rectangle with a fixed border round it, exactly as a photo mat frames art.
+ * The mats file: one paper-sized tile per color — the design's outline cut out
+ * of the sheet's own rectangle, exactly the mat every color sheet also carries
+ * (without the pieces). One pass per color leaves you a full colored mat.
  */
 export function buildMulticolorMatsSVG(
   plan: MulticolorPlan,
-  _options: MulticolorOptions,
+  options: MulticolorOptions,
   gridRotation = 0,
 ): string | null {
   if (plan.sheets.length === 0) return null;
-  const b = plan.matBorderMm;
-  const tileW = plan.designWmm + 2 * b;
-  const tileH = plan.designHmm + 2 * b;
+  const tileW = options.paperWidthMm;
+  const tileH = options.paperHeightMm;
+  const gap = options.pageSpacingMm;
   const { cols, rows } = layerCount(plan.sheets.length);
-  const { w, h } = totalSize(cols, rows, tileW, tileH);
+  const { w, h } = totalSize(cols, rows, tileW, tileH, gap);
   const map = docMap(plan, gridRotation);
 
   const parts: string[] = [];
   plan.sheets.forEach((sheet, i) => {
-    const { ox, oy } = layoutCell(i, cols, tileW, tileH);
-    const d = matPathFor(plan, map, ox, oy, tileW, tileH);
+    const { ox, oy } = layoutCell(i, cols, tileW, tileH, gap);
+    const cx = ox + (tileW - plan.designWmm) / 2;
+    const cy = oy + (tileH - plan.designHmm) / 2;
+    const d = frameWindowPath(plan, map, ox, oy, tileW, tileH, cx, cy);
     parts.push(
       `  <g inkscape:groupmode="layer" inkscape:label="Mat ${i + 1} — ${xmlEscape(sheet.hex)}" id="multicolor-mat-${i + 1}">\n` +
         `    <path d="${d}" fill="${sheet.hex}" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>\n` +
@@ -415,17 +431,21 @@ export function renderMulticolorPreview(
   if (!ctx) return;
   ctx.clearRect(0, 0, w, h);
 
-  const tileW =
-    mode === "sheets" ? options.paperWidthMm : plan.designWmm + 2 * plan.matBorderMm;
-  const tileH =
-    mode === "sheets" ? options.paperHeightMm : plan.designHmm + 2 * plan.matBorderMm;
+  const tileW = options.paperWidthMm;
+  const tileH = options.paperHeightMm;
+  const gap = options.pageSpacingMm;
   const { cols, rows } = layerCount(plan.sheets.length);
-  const { w: totalW, h: totalH } = totalSize(cols, rows, tileW, tileH);
+  const { w: totalW, h: totalH } = totalSize(cols, rows, tileW, tileH, gap);
 
   const pad = 8;
   const fit = Math.min((w - 2 * pad) / (totalW || 1), (h - 2 * pad) / (totalH || 1));
   if (!(fit > 0)) return;
-  const mm = (v: number) => v * fit;
+  // Centered in the panel, not pinned to its top-left corner.
+  const ox0 = (w - totalW * fit) / 2;
+  const oy0 = (h - totalH * fit) / 2;
+  // Document-space placement for a tile's grid origin (centering + layout).
+  const sx = (v: number) => ox0 + v * fit;
+  const sy = (v: number) => oy0 + v * fit;
 
   const turn = (p: Pt): Pt => {
     const [x, y] = rotatePoint(p.x, p.y, gridRotation);
@@ -433,8 +453,9 @@ export function renderMulticolorPreview(
   };
   const cx = (tileW - plan.designWmm) / 2;
   const cy = (tileH - plan.designHmm) / 2;
-  const px = (x: number) => mm((x - plan.box.minX) * plan.scale + cx);
-  const py = (y: number) => mm((y - plan.box.minY) * plan.scale + cy);
+  // Tile-relative geometry; the translate below supplies the grid origin.
+  const px = (x: number) => ((x - plan.box.minX) * plan.scale + cx) * fit;
+  const py = (y: number) => ((y - plan.box.minY) * plan.scale + cy) * fit;
 
   const ringPath = (ring: Pt[]) => {
     ctx.beginPath();
@@ -447,20 +468,22 @@ export function renderMulticolorPreview(
   };
 
   plan.sheets.forEach((sheet, i) => {
-    const { ox, oy } = layoutCell(i, cols, tileW, tileH);
+    const { ox, oy } = layoutCell(i, cols, tileW, tileH, gap);
     ctx.save();
-    ctx.translate(mm(ox), mm(oy));
+    ctx.translate(sx(ox), sy(oy));
 
-    if (mode === "mats") {
-      ctx.beginPath();
-      ctx.rect(0, 0, mm(tileW), mm(tileH));
-      for (const loop of plan.outline) ringPath(loop);
-      ctx.fillStyle = sheet.hex;
-      ctx.fill("evenodd");
-      ctx.strokeStyle = "rgba(0,0,0,0.35)";
-      ctx.stroke();
-    } else {
-      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    // Both modes draw the mat frame + window first — on the color sheets the
+    // leftover cardstock between the border and the window is the colored mat —
+    // then the sheets mode adds the pieces on top, inside the window.
+    ctx.beginPath();
+    ctx.rect(0, 0, tileW * fit, tileH * fit);
+    for (const loop of plan.outline) ringPath(loop);
+    ctx.fillStyle = sheet.hex;
+    ctx.fill("evenodd");
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.stroke();
+
+    if (mode === "sheets") {
       for (const ring of plan.polygons) {
         ctx.fillStyle = sheet.hex;
         ringPath(ring);
@@ -468,6 +491,12 @@ export function renderMulticolorPreview(
         ctx.stroke();
       }
     }
+
+    // The tile's own bounds, so each sheet reads as a separate piece of paper.
+    ctx.strokeStyle = "rgba(70,70,70,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(0, 0, tileW * fit, tileH * fit);
+    ctx.lineWidth = 1;
     ctx.restore();
   });
 }

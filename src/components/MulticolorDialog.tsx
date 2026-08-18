@@ -28,6 +28,18 @@ import {
  * paper wasted. See `multicolor-export.ts`.
  */
 
+type Unit = "mm" | "in";
+
+/** Inches per millimetre. The dialog stores everything in mm; the unit toggle
+ *  only changes how the fields are read and written. */
+const IN_PER_MM = 1 / 25.4;
+
+/** Rounds a length for display in the selected unit, dropping float noise. */
+function fmtLen(mm: number, unit: Unit): string {
+  const v = unit === "mm" ? mm : mm * IN_PER_MM;
+  return String(Math.round(v * 100) / 100);
+}
+
 function Section({
   title,
   children,
@@ -45,29 +57,35 @@ function Section({
   );
 }
 
-/** A millimetre field. Clamped on commit, not per keystroke, so a half-typed
- *  "1" on the way to "150" is not snapped away underneath. */
+/** A length field. The value it carries is always in mm; when `unit` is "in"
+ *  it is converted for display and the typed value is converted back on commit.
+ *  Clamped on commit, not per keystroke, so a half-typed "1" on the way to
+ *  "150" is not snapped away underneath. */
 function NumberMm({
   label,
   value,
   min,
   max,
-  step = 1,
+  unit,
   onChange,
 }: {
   label: string;
+  /** The field's value, in mm. */
   value: number;
+  /** Clamp bounds, in mm. */
   min: number;
   max: number;
-  step?: number;
+  unit: Unit;
   onChange: (v: number) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const factor = unit === "mm" ? 1 : IN_PER_MM;
   const commit = (raw: string) => {
     const n = Number(raw);
     setDraft(null);
-    if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)));
+    if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n / factor)));
   };
+  const shown = (n: number) => Math.round(n * 100) / 100;
   return (
     <label className="flex items-center gap-2">
       <span className="text-xs uppercase tracking-wide text-muted-foreground flex-1 min-w-0">
@@ -75,10 +93,10 @@ function NumberMm({
       </span>
       <input
         type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={draft ?? String(value)}
+        min={shown(min * factor)}
+        max={shown(max * factor)}
+        step={unit === "mm" ? 1 : 0.1}
+        value={draft ?? String(shown(value * factor))}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
@@ -86,7 +104,7 @@ function NumberMm({
         }}
         className="w-20 shrink-0 h-8 rounded-md border border-input bg-background px-1.5 text-xs text-foreground tabular-nums outline-none focus:border-ring focus:ring-1 focus:ring-ring"
       />
-      <span className="text-xs text-muted-foreground/60 w-5 shrink-0">mm</span>
+      <span className="text-xs text-muted-foreground/60 w-6 shrink-0">{unit}</span>
     </label>
   );
 }
@@ -137,6 +155,8 @@ export function MulticolorDialog({
   const [paperWidthMm, setPaperWidthMm] = useState(210);
   const [paperHeightMm, setPaperHeightMm] = useState(297);
   const [marginMm, setMarginMm] = useState(15);
+  const [spacingMm, setSpacingMm] = useState(6);
+  const [unit, setUnit] = useState<Unit>("mm");
   const [mat, setMat] = useState(false);
   const [mode, setMode] = useState<MulticolorPreviewMode>("sheets");
   const [busy, setBusy] = useState(false);
@@ -146,9 +166,10 @@ export function MulticolorDialog({
       paperWidthMm,
       paperHeightMm,
       marginMm,
+      pageSpacingMm: spacingMm,
       mat,
     }),
-    [paperWidthMm, paperHeightMm, marginMm, mat],
+    [paperWidthMm, paperHeightMm, marginMm, spacingMm, mat],
   );
 
   const plan = useMemo(
@@ -245,14 +266,32 @@ export function MulticolorDialog({
       >
         <div className="flex items-center justify-between shrink-0">
           <h3 className="font-semibold text-sm">Export multicolor cut</h3>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => onOpenChange(false)}
-          >
-            <X className="w-3.5 h-3.5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md overflow-hidden border border-white/10">
+              {(["mm", "in"] as const).map((u) => (
+                <button
+                  key={u}
+                  onClick={() => setUnit(u)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs transition-colors",
+                    unit === u
+                      ? "bg-amber-400/20 text-amber-200"
+                      : "text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  {u}
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => onOpenChange(false)}
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 flex flex-col sm:flex-row gap-4">
@@ -291,9 +330,10 @@ export function MulticolorDialog({
             </div>
             {metrics && (
               <p className="text-[11px] text-muted-foreground/70 leading-relaxed shrink-0">
-                Design comes out at {metrics.designWmm.toFixed(0)} ×{" "}
-                {metrics.designHmm.toFixed(0)} mm on a {metrics.usableWmm.toFixed(0)} ×{" "}
-                {metrics.usableHmm.toFixed(0)} mm usable area.
+                Design comes out at {fmtLen(metrics.designWmm, unit)} ×{" "}
+                {fmtLen(metrics.designHmm, unit)} {unit} on a{" "}
+                {fmtLen(metrics.usableWmm, unit)} × {fmtLen(metrics.usableHmm, unit)}{" "}
+                {unit} usable area.
               </p>
             )}
           </div>
@@ -301,31 +341,41 @@ export function MulticolorDialog({
           <div className="sm:w-72 shrink-0 min-h-0 overflow-y-auto pr-1 divide-y divide-white/10">
             <Section title="Paper">
               <NumberMm
+                key={`width-${unit}`}
                 label="Width"
                 value={paperWidthMm}
                 min={50}
                 max={1200}
+                unit={unit}
                 onChange={setPaperWidthMm}
               />
               <NumberMm
+                key={`height-${unit}`}
                 label="Height"
                 value={paperHeightMm}
                 min={50}
                 max={1200}
+                unit={unit}
                 onChange={setPaperHeightMm}
               />
               <NumberMm
+                key={`margin-${unit}`}
                 label="Margin"
                 value={marginMm}
                 min={0}
                 max={50}
+                unit={unit}
                 onChange={setMarginMm}
               />
-              <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-                The design is scaled to fit inside the sheet, centered. Every
-                sheet below is cut into the whole design, so one pass per colour
-                leaves you every polygon in every colour.
-              </p>
+              <NumberMm
+                key={`spacing-${unit}`}
+                label="Spacing"
+                value={spacingMm}
+                min={0}
+                max={50}
+                unit={unit}
+                onChange={setSpacingMm}
+              />
               {!fits && (
                 <p className="text-[11px] text-red-400 leading-relaxed">
                   The margins meet — shrink the margin or enlarge the sheet.
@@ -333,25 +383,10 @@ export function MulticolorDialog({
               )}
             </Section>
 
-            <Section title="Cut lines">
-              <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-                Each region of the artwork — where the eye sees one colour — is
-                a separate polygon, so the machine cuts exactly on the colour
-                seams.
-              </p>
-            </Section>
-
             <Section title="Mats">
               <Check checked={mat} onChange={setMat}>
                 Mats (separate file)
               </Check>
-              {mat && (
-                <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-                  A second SVG, one mat per colour: the design outline cut out of
-                  a {plan?.matBorderMm ?? 0} mm border, ready to frame the
-                  finished piece.
-                </p>
-              )}
             </Section>
 
             {plan && (

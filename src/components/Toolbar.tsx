@@ -332,7 +332,7 @@ export function Toolbar({
             <DropdownMenuItem
               onClick={() => {
                 setExportOpen(false);
-                onExportCut();
+                onExportMulticolor();
               }}
             >
               <Scissors className="w-4 h-4" />
@@ -344,11 +344,11 @@ export function Toolbar({
             <DropdownMenuItem
               onClick={() => {
                 setExportOpen(false);
-                onExportMulticolor();
+                onExportCut();
               }}
             >
               <Layers className="w-4 h-4" />
-              <span>Multicolor...</span>
+              <span>Stacked paper...</span>
             </DropdownMenuItem>
             {/* Beside Cutting rather than inside it: same machine, but it
                 stacks nothing and joins nothing — every cell is one flat
@@ -360,7 +360,7 @@ export function Toolbar({
               }}
             >
               <Puzzle className="w-4 h-4" />
-              <span>Interlocking...</span>
+              <span>Tiled Paper...</span>
             </DropdownMenuItem>
             {/* A dialog, not a canvas mode: a plot takes the whole artwork, so
                 unlike fabric there is no region to drag out on the canvas. */}
