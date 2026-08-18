@@ -22,7 +22,6 @@ and the per-module/per-symbol map is generated — do not restate either here.
 | [docs/exports.md](docs/exports.md) | Crop & export (PNG/SVG), plotter export, apparel export |
 | [docs/persistence.md](docs/persistence.md) | localStorage keys, `ProjectSnapshot`, the `.trixel.svg` project file, examples |
 | [docs/fabrication-export.md](docs/fabrication-export.md) | Design spec for the cutting-machine export (not implemented) |
-| [docs/interlock-export.md](docs/interlock-export.md) | The interlocking ("weave") cut — one piece per cell, tabs hidden under its neighbours |
 
 ## Quick start
 
@@ -55,7 +54,7 @@ No tests configured.
   - **Skipping the push is worse than "not undoable".** The next commit snapshots the changed value anyway, so undoing that *later* edit silently rolls this one back too. Layer visibility and reorder had exactly this bug: hide a layer, paint a stroke, undo the stroke, and the layer came back.
   - The escape hatch for state that should not be undoable is to **not apply it on restore**, not to skip the push. `registerRestore` deliberately leaves the grid settings alone, and undo/redo deliberately leave `activeLayerIdx` alone (clamped to the restored layer count), so that moving around between strokes is never rolled back.
   - Tools do not call `pushHistory` directly — they call `ctx.onCommit()`, which bumps a counter that an effect turns into one `pushHistory(buildSnapshot())`. Pushing from inside a `setPainted` updater would double-fire under StrictMode and desync `historyIdx`. Commit **once per stroke**, on pointer-up, not per cell. In `LayerPanel` every mutation goes through its local `commit()` for the same reason.
-- **Colors are stored encoded**, not as hex: `"paletteIdx,colorIdx"` via `encodeColor`, resolved through `resolveColor` (`src/lib/constants.ts`). `PALETTE_DEFS` holds 18 palettes × 9 lightnesses — 14 HSL-derived, shifted globally by `hueOffset`/`satOffset`, plus the four fixed-hex yarn and neon palettes from `etc/yarns.json` / `etc/neons.json` that ignore those offsets. Painted data therefore follows palette changes automatically — compare encoded values, not resolved hex, when testing swatch identity (separate palettes can resolve to the same color). The documented exceptions all share one reason: where the only question is *whether the eye sees a boundary*, comparison is on the resolved hex (`region-outline.ts`, `round-corners.ts`).
+  - **Colors are stored encoded**, not as hex: `"paletteIdx,colorIdx"` via `encodeColor`, resolved through `resolveColor` (`src/lib/constants.ts`). `PALETTE_DEFS` holds 18 HSL-derived palettes × 9 lightnesses, shifted globally by `hueOffset`/`satOffset`. Four of them (Salmon, Gold, Moss, Teal) are monochromatic ramps extrapolated from the yarn families in `etc/yarns.json`. Painted data therefore follows palette changes automatically — compare encoded values, not resolved hex, when testing swatch identity (separate palettes can resolve to the same color). The documented exceptions all share one reason: where the only question is *whether the eye sees a boundary*, comparison is on the resolved hex (`region-outline.ts`, `round-corners.ts`).
   - **`NO_PRINT` is a colour that never renders.** A construction mark: it takes part in the boundary-degree count in `round-corners.ts` — which is what forces a corner to stay sharp — and is skipped everywhere else. It deliberately **fails `decodeColor`**, so the many consumers that already skip undecodable values skip it for free; the one place that had to be taught to admit it is `boundaryVertexDegrees`. Adding a new consumer of `painted` means deciding which side it is on, and the safe default (skip) is the one you get by doing nothing. See [docs/layer-effects.md](docs/layer-effects.md).
   - **`hueOffset`/`satOffset` live in module state** inside `constants.ts` rather than being arguments to `resolveColor`, so `setPaletteOffsets` **must be called during render, not in an effect**. It is a `useMemo` in `TrixelGrid` for exactly that reason. React flushes child effects before parent ones, so as an effect it landed *after* `GridCanvas` had already painted with the previous offsets — and since nothing else had changed, no further draw was scheduled. On first load the saved offsets arrive in one restore and never change again, so the artwork kept the unshifted palette until the next edit happened to redraw it. Anything else that syncs module state consumed by descendants has the same constraint.
 - **`setPainted` updaters must be pure** — React StrictMode replays them. Precompute the keys/colors outside the updater (see `edit-tool.ts` and `pattern-tool.ts`).
@@ -136,16 +135,3 @@ paths then go through `triangulateLoops`
 (`mesh-export.ts`) — a rounded outline is not a lattice cell, and the extruders
 take triangles. Reaching for `buildRenderPlan` in a fabrication path is still the
 wrong move; reaching for `stepRegionGeometry` is not.
-
-**The interlocking cut honours nothing** — not the plan, and not round corners
-either, which makes it the one exception to the rule above. Each cell becomes one
-piece: the cell's own triangle plus three half-size tabs that slide *under* the
-neighbouring pieces, so the built mosaic is the artwork and the tabs are never
-seen. Rounding is undefined here because on a cut sheet every segment is a line
-*shared* between two pieces, convex to one and concave to the other. The tile is
-laid two ways and they must not be confused: **assembled**, cores on their cells
-and pieces overlapping, and **nested**, the `√7`-scaled 19.1°-rotated tiling used
-to pack a sheet with shared cut lines. It builds on the ordinary lattice
-machinery via a half-scale fine lattice, feeding ordinary `TriKey`s to the
-ordinary `traceUnionLoops`. See
-[docs/interlock-export.md](docs/interlock-export.md).
