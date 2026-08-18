@@ -29,6 +29,7 @@ import {
   Paintbrush,
   PaintBucket,
   Puzzle,
+  Layers,
   Snowflake,
   Pipette,
   GitCompareArrows,
@@ -121,6 +122,7 @@ export function Toolbar({
   onExportSVG,
   onExport3D,
   onExportCut,
+  onExportMulticolor,
   onExportInterlock,
   onExportPlotter,
   onExportApparel,
@@ -155,6 +157,7 @@ export function Toolbar({
   onExportSVG: () => void;
   onExport3D: () => void;
   onExportCut: () => void;
+  onExportMulticolor: () => void;
   onExportInterlock: () => void;
   onExportPlotter: () => void;
   onExportApparel: () => void;
@@ -334,6 +337,18 @@ export function Toolbar({
             >
               <Scissors className="w-4 h-4" />
               <span>Cutting...</span>
+            </DropdownMenuItem>
+            {/* Also a flat, single-material cut, but the same sheet carries
+                every polygon in one color, and the mats are a separate file.
+                Placed beside Cutting as a sibling mode. */}
+            <DropdownMenuItem
+              onClick={() => {
+                setExportOpen(false);
+                onExportMulticolor();
+              }}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Multicolor...</span>
             </DropdownMenuItem>
             {/* Beside Cutting rather than inside it: same machine, but it
                 stacks nothing and joins nothing — every cell is one flat
