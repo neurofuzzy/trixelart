@@ -27,17 +27,20 @@ import {
   trisBox,
   type Box,
 } from "@/lib/hatch";
+import { colorRamp, subdivisionMode } from "@/lib/subdivision-noise";
 import {
-  noiseSubFills,
-  noiseRegionFills,
-  type SubFill,
-} from "@/lib/subdivision-noise";
-import {
+  flattenRoundedRing,
   stepRegionGeometry,
   type RoundedRing,
 } from "@/lib/round-corners";
 import { silhouetteGeometry } from "@/lib/glow";
-import { GLRenderer, hexColor, type FillBatch, type Color4 } from "@/lib/webgl/renderer";
+import {
+  GLRenderer,
+  hexColor,
+  type FillBatch,
+  type PosBatch,
+  type Color4,
+} from "@/lib/webgl/renderer";
 
 /**
  * The hexagon the stamp and select hover cues outline: the region their next
@@ -109,13 +112,41 @@ interface FillGeometry {
   colors: Float32Array;
 }
 
+/** Per-pixel noise parameters, straight off the effect spec. */
+interface NoiseParams {
+  mode: "midpoint" | "centroid";
+  amountScale: number;
+  seed: number;
+  period?: { m: number; n: number };
+}
+
 /** The rounded/outline geometry of one step, from `effectPlan`. */
 interface EffectStep {
   radius: number;
   outline: number;
   adjust: ((hex: string) => string) | undefined;
-  regionFills: Map<string, SubFill[]> | null;
+  /** Ring-fan triangles per region, present when grain rides under this
+   *  step's rounding; the fragment shader computes the dither. */
+  fans: Float32Array[] | null;
+  noise: NoiseParams | null;
   regions: { fill: string; base: string; rings: RoundedRing[] }[];
+}
+
+/** One colour group of a noisy step: its cells' lattice triangles and the
+ *  dither ramp every one of them shades with. */
+interface NoiseGroupData {
+  ramp: Float32Array;
+  positions: Float32Array;
+}
+/** Per-step noise payload: one group per distinct encoded colour. */
+interface NoiseStepData {
+  groups: NoiseGroupData[];
+  params: NoiseParams;
+}
+/** The GPU-side copy: same groups with uploaded position buffers. */
+interface NoiseStepBatches {
+  params: NoiseParams;
+  groups: { ramp: Float32Array; positions: Float32Array; batch: PosBatch }[];
 }
 
 /** The glow geometry of one step, from `glowPlan`. */
@@ -123,33 +154,6 @@ interface GlowStep {
   spec: { sigma: number; opacity: number; color: string };
   caster: RoundedRing[];
   receiver: RoundedRing[];
-}
-
-/** Sub-fill pieces flattened into triangles, with the colour-adjust filter
- *  applied. A quad piece fans into two triangles; a triangle passes through. */
-function subFillsTriangles(fills: SubFill[], adjust?: (hex: string) => string): FillGeometry {
-  const pos: number[] = [];
-  const col: number[] = [];
-  const pushTri = (
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-    c: { x: number; y: number },
-    hex: string,
-  ) => {
-    const rgb = hexColor(hex);
-    pos.push(a.x, a.y, b.x, b.y, c.x, c.y);
-    for (let k = 0; k < 3; k++) col.push(rgb[0], rgb[1], rgb[2], rgb[3]);
-  };
-  for (const f of fills) {
-    const hex = adjust ? adjust(f.hex) : f.hex;
-    if (f.points.length === 3) {
-      pushTri(f.points[0], f.points[1], f.points[2], hex);
-    } else if (f.points.length >= 4) {
-      pushTri(f.points[0], f.points[1], f.points[2], hex);
-      pushTri(f.points[0], f.points[2], f.points[3], hex);
-    }
-  }
-  return { positions: new Float32Array(pos), colors: new Float32Array(col) };
 }
 
 /**
@@ -166,8 +170,10 @@ function fillStepGeometry(
   const radius = stepRoundRadius(step);
   const outline = stepOutlineWeight(step);
   if (radius > 0 || outline > 0) return null;
+  // A noisy plain step renders through the noise shader instead (see
+  // `noiseData`) — its geometry is just the lattice triangles, positions only.
+  if (stepSubdivisionNoise(step, noisePeriod)) return null;
   const adjust = stepColorAdjust(step);
-  const noise = stepSubdivisionNoise(step, noisePeriod);
 
   const pos: number[] = [];
   const col: number[] = [];
@@ -190,15 +196,6 @@ function fillStepGeometry(
     const type = parts[2] as TriType;
     if (isNoPrint(encoded)) continue;
 
-    if (noise) {
-      const sub = subFillsTriangles(noiseSubFills(q, r, type, encoded, noise), adjust);
-      for (let i = 0; i < sub.positions.length; i++) {
-        pos.push(sub.positions[i]);
-        col.push(sub.colors[i]);
-      }
-      continue;
-    }
-
     const resolved = adjust ? adjust(resolveColor(encoded)) : resolveColor(encoded);
     const rgb = hexColor(resolved);
     const [a, b, c] = getTriVertices(q, r, type);
@@ -206,6 +203,73 @@ function fillStepGeometry(
   }
 
   return pos.length ? { positions: new Float32Array(pos), colors: new Float32Array(col) } : null;
+}
+
+/**
+ * Builds the per-step noise payload: cells grouped by encoded colour, each
+ * group carrying its lattice triangles and that colour's dither ramp. The
+ * fragment shader does everything else — see FS_NOISE.
+ */
+function buildNoiseGroups(
+  step: RenderStep,
+  noisePeriod: { m: number; n: number } | undefined,
+): NoiseStepData | null {
+  if (step.kind !== "fill") return null;
+  const spec = stepSubdivisionNoise(step, noisePeriod);
+  if (!spec) return null;
+
+  const ids = new Map<string, number>();
+  const groups: { ramp: Float32Array; positions: number[] }[] = [];
+  let count = 0;
+
+  for (const [key, encoded] of Object.entries(step.painted)) {
+    const parts = key.split(",");
+    if (parts.length !== 3) continue;
+    const q = parseInt(parts[0]);
+    const r = parseInt(parts[1]);
+    if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
+    const type = parts[2] as TriType;
+    if (isNoPrint(encoded)) continue;
+
+    let gi = ids.get(encoded);
+    if (gi === undefined) {
+      gi = groups.length;
+      ids.set(encoded, gi);
+      const rampHexes = colorRamp(encoded);
+      groups.push({
+        ramp: new Float32Array(rampHexes.flatMap((h) => hexColor(h).slice(0, 3))),
+        positions: [],
+      });
+    }
+    const [a, b, c] = getTriVertices(q, r, type);
+    groups[gi].positions.push(a.x, a.y, b.x, b.y, c.x, c.y);
+    count++;
+  }
+  if (count === 0) return null;
+
+  return {
+    groups: groups.map((g) => ({ ramp: g.ramp, positions: new Float32Array(g.positions) })),
+    params: {
+      mode: subdivisionMode(spec),
+      amountScale: Math.max(0, Math.min(100, spec.amount)) / 100,
+      seed: spec.seed | 0,
+      period: spec.period,
+    },
+  };
+}
+
+/** Ring fans for the rounded-grain path: one flattened ring fanned from its
+ *  first point. Exporter-grade flattening (the shader colours it per pixel,
+ *  so chord accuracy only has to beat the dither scale). */
+function fanPositions(rings: RoundedRing[]): Float32Array {
+  const tris: number[] = [];
+  for (const ring of rings) {
+    const pts = flattenRoundedRing(ring);
+    for (let i = 1; i < pts.length - 1; i++) {
+      tris.push(pts[0][0], pts[0][1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+    }
+  }
+  return new Float32Array(tris);
 }
 
 /** Whether a triangle's bounding box overlaps `box` — the cheap off-screen test
@@ -279,6 +343,9 @@ export function GridCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
   const [renderer, setRenderer] = useState<GLRenderer | null>(null);
+  // Bumped when the WebGL context is lost: remounts the canvas so a brand-new
+  // context backs the new renderer.
+  const [glEpoch, setGlEpoch] = useState(0);
 
   // Marching-ants animation tick (8 px/s equivalent in screen px). Stops
   // when there's no selection so we don't repaint forever.
@@ -294,15 +361,63 @@ export function GridCanvas({
     return () => cancelAnimationFrame(raf);
   }, [selectedHexes]);
 
-  // Create the WebGL renderer once the canvas is in the DOM.
+  // Create the WebGL renderer once per canvas lifetime. `glEpoch` bumps only
+  // when the context is lost (a lost context's only reliable reset is a new
+  // canvas + context); the effect deliberately does NOT list `renderer` in its
+  // dependencies — the `setRenderer` below changes it, and a re-run would run
+  // this cleanup first, disposing the renderer we just installed (an endless
+  // create/dispose storm). The local ref guards double-invocation instead.
+ //
+ // Creation can fail transiently: drivers may defer shader compilation and
+ // report COMPILE/LINK_STATUS=false with a null info log while the GLSL is
+ // still being compiled on the GPU process. Retry on the same canvas — the
+ // context is reused, so attempts are cheap — before declaring failure.
+  const createdRef = useRef<GLRenderer | null>(null);
   useEffect(() => {
-    if (renderer || !canvasRef.current) return;
-    try {
-      setRenderer(new GLRenderer(canvasRef.current));
-    } catch (e) {
-      console.error("WebGL init failed:", e);
-    }
-  }, [renderer]);
+    if (createdRef.current || !canvasRef.current) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryCreate = () => {
+      if (cancelled || createdRef.current || !canvasRef.current) return;
+      attempts++;
+      try {
+        const r = new GLRenderer(canvasRef.current);
+        createdRef.current = r;
+        setRenderer(r);
+      } catch (e) {
+        if (attempts >= 40) {
+          console.error("WebGL init failed:", e);
+          return;
+        }
+        setTimeout(tryCreate, 80);
+      }
+    };
+    tryCreate();
+    return () => {
+      cancelled = true;
+      createdRef.current?.dispose();
+      createdRef.current = null;
+      setRenderer(null);
+    };
+  }, [glEpoch]);
+
+  // A lost context silently no-ops every draw — the artwork would vanish with
+  // no error anywhere user-visible. Swallow the default (which would tear the
+  // canvas down) and rebuild. Losses on a stale canvas (the one being torn
+  // down by a rebuild) must be ignored, or the disposal itself would trigger
+  // another rebuild.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onLost = (e: Event) => {
+      if (e.target !== canvas) return;
+      e.preventDefault();
+      console.warn("[trixel] WebGL context lost — rebuilding the renderer.");
+      setGlEpoch((n) => n + 1);
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
+    return () => canvas.removeEventListener("webglcontextlost", onLost);
+  }, [glEpoch]);
 
   // The same plan the exporters walk, so preview and file agree on coalescing.
   const plan = useMemo(() => buildRenderPlan(layers), [layers]);
@@ -343,23 +458,66 @@ export function GridCanvas({
         const outline = stepOutlineWeight(step);
         if (radius <= 0 && outline <= 0) return null;
         const adjust = stepColorAdjust(step);
-        const noise = stepSubdivisionNoise(step, noisePeriod);
+        const spec = stepSubdivisionNoise(step, noisePeriod);
+        const noise: NoiseParams | null = spec
+          ? {
+              mode: subdivisionMode(spec),
+              amountScale: Math.max(0, Math.min(100, spec.amount)) / 100,
+              seed: spec.seed | 0,
+              period: spec.period,
+            }
+          : null;
+        const regions =
+          radius > 0 || outline > 0
+            ? stepRegionGeometry(step.painted, radius, adjust)
+            : [];
         return {
           radius,
           outline,
           adjust,
-          // Memoised here rather than rebuilt per frame: this path cannot be
-          // viewport-culled, so it must not land on a pan or a hover.
-          regionFills:
-            noise && outline <= 0
-              ? noiseRegionFills(step.painted, noise)
-              : null,
-          regions: stepRegionGeometry(step.painted, radius, adjust),
+          // Grain under rounding shades the region's own ring fans (the
+          // fragment shader decides per pixel), so each region carries its
+          // fan mesh. An outlined layer has no interior to texture.
+          fans:
+            regions.map((rg) => fanPositions(rg.rings)),
+          noise,
+          regions,
         } as EffectStep;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [plan, hueOffset, saturationOffset, noisePeriod],
   );
+
+  // Per-step noise groups (cells grouped by colour + their dither ramps),
+  // memoised on the same key as `effectPlan` — a palette shift re-resolves
+  // every ramp through module state, exactly like the geometry memos above.
+  const noiseData = useMemo(
+    () => plan.map((step) => buildNoiseGroups(step, noisePeriod)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, hueOffset, saturationOffset, noisePeriod],
+  );
+
+  // Plain noisy steps get one retained positions batch per colour group.
+  // Rounded steps shade their region fans instead (see drawFillStep), uploaded
+  // per frame — regions are few and fans are small.
+  const noiseBatchesRef = useRef<(NoiseStepBatches | null)[] | null>(null);
+  useEffect(() => {
+    if (!renderer) return;
+    const own = renderer;
+    const build = (d: NoiseStepData | null): NoiseStepBatches | null =>
+      d && d.groups.length
+        ? {
+            params: d.params,
+            groups: d.groups.map((g) => ({ ...g, batch: own.makePosBatch(g.positions) })),
+          }
+        : null;
+    const arr = noiseData.map(build);
+    noiseBatchesRef.current = arr;
+    return () => {
+      for (const s of arr)
+        if (s) for (const g of s.groups) own.disposePosBatch(g.batch);
+    };
+  }, [renderer, noiseData]);
 
   // Glow geometry, memoised on the same key and for the same reason. Kept apart
   // from `effectPlan` because a glow needs two shapes rather than one: the
@@ -437,6 +595,7 @@ export function GridCanvas({
     // Artwork — bottom-to-top through the same plan the exporters walk. A
     // blended layer lands in an isolated buffer first and composites whole.
     const batches = fillBatchesRef.current ?? [];
+    const noiseGroups = noiseBatchesRef.current ?? [];
     for (let si = 0; si < plan.length; si++) {
       const step = plan[si];
       if (step.kind === "hatch") {
@@ -446,12 +605,12 @@ export function GridCanvas({
       const blend = stepBlendMode(step);
       if (blend) {
         r.beginBlendStep();
-        drawFillStep(r, si, effectPlan, glowPlan, batches);
+        drawFillStep(r, si, effectPlan, glowPlan, batches, noiseGroups);
         const layerTex = r.endBlendStep();
         r.compositeStep(layerTex, blend);
         r.setOpaque();
       } else {
-        drawFillStep(r, si, effectPlan, glowPlan, batches);
+        drawFillStep(r, si, effectPlan, glowPlan, batches, noiseGroups);
       }
     }
 
@@ -532,6 +691,7 @@ export function GridCanvas({
 
   return (
     <canvas
+      key={glEpoch}
       ref={canvasRef}
       className="absolute inset-0 w-full h-full pointer-events-none"
     />
@@ -551,9 +711,11 @@ function drawFillStep(
   effectPlan: (EffectStep | null)[],
   glowPlan: (GlowStep | null)[],
   batches: (FillBatch | null)[],
+  noiseGroups: (NoiseStepBatches | null)[],
 ): void {
   const geom = effectPlan[si];
   const glow = glowPlan[si];
+  const stepNoise = noiseGroups[si] ?? null;
 
   // The glow falls on the artwork below, clipped to it, and sits under this
   // step's own fills.
@@ -567,6 +729,15 @@ function drawFillStep(
   }
 
   if (!geom) {
+    // A plain noisy step shades its lattice triangles in the fragment shader;
+    // everything else uses its retained colour batch.
+    if (stepNoise) {
+      // One draw per distinct colour: each group's cells share a ramp.
+      r.setOpaque();
+      for (const g of stepNoise.groups)
+        if (g.batch) r.drawNoise(g.batch, g.ramp, stepNoise.params);
+      return;
+    }
     const batch = batches[si];
     if (batch) {
       r.setOpaque();
@@ -575,19 +746,21 @@ function drawFillStep(
     return;
   }
 
-  for (const region of geom.regions) {
-    const grain = geom.regionFills?.get(region.base);
+  for (let ri = 0; ri < geom.regions.length; ri++) {
+    const region = geom.regions[ri];
     const rings = region.rings;
-    if (grain?.length) {
-      // Solid first, grain clipped over it — the same order the canvas path
-      // draws in. The grain covers only the cells the artwork was painted in,
-      // while a rounded ring bulges past them at every reflex corner, so the
-      // solid fill under the clip is what paints that bulge.
+    if (geom.fans && geom.noise && stepNoise) {
+      const fans = geom.fans[ri];
+      if (fans.length === 0) continue;
+      // Solid region first — a rounded ring bulges past the painted cells at
+      // every reflex corner, and those bulges have no grain (they are not any
+      // cell). The clip then confines per-colour group draws to this region,
+      // where the fragment shader dithers each pixel by its own cell.
       r.setOpaque();
       r.fillRings(rings, hexColor(region.fill));
-      const grainGeo = subFillsTriangles(grain, geom.adjust);
       r.beginClip(rings);
-      r.drawTriangles(grainGeo.positions, grainGeo.colors);
+      for (const g of stepNoise.groups)
+        r.drawNoiseDynamic(g.positions, g.ramp, stepNoise.params);
       r.endClip();
     } else if (geom.outline > 0) {
       // The outline effect swaps the solid for a stroke of the region boundary
@@ -596,6 +769,7 @@ function drawFillStep(
       // construction and joins are true circles.
       r.strokeRingOutline(rings, geom.outline, hexColor(region.fill));
     } else {
+      r.setOpaque();
       r.fillRings(rings, hexColor(region.fill));
     }
   }
@@ -1046,6 +1220,4 @@ function polygonFanTris(corners: { x: number; y: number }[]): number[] {
   return out;
 }
 
-// Kept imports referenced even when a build tree-shakes an unused branch:
-void noiseSubFills;
 export type { SubdivisionNoiseSpec } from "@/lib/subdivision-noise";

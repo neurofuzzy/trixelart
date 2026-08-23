@@ -44,7 +44,7 @@
  * exporters that need byte fidelity keep their own 2D backends untouched.
  */
 
-import * as twgl from "twgl";
+import { SIDE, H } from "@/lib/grid-math";
 import { flattenRoundedRing, type RoundedRing } from "@/lib/round-corners";
 
 /** A colour ready for a vertex: straight RGBA in 0..1. */
@@ -60,6 +60,12 @@ export interface ViewTransform {
 export interface FillBatch {
   positions: WebGLBuffer;
   colors: WebGLBuffer;
+  count: number;
+}
+
+/** A positions-only static batch for the noise draw (see `drawNoise`). */
+export interface PosBatch {
+  buffer: WebGLBuffer;
   count: number;
 }
 
@@ -154,6 +160,106 @@ void main() {
     if (f > uDashOn) discard;
   }
   outColor = vec4(vColor.rgb * vColor.a, vColor.a);
+}`;
+
+// Subdivision noise, computed per pixel. The mesh carries nothing but cell
+// triangles (or region-covering fans); a cell-atlas texture names the colour
+// ramp under each pixel, and the shader re-derives everything the CPU path
+// computes in `subdivision-noise.ts`: which sub-piece the pixel sits in (from
+// interpolated barycentrics, ordered exactly like `subdivideTri` /
+// `subdivideTriCentroid`), the same 32-bit avalanche hash seeded by folded
+// cell + piece + seed, the same rounding to NOISE_LEVELS steps, and the same
+// precomputed ramp lookup. Pixels whose cell is unpainted resolve to
+// `uSolid`, which is what lets a rounded region draw its own reflex-corner
+// bulges without a second pass.
+const VS_NOISE = `#version 300 es
+precision highp float;
+uniform mat4 uMVP;
+in vec2 aPos;
+out vec2 vWorld;
+void main() {
+  vWorld = aPos;
+  gl_Position = uMVP * vec4(aPos, 0.0, 1.0);
+}`;
+
+const FS_NOISE = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform vec3 uRamp[17];         // the colour's dither ramp, darkest first
+uniform int uMode;              // 0 = midpoint cut, 1 = centroid fins
+uniform float uAmountScale;     // slider amount 0..100 as 0..1
+uniform int uSeed;
+uniform int uUsePeriod;         // fold the hash key onto the crop repeat?
+uniform int uPeriodM;
+uniform int uPeriodN;
+uniform float uSide;
+uniform float uH;
+
+in vec2 vWorld;
+out vec4 outColor;
+
+void main() {
+  // Which lattice triangle holds this pixel — worldToTri inverted.
+  float rf = vWorld.y / uH;
+  float qf = vWorld.x / uSide - rf * 0.5;
+  int r = int(floor(rf));
+  int q = int(floor(qf));
+  bool up = (fract(qf) + fract(rf)) < 1.0;
+
+  // Barycentric coordinates of the pixel within its own cell, from the cell's
+  // analytic corners in getTriVertices order [a, b, c].
+  float bx = float(q) * uSide + float(r) * uSide * 0.5;
+  float by = float(r) * uH;
+  vec2 A, B, C;
+  if (up) { A = vec2(bx, by); B = vec2(bx + uSide, by); C = vec2(bx + uSide * 0.5, by + uH); }
+  else    { A = vec2(bx + uSide * 0.5, by + uH); B = vec2(bx + uSide * 1.5, by + uH); C = vec2(bx + uSide, by); }
+  vec2 AB = B - A, AC = C - A, PA = vWorld - A;
+  float inv = 1.0 / (AB.x * AC.y - AB.y * AC.x);
+  float bY = (PA.x * AC.y - PA.y * AC.x) * inv;
+  float bZ = (AB.x * PA.y - AB.y * PA.x) * inv;
+  vec3 b = vec3(1.0 - bY - bZ, bY, bZ);
+
+  // The sub-piece the pixel sits in, ordered exactly like subdivideTri /
+  // subdivideTriCentroid name their pieces.
+  float sub;
+  if (uMode == 1) {
+    sub = b.x >= b.y && b.x >= b.z ? 0.0 : (b.y >= b.z ? 1.0 : 2.0);
+  } else {
+    sub = b.x > 0.5 ? 0.0 : (b.y > 0.5 ? 1.0 : (b.z > 0.5 ? 2.0 : 3.0));
+  }
+
+  // Fold the HASH KEY onto the crop repeat (canonicalCell), when there is one
+  // — geometry stays at real coordinates, exactly like the CPU path.
+  int hq = q;
+  int hr = r;
+  if (uUsePeriod == 1) {
+    int rows = uPeriodN * 2;
+    int rr = ((r % rows) + rows) % rows;
+    int k = (r - rr) / rows;
+    // The vertical translation shifts q by n (since (0, 2H) = 2v - u), so the
+    // row index pays that back with N — not M — before q is reduced.
+    hq = (((q + k * uPeriodN) % uPeriodM) + uPeriodM) % uPeriodM;
+    hr = rr;
+  }
+
+  // noiseAt's avalanche, verbatim in 32-bit unsigned arithmetic (JS imul and
+  // GLSL uint multiply both wrap mod 2^32).
+  uint h = uint(hq) * 0x27d4eb2du;
+  h = h ^ (uint(hr) * 0x165667b1u);
+  h = h ^ ((up ? 1u : 2u) * 0x9e3779b9u);
+  h = h ^ (uint(sub + 1.0) * 0x85ebca6bu);
+  h = h ^ (uint(uSeed) * 0xc2b2ae35u);
+  h = (h ^ (h >> 16)) * 0x21f0aaadu;
+  h = (h ^ (h >> 15)) * 0x735a2d97u;
+  h = h ^ (h >> 15);
+  float n = (float(h) / 2147483648.0) - 1.0;
+
+  // Math.round(n * amountScale * NOISE_LEVELS), clamped to the ramp.
+  int level = int(floor(n * uAmountScale * 8.0 + 0.5));
+  level = clamp(level, -8, 8);
+
+  outColor = vec4(uRamp[level + 8], 1.0);
 }`;
 
 const VS_QUAD = `#version 300 es
@@ -315,16 +421,24 @@ function gaussianKernel(sigmaTexel: number): { step: number; kernel: Float32Arra
   return { step, kernel };
 }
 
+/** A compiled program plus cached uniform locations — the tiny slice of
+ *  twgl's ProgramInfo this renderer needs, without its link race. */
+interface Prog {
+  program: WebGLProgram;
+  u(name: string): WebGLUniformLocation | null;
+}
+
 export class GLRenderer {
   private gl: WebGL2RenderingContext;
 
-  private tri: twgl.ProgramInfo;
-  private line: twgl.ProgramInfo;
-  private outlinePrg: twgl.ProgramInfo;
-  private quad: twgl.ProgramInfo;
-  private solidQuad: twgl.ProgramInfo;
-  private blurPrg: twgl.ProgramInfo;
-  private compositePrg: twgl.ProgramInfo;
+  private tri: Prog;
+  private line: Prog;
+  private outlinePrg: Prog;
+  private noisePrg: Prog;
+  private quad: Prog;
+  private solidQuad: Prog;
+  private blurPrg: Prog;
+  private compositePrg: Prog;
 
   private cssWidth = 0;
   private cssHeight = 0;
@@ -371,25 +485,53 @@ export class GLRenderer {
     this.gl = gl;
     this.maxSamples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number);
 
-    this.tri = twgl.createProgramInfo(gl, [VS_SOLID, FS_SOLID]);
-    this.line = twgl.createProgramInfo(gl, [VS_LINE, FS_LINE]);
-    this.outlinePrg = twgl.createProgramInfo(gl, [VS_OUTLINE, FS_OUTLINE]);
-    this.quad = twgl.createProgramInfo(gl, [VS_QUAD, FS_QUAD]);
-    this.solidQuad = twgl.createProgramInfo(gl, [VS_QUAD, FS_SOLID_QUAD]);
-    this.blurPrg = twgl.createProgramInfo(gl, [VS_QUAD, FS_BLUR]);
-    this.compositePrg = twgl.createProgramInfo(gl, [VS_QUAD, FS_COMPOSITE]);
-    for (const [name, info] of [
-      ["solid", this.tri],
-      ["line", this.line],
-      ["outline", this.outlinePrg],
-      ["quad", this.quad],
-      ["solidQuad", this.solidQuad],
-      ["blur", this.blurPrg],
-      ["composite", this.compositePrg],
-    ] as const) {
-      if (!info) throw new Error(`WebGL shader failed to link: ${name}`);
-    }
-
+    // Some drivers report COMPILE/LINK_STATUS=false transiently while shader
+    // compilation is still in flight; force completion and give the status a
+    // few ticks before treating it as a real failure.
+    const mkShader = (type: number, srcText: string): WebGLShader => {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, srcText);
+      gl.compileShader(sh);
+      let ok = !!gl.getShaderParameter(sh, gl.COMPILE_STATUS);
+      for (let t = 0; t < 3 && !ok; t++) {
+        gl.finish();
+        ok = !!gl.getShaderParameter(sh, gl.COMPILE_STATUS);
+      }
+      if (!ok) throw new Error(`WebGL shader compile failed: ${gl.getShaderInfoLog(sh)}`);
+      return sh;
+    };
+    const mkProgram = (vsSrc: string, fsSrc: string): Prog => {
+      const vs = mkShader(gl.VERTEX_SHADER, vsSrc);
+      const fs = mkShader(gl.FRAGMENT_SHADER, fsSrc);
+      let prog: WebGLProgram | null = null;
+      let linked = false;
+      for (let attempt = 0; attempt < 3 && !linked; attempt++) {
+        if (attempt > 0) gl.finish();
+        prog = gl.createProgram()!;
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        linked = !!gl.getProgramParameter(prog!, gl.LINK_STATUS);
+      }
+      if (!prog || !linked)
+        throw new Error(`WebGL program link failed: ${gl.getProgramInfoLog(prog) ?? "no log"}`);
+      const cache = new Map<string, WebGLUniformLocation | null>();
+      return {
+        program: prog,
+        u(name: string) {
+          if (!cache.has(name)) cache.set(name, gl.getUniformLocation(prog!, name));
+          return cache.get(name)!;
+        },
+      };
+    };
+    this.tri = mkProgram(VS_SOLID, FS_SOLID);
+    this.line = mkProgram(VS_LINE, FS_LINE);
+    this.outlinePrg = mkProgram(VS_OUTLINE, FS_OUTLINE);
+    this.noisePrg = mkProgram(VS_NOISE, FS_NOISE);
+    this.quad = mkProgram(VS_QUAD, FS_QUAD);
+    this.solidQuad = mkProgram(VS_QUAD, FS_SOLID_QUAD);
+    this.blurPrg = mkProgram(VS_QUAD, FS_BLUR);
+    this.compositePrg = mkProgram(VS_QUAD, FS_COMPOSITE);
     // A single oversized triangle covers the whole viewport; UVs stretch with
     // it, so a render target is sampled with no half-texel seam.
     this.quadBuf = gl.createBuffer();
@@ -496,16 +638,23 @@ export class GLRenderer {
   /** The world→device transform the current frame is drawn under — the same
    *  numbers `GridCanvas` used to load into a 2D context's CTM. */
   setView(view: ViewTransform): void {
-    const { m4 } = twgl;
     this.zoom = view.zoom;
-    let m = m4.translation([view.x, view.y, 0]);
-    m = m4.multiply(m4.rotationZ(view.rotation), m);
-    m = m4.multiply(m4.scaling([view.zoom, view.zoom, 1]), m);
-    m = m4.multiply(m4.translation([this.cssWidth / 2, this.cssHeight / 2, 0]), m);
-    m = m4.multiply(m4.scaling([this.dpr, this.dpr, 1]), m);
-    m = m4.multiply(m4.scaling([2 / this.deviceW, -2 / this.deviceH, 1]), m);
-    m = m4.multiply(m4.translation([-1, 1, 0]), m);
-    this.uMVP = m;
+    // screen(css) = center + zoom * R(θ) * (world + view); device = css*dpr;
+    // NDC.x = 2*deviceX/deviceW - 1; NDC.y = 1 - 2*deviceY/deviceH.
+    const c = Math.cos(view.rotation), s = Math.sin(view.rotation);
+    const l11 = c * view.zoom, l12 = -s * view.zoom;
+    const l21 = s * view.zoom, l22 = c * view.zoom;
+    const kx = 2 / this.cssWidth, ky = 2 / this.cssHeight;
+    const tvx = l11 * view.x + l12 * view.y;
+    const tvy = l21 * view.x + l22 * view.y;
+    this.uMVP = new Float32Array([
+      kx * l11, ky * l21, 0, 0,
+      kx * l12, -ky * l22, 0, 0,
+      0, 0, 1, 0,
+      kx * (this.cssWidth / 2 + tvx) - 1,
+      1 - ky * (this.cssHeight / 2 + tvy),
+      0, 1,
+    ]);
   }
 
   /** Bind the artwork accumulator and clear colour + stencil for a new frame. */
@@ -533,6 +682,10 @@ export class GLRenderer {
     gl.disable(gl.BLEND);
   }
 
+  /** Set once a frame has ended with a GL error, so the diagnosis is loud
+   *  exactly once instead of every frame. */
+  private reportedFrameError = false;
+
   /** Resolve the artwork accumulator to the canvas element. */
   endFrame(): void {
     const gl = this.gl;
@@ -546,6 +699,27 @@ export class GLRenderer {
     );
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    // A GL error here means some draw this frame was dropped and the artwork
+    // may be incomplete — surface it loudly once rather than silently showing
+    // a black layer. Context loss reports through its own warning instead.
+    const err = gl.getError();
+    if (err !== 0 && err !== 0x9242 && !gl.isContextLost() && !this.reportedFrameError) {
+      this.reportedFrameError = true;
+      console.error(
+        `[trixel] WebGL frame ended with error 0x${err.toString(16)} — a draw was ` +
+        `dropped, so the preview may be incomplete. If this persists, please ` +
+        `report what effects were enabled.`,
+      );
+    }
+  }
+
+  /** Releases the context. Losing it frees every object at once, which makes
+   *  this both the unmount path and the recovery from a lost context (the one
+   *  reliable reset a WebGL context offers). */
+  dispose(): void {
+    this.texFboCache.clear();
+    const ext = this.gl.getExtension("WEBGL_lose_context");
+    ext?.loseContext();
   }
 
   /** Compositing state for the artwork's opaque draws. */
@@ -567,18 +741,21 @@ export class GLRenderer {
   private scratchCol: WebGLBuffer | null = null;
   private scratchLen: WebGLBuffer | null = null;
   private scratchOutline: WebGLBuffer | null = null;
+  private scratchNoise: WebGLBuffer | null = null;
 
   private uploadScratch(data: Float32Array, which: number): WebGLBuffer {
     const gl = this.gl;
     if (which === 0) this.scratchPos ??= gl.createBuffer();
     else if (which === 1) this.scratchCol ??= gl.createBuffer();
     else if (which === 2) this.scratchLen ??= gl.createBuffer();
-    else this.scratchOutline ??= gl.createBuffer();
+    else if (which === 3) this.scratchOutline ??= gl.createBuffer();
+    else this.scratchNoise ??= gl.createBuffer();
     const buf =
       which === 0 ? this.scratchPos!
       : which === 1 ? this.scratchCol!
       : which === 2 ? this.scratchLen!
-      : this.scratchOutline!;
+      : which === 3 ? this.scratchOutline!
+      : this.scratchNoise!;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
     return buf;
@@ -611,10 +788,9 @@ export class GLRenderer {
   }
 
   private drawDynamic(
-    program: twgl.ProgramInfo,
+    program: Prog,
     attribs: Array<{ name: string; data: Float32Array; size: number }>,
     count: number,
-    uniforms: Record<string, unknown>,
   ): void {
     const gl = this.gl;
     const used = new Set<number>();
@@ -627,14 +803,14 @@ export class GLRenderer {
       used.add(loc);
     });
     this.syncAttribs(used);
-    twgl.setUniforms(program, uniforms as never);
+    gl.uniformMatrix4fv(program.u("uMVP"), false, this.uMVP as Float32Array);
     gl.drawArrays(gl.TRIANGLES, 0, count);
   }
 
   /** Binds one static buffer to an attribute of the current program and records
    *  the location in `used` — the retained-batch and quad-blit draws' shared
    *  half of the `drawDynamic` sequence. */
-  private bindAttrib(program: twgl.ProgramInfo, name: string, size: number, buf: WebGLBuffer, used: Set<number>): void {
+  private bindAttrib(program: Prog, name: string, size: number, buf: WebGLBuffer, used: Set<number>): void {
     const gl = this.gl;
     const loc = gl.getAttribLocation(program.program, name);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -653,7 +829,6 @@ export class GLRenderer {
         { name: "aColor", data: colors, size: 4 },
       ],
       count,
-      { uMVP: this.uMVP },
     );
   }
 
@@ -700,7 +875,7 @@ export class GLRenderer {
     this.bindAttrib(program, "aPos", 2, batch.positions, used);
     this.bindAttrib(program, "aColor", 4, batch.colors, used);
     this.syncAttribs(used);
-    twgl.setUniforms(program, { uMVP: this.uMVP } as never);
+    gl.uniformMatrix4fv(program.u("uMVP"), false, this.uMVP as Float32Array);
     gl.drawArrays(gl.TRIANGLES, 0, batch.count);
   }
 
@@ -761,13 +936,18 @@ export class GLRenderer {
    * then costs nothing per frame.
    */
   private viewWorldBox(): { minX: number; minY: number; maxX: number; maxY: number } {
-    const inv = twgl.m4.inverse(this.uMVP as Float32Array);
+    // Invert the affine map analytically. uMVP rows:
+    //   clipX = A*x + B*y + C ; clipY = D*x + E*y + F
+    const m = this.uMVP as Float32Array;
+    const A = m[0], B = m[4], C0 = m[12];
+    const D = m[1], E = m[5], F0 = m[13];
+    const det = A * E - B * D;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const cx of [-1, 1]) {
       for (const cy of [-1, 1]) {
-        // The transform is affine, so the inverse needs no perspective divide.
-        const wx = inv[0] * cx + inv[4] * cy + inv[12];
-        const wy = inv[1] * cx + inv[5] * cy + inv[13];
+        const px = cx - C0, py = cy - F0;
+        const wx = (E * px - B * py) / det;
+        const wy = (-D * px + A * py) / det;
         if (wx < minX) minX = wx;
         if (wy < minY) minY = wy;
         if (wx > maxX) maxX = wx;
@@ -860,7 +1040,6 @@ export class GLRenderer {
         this.tri,
         [{ name: "aPos", data, size: 2 }],
         data.length / 2,
-        { uMVP: this.uMVP },
       );
     };
     write(positive, gl.INCR_WRAP);
@@ -954,6 +1133,96 @@ export class GLRenderer {
     this.syncAttribs(used);
     gl.uniform4f(gl.getUniformLocation(program.program, "uColor"), color[0], color[1], color[2], color[3]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // ---------------------------------------------------------------- noise
+
+  /** A positions-only static batch: the mesh a noise draw covers (a plain
+   *  step's lattice triangles, or a rounded region's ring fans). */
+  makePosBatch(positions: Float32Array): PosBatch {
+    const buffer = this.gl.createBuffer()!;
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+    return { buffer, count: positions.length / 2 };
+  }
+  disposePosBatch(b: PosBatch): void {
+    this.gl.deleteBuffer(b.buffer);
+  }
+
+  /** Draws subdivision noise for ONE colour group: `positions` are the group's
+   *  lattice triangles and `ramp` (17 vec3s, darkest first) is that colour's
+   *  dither ramp — the exact array `colorRamp` produces. Every parameter
+   *  mirrors the CPU path in `subdivision-noise.ts`; FS_NOISE has the maths. */
+  drawNoise(
+    batch: PosBatch,
+    ramp: Float32Array,
+    params: {
+      mode: "midpoint" | "centroid";
+      amountScale: number;
+      seed: number;
+      period?: { m: number; n: number };
+    },
+  ): void {
+    if (batch.count === 0) return;
+    const gl = this.gl;
+    const program = this.noisePrg;
+    gl.useProgram(program.program);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, batch.buffer, used);
+    this.syncAttribs(used);
+
+    gl.uniformMatrix4fv(gl.getUniformLocation(program.program, "uMVP"), false, this.uMVP as Float32Array);
+    gl.uniform3fv(gl.getUniformLocation(program.program, "uRamp"), ramp);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uMode"), params.mode === "centroid" ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uAmountScale"), params.amountScale);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uSeed"), params.seed | 0);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uUsePeriod"), params.period ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uPeriodM"), params.period?.m ?? 1);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uPeriodN"), params.period?.n ?? 1);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uSide"), SIDE);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uH"), H);
+    this.setOpaque();
+    gl.drawArrays(gl.TRIANGLES, 0, batch.count);
+  }
+
+  /** `drawNoise` for meshes that are not retained — a rounded region's ring
+   *  fans, rebuilt only when the plan changes and small enough to re-upload
+   *  per frame. Slot 4 keeps the upload clear of the other scratches. */
+  drawNoiseDynamic(
+    positions: Float32Array,
+    ramp: Float32Array,
+    params: {
+      mode: "midpoint" | "centroid";
+      amountScale: number;
+      seed: number;
+      period?: { m: number; n: number };
+    },
+  ): void {
+    if (positions.length === 0) return;
+    const count = positions.length / 2;
+    const program = this.noisePrg;
+    const gl = this.gl;
+    gl.useProgram(program.program);
+    const used = new Set<number>();
+    const loc = gl.getAttribLocation(program.program, "aPos");
+    const buf = this.uploadScratch(positions, 4);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    used.add(loc);
+    this.syncAttribs(used);
+
+    gl.uniformMatrix4fv(gl.getUniformLocation(program.program, "uMVP"), false, this.uMVP as Float32Array);
+    gl.uniform3fv(gl.getUniformLocation(program.program, "uRamp"), ramp);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uMode"), params.mode === "centroid" ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uAmountScale"), params.amountScale);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uSeed"), params.seed | 0);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uUsePeriod"), params.period ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uPeriodM"), params.period?.m ?? 1);
+    gl.uniform1i(gl.getUniformLocation(program.program, "uPeriodN"), params.period?.n ?? 1);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uSide"), SIDE);
+    gl.uniform1f(gl.getUniformLocation(program.program, "uH"), H);
+    this.setOpaque();
+    gl.drawArrays(gl.TRIANGLES, 0, count);
   }
 
   // ---------------------------------------------------------------- strokes
@@ -1065,12 +1334,6 @@ export class GLRenderer {
         { name: "aLen", data: new Float32Array(lens), size: 1 },
       ],
       positions.length / 2,
-      {
-        uMVP: this.uMVP,
-        uDashPeriod: opts.dash?.period ?? 0,
-        uDashPhase: opts.dash?.phase ?? 0,
-        uDashOn: opts.dash?.on ?? 1,
-      },
     );
   }
 
@@ -1132,7 +1395,6 @@ export class GLRenderer {
         { name: "aLen", data: new Float32Array(lens), size: 1 },
       ],
       positions.length / 2,
-      { uMVP: this.uMVP, uDashPeriod: 0, uDashPhase: 0, uDashOn: 1 },
     );
   }
 
@@ -1166,7 +1428,6 @@ export class GLRenderer {
         { name: "aColor", data: new Float32Array(colors), size: 4 },
       ],
       positions.length / 2,
-      { uMVP: this.uMVP },
     );
   }
 
@@ -1252,12 +1513,10 @@ export class GLRenderer {
     used.add(locPos);
     used.add(locSeg);
     this.syncAttribs(used);
-    twgl.setUniforms(program, {
-      uMVP: this.uMVP,
-      uColor: [color[0], color[1], color[2], color[3]],
-      uHalf: half,
-      uPxScale: pxScale,
-    } as never);
+    gl.uniformMatrix4fv(program.u("uMVP"), false, this.uMVP as Float32Array);
+    gl.uniform4f(program.u("uColor"), color[0], color[1], color[2], color[3]);
+    gl.uniform1f(program.u("uHalf"), half);
+    gl.uniform1f(program.u("uPxScale"), pxScale);
     this.setOverlay();
     gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
   }
@@ -1284,7 +1543,6 @@ export class GLRenderer {
       this.tri,
       [{ name: "aPos", data: positions, size: 2 }],
       positions.length / 2,
-      { uMVP: this.uMVP },
     );
     gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);

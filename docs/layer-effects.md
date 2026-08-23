@@ -626,6 +626,21 @@ recording:
   donuts self-intersected on small features — anything canvas's `stroke()`
   survives.
 
+- **Subdivision noise is computed per pixel in a fragment shader.** The mesh
+  stays at one triangle per cell (grouped by colour, since each colour shares
+  its own 17-entry dither ramp); the shader inverts `worldToTri` to find the
+  pixel's cell, derives barycentric coordinates from the cell's analytic
+  corners to pick the sub-piece (ordering matches `subdivideTri` /
+  `subdivideTriCentroid` exactly), runs the same 32-bit avalanche hash on the
+  folded cell key, quantises with the same round-to-NOISE_LEVELS, and reads the
+  final colour from the ramp `colorRamp` produced. Under rounding the region's
+  ring fans shade with a solid fallback for reflex-corner bulges — pixels that
+  belong to no cell — replacing the earlier clip + grain-triangle pass and its
+  seam concerns. An earlier port tessellated every cell into four or eight CPU
+  triangles per frame's worth of buffer, which multiplied geometry for no gain:
+  the grain is a pure function of cell, piece and seed, which is fragment-
+  shader territory.
+
 One renderer-internal rule keeps all of this deterministic: enabled vertex-
 attrib arrays are global GL state, and a deleted buffer leaves a dangling
 enabled array that makes the next `drawArrays` fail silently (INVALID_OPERATION,
