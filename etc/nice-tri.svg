@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" viewBox="0 0 9 7.92820323028" width="9in" height="7.92820323028in">
+  <g inkscape:groupmode="layer" id="paper" inkscape:label="Paper">
+    <rect x="0" y="0" width="9" height="7.92820323028" fill="#ffffff" stroke="none"/>
+  </g>
+  <g inkscape:groupmode="layer" id="hatch" inkscape:label="Hatch">
+    <g transform="translate(0.5,0.5) scale(0.08)" fill="none" stroke="#000000" stroke-width="0.147637795276" stroke-linecap="round">
+      <path d="M28.625,38.754 L55.750,85.736 L49.500,85.736 L25.500,44.167 L22.375,49.579 L43.250,85.736"/>
+      <path d="M24.500,85.736 L13.000,65.817 L16.125,60.405 L30.750,85.736 L37.000,85.736 L19.250,54.992"/>
+      <path d="M9.875,71.230 L18.250,85.736 L12.000,85.736 L6.750,76.643 L3.625,82.055 L5.750,85.736"/>
+      <path d="M62.000,85.736 L31.750,33.341 L34.875,27.929 L68.250,85.736 L74.500,85.736 L38.000,22.516 L41.125,17.104 L80.750,85.736 L87.000,85.736 L44.250,11.691 L47.375,6.278 L93.250,85.736"/>
+    </g>
+  </g>
+  <g inkscape:groupmode="layer" id="outlines" inkscape:label="Outlines">
+    <g transform="translate(0.5,0.5) scale(0.08)" fill="none" stroke="#000000" stroke-width="0.147637795276" stroke-linecap="round">
+      <path d="M50.000,0.000 L75.000,43.301 L100.000,86.603 L50.000,86.603 L0.000,86.603 L25.000,43.301 L50.000,0.000"/>
+    </g>
+  </g>
+</svg>

@@ -341,7 +341,7 @@ function srgbToLinear(c: number): number {
 /**
  * OKLab, for measuring "which palette colour is nearest".
  *
- * Plain RGB distance is not good enough here: the palettes span 14 hues at 9
+ * Plain RGB distance is not good enough here: the palettes span 18 hues at 9
  * lightnesses, and Euclidean RGB routinely prefers a wrong-hue swatch over the
  * obvious match. OKLab is near-uniform perceptually, so nearest-in-OKLab is
  * nearest to the eye.
@@ -365,7 +365,7 @@ function oklab(rgb: Rgb): Rgb {
  *
  * Exposed for the plotter export, which reproduces colour as line density in a
  * single ink and therefore needs a brightness that is comparable *across* the
- * 14 palettes. `colorIdx` is not: index 8 of Glacier is 68% lightness and index
+ * 18 palettes. `colorIdx` is not: index 8 of Glacier is 68% lightness and index
  * 8 of Ocean is 88%, and they would plot identically.
  */
 export function oklabLightness(hex: string): number {

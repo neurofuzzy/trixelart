@@ -1,0 +1,344 @@
+[
+  {
+    "name": "Red-Orange Light",
+    "family": "Red-Orange",
+    "level": "Light",
+    "hex": "#E6420B",
+    "hsl": "hsl(15, 90%, 47%)",
+    "hsl_values": {
+      "h": 15,
+      "s": 90,
+      "l": 47
+    },
+    "hsv_source": {
+      "h": 15,
+      "s": 95,
+      "v": 90
+    },
+    "rgb": "rgb(230, 66, 11)",
+    "relative_luminance": 0.207
+  },
+  {
+    "name": "Red-Orange Medium",
+    "family": "Red-Orange",
+    "level": "Medium",
+    "hex": "#BF370A",
+    "hsl": "hsl(15, 90%, 39%)",
+    "hsl_values": {
+      "h": 15,
+      "s": 90,
+      "l": 39
+    },
+    "hsv_source": {
+      "h": 15,
+      "s": 95,
+      "v": 75
+    },
+    "rgb": "rgb(191, 55, 10)",
+    "relative_luminance": 0.138
+  },
+  {
+    "name": "Red-Orange Dark",
+    "family": "Red-Orange",
+    "level": "Dark",
+    "hex": "#732106",
+    "hsl": "hsl(15, 90%, 24%)",
+    "hsl_values": {
+      "h": 15,
+      "s": 90,
+      "l": 24
+    },
+    "hsv_source": {
+      "h": 15,
+      "s": 95,
+      "v": 45
+    },
+    "rgb": "rgb(115, 33, 6)",
+    "relative_luminance": 0.047
+  },
+  {
+    "name": "Yellow-Orange Light",
+    "family": "Yellow-Orange",
+    "level": "Light",
+    "hex": "#E68B0B",
+    "hsl": "hsl(35, 90%, 47%)",
+    "hsl_values": {
+      "h": 35,
+      "s": 90,
+      "l": 47
+    },
+    "hsv_source": {
+      "h": 35,
+      "s": 95,
+      "v": 90
+    },
+    "rgb": "rgb(230, 139, 11)",
+    "relative_luminance": 0.353
+  },
+  {
+    "name": "Yellow-Orange Medium",
+    "family": "Yellow-Orange",
+    "level": "Medium",
+    "hex": "#BF740A",
+    "hsl": "hsl(35, 90%, 39%)",
+    "hsl_values": {
+      "h": 35,
+      "s": 90,
+      "l": 39
+    },
+    "hsv_source": {
+      "h": 35,
+      "s": 95,
+      "v": 75
+    },
+    "rgb": "rgb(191, 116, 10)",
+    "relative_luminance": 0.236
+  },
+  {
+    "name": "Yellow-Orange Dark",
+    "family": "Yellow-Orange",
+    "level": "Dark",
+    "hex": "#734506",
+    "hsl": "hsl(35, 90%, 24%)",
+    "hsl_values": {
+      "h": 35,
+      "s": 90,
+      "l": 24
+    },
+    "hsv_source": {
+      "h": 35,
+      "s": 95,
+      "v": 45
+    },
+    "rgb": "rgb(115, 69, 6)",
+    "relative_luminance": 0.079
+  },
+  {
+    "name": "Yellow-Green Light",
+    "family": "Yellow-Green",
+    "level": "Light",
+    "hex": "#B0E645",
+    "hsl": "hsl(80, 76%, 59%)",
+    "hsl_values": {
+      "h": 80,
+      "s": 76,
+      "l": 59
+    },
+    "hsv_source": {
+      "h": 80,
+      "s": 70,
+      "v": 90
+    },
+    "rgb": "rgb(176, 230, 69)",
+    "relative_luminance": 0.663
+  },
+  {
+    "name": "Yellow-Green Medium",
+    "family": "Yellow-Green",
+    "level": "Medium",
+    "hex": "#93BF39",
+    "hsl": "hsl(80, 54%, 49%)",
+    "hsl_values": {
+      "h": 80,
+      "s": 54,
+      "l": 49
+    },
+    "hsv_source": {
+      "h": 80,
+      "s": 70,
+      "v": 75
+    },
+    "rgb": "rgb(147, 191, 57)",
+    "relative_luminance": 0.438
+  },
+  {
+    "name": "Yellow-Green Dark",
+    "family": "Yellow-Green",
+    "level": "Dark",
+    "hex": "#587322",
+    "hsl": "hsl(80, 54%, 29%)",
+    "hsl_values": {
+      "h": 80,
+      "s": 54,
+      "l": 29
+    },
+    "hsv_source": {
+      "h": 80,
+      "s": 70,
+      "v": 45
+    },
+    "rgb": "rgb(88, 115, 34)",
+    "relative_luminance": 0.145
+  },
+  {
+    "name": "Blue-Green Light",
+    "family": "Blue-Green",
+    "level": "Light",
+    "hex": "#95E6D1",
+    "hsl": "hsl(165, 61%, 74%)",
+    "hsl_values": {
+      "h": 165,
+      "s": 61,
+      "l": 74
+    },
+    "hsv_source": {
+      "h": 165,
+      "s": 35,
+      "v": 90
+    },
+    "rgb": "rgb(149, 230, 209)",
+    "relative_luminance": 0.676
+  },
+  {
+    "name": "Blue-Green Medium",
+    "family": "Blue-Green",
+    "level": "Medium",
+    "hex": "#60BFA7",
+    "hsl": "hsl(165, 43%, 56%)",
+    "hsl_values": {
+      "h": 165,
+      "s": 43,
+      "l": 56
+    },
+    "hsv_source": {
+      "h": 165,
+      "s": 50,
+      "v": 75
+    },
+    "rgb": "rgb(96, 191, 167)",
+    "relative_luminance": 0.425
+  },
+  {
+    "name": "Blue-Green Dark",
+    "family": "Blue-Green",
+    "level": "Dark",
+    "hex": "#397364",
+    "hsl": "hsl(165, 33%, 34%)",
+    "hsl_values": {
+      "h": 165,
+      "s": 33,
+      "l": 34
+    },
+    "hsv_source": {
+      "h": 165,
+      "s": 50,
+      "v": 45
+    },
+    "rgb": "rgb(57, 115, 100)",
+    "relative_luminance": 0.141
+  },
+  {
+    "name": "Blue-Violet Light",
+    "family": "Blue-Violet",
+    "level": "Light",
+    "hex": "#8250E6",
+    "hsl": "hsl(260, 75%, 61%)",
+    "hsl_values": {
+      "h": 260,
+      "s": 75,
+      "l": 61
+    },
+    "hsv_source": {
+      "h": 260,
+      "s": 65,
+      "v": 90
+    },
+    "rgb": "rgb(130, 80, 230)",
+    "relative_luminance": 0.162
+  },
+  {
+    "name": "Blue-Violet Medium",
+    "family": "Blue-Violet",
+    "level": "Medium",
+    "hex": "#6030BF",
+    "hsl": "hsl(260, 60%, 47%)",
+    "hsl_values": {
+      "h": 260,
+      "s": 60,
+      "l": 47
+    },
+    "hsv_source": {
+      "h": 260,
+      "s": 75,
+      "v": 75
+    },
+    "rgb": "rgb(96, 48, 191)",
+    "relative_luminance": 0.084
+  },
+  {
+    "name": "Blue-Violet Dark",
+    "family": "Blue-Violet",
+    "level": "Dark",
+    "hex": "#3D0F99",
+    "hsl": "hsl(260, 82%, 33%)",
+    "hsl_values": {
+      "h": 260,
+      "s": 82,
+      "l": 33
+    },
+    "hsv_source": {
+      "h": 260,
+      "s": 90,
+      "v": 60
+    },
+    "rgb": "rgb(61, 15, 153)",
+    "relative_luminance": 0.036
+  },
+  {
+    "name": "Red-Violet Light",
+    "family": "Red-Violet",
+    "level": "Light",
+    "hex": "#E650B4",
+    "hsl": "hsl(320, 75%, 61%)",
+    "hsl_values": {
+      "h": 320,
+      "s": 75,
+      "l": 61
+    },
+    "hsv_source": {
+      "h": 320,
+      "s": 65,
+      "v": 90
+    },
+    "rgb": "rgb(230, 80, 180)",
+    "relative_luminance": 0.259
+  },
+  {
+    "name": "Red-Violet Medium",
+    "family": "Red-Violet",
+    "level": "Medium",
+    "hex": "#BF1D89",
+    "hsl": "hsl(320, 74%, 43%)",
+    "hsl_values": {
+      "h": 320,
+      "s": 74,
+      "l": 43
+    },
+    "hsv_source": {
+      "h": 320,
+      "s": 85,
+      "v": 75
+    },
+    "rgb": "rgb(191, 29, 137)",
+    "relative_luminance": 0.138
+  },
+  {
+    "name": "Red-Violet Dark",
+    "family": "Red-Violet",
+    "level": "Dark",
+    "hex": "#850D5D",
+    "hsl": "hsl(320, 82%, 29%)",
+    "hsl_values": {
+      "h": 320,
+      "s": 82,
+      "l": 29
+    },
+    "hsv_source": {
+      "h": 320,
+      "s": 90,
+      "v": 52
+    },
+    "rgb": "rgb(133, 13, 93)",
+    "relative_luminance": 0.061
+  }
+]

@@ -1,0 +1,272 @@
+[
+  {
+    "name": "Salmon / Pink Light",
+    "family": "Salmon / Pink",
+    "level": "Light",
+    "hex": "#F2A98C",
+    "hsl": "hsl(17, 80%, 75%)",
+    "hsl_values": {
+      "h": 17,
+      "s": 80,
+      "l": 75
+    },
+    "rgb": "rgb(242, 169, 140)",
+    "relative_luminance": 0.491,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Salmon / Pink Medium",
+    "family": "Salmon / Pink",
+    "level": "Medium",
+    "hex": "#DE7B5C",
+    "hsl": "hsl(14, 66%, 62%)",
+    "hsl_values": {
+      "h": 14,
+      "s": 66,
+      "l": 62
+    },
+    "rgb": "rgb(222, 123, 92)",
+    "relative_luminance": 0.305,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Salmon / Pink Dark",
+    "family": "Salmon / Pink",
+    "level": "Dark",
+    "hex": "#A64E38",
+    "hsl": "hsl(12, 50%, 44%)",
+    "hsl_values": {
+      "h": 12,
+      "s": 50,
+      "l": 44
+    },
+    "rgb": "rgb(166, 78, 56)",
+    "relative_luminance": 0.138,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Gold / Yellow-Orange Light",
+    "family": "Gold / Yellow-Orange",
+    "level": "Light",
+    "hex": "#E8C06B",
+    "hsl": "hsl(41, 73%, 66%)",
+    "hsl_values": {
+      "h": 41,
+      "s": 73,
+      "l": 66
+    },
+    "rgb": "rgb(232, 192, 107)",
+    "relative_luminance": 0.559,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Gold / Yellow-Orange Medium",
+    "family": "Gold / Yellow-Orange",
+    "level": "Medium",
+    "hex": "#C98A2E",
+    "hsl": "hsl(36, 63%, 48%)",
+    "hsl_values": {
+      "h": 36,
+      "s": 63,
+      "l": 48
+    },
+    "rgb": "rgb(201, 138, 46)",
+    "relative_luminance": 0.308,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Gold / Yellow-Orange Dark",
+    "family": "Gold / Yellow-Orange",
+    "level": "Dark",
+    "hex": "#7A4E1C",
+    "hsl": "hsl(32, 63%, 29%)",
+    "hsl_values": {
+      "h": 32,
+      "s": 63,
+      "l": 29
+    },
+    "rgb": "rgb(122, 78, 28)",
+    "relative_luminance": 0.097,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Moss / Yellow-Green Light",
+    "family": "Moss / Yellow-Green",
+    "level": "Light",
+    "hex": "#C7CC6E",
+    "hsl": "hsl(63, 48%, 62%)",
+    "hsl_values": {
+      "h": 63,
+      "s": 48,
+      "l": 62
+    },
+    "rgb": "rgb(199, 204, 110)",
+    "relative_luminance": 0.565,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Moss / Yellow-Green Medium",
+    "family": "Moss / Yellow-Green",
+    "level": "Medium",
+    "hex": "#93A039",
+    "hsl": "hsl(68, 47%, 43%)",
+    "hsl_values": {
+      "h": 68,
+      "s": 47,
+      "l": 43
+    },
+    "rgb": "rgb(147, 160, 57)",
+    "relative_luminance": 0.316,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Moss / Yellow-Green Dark",
+    "family": "Moss / Yellow-Green",
+    "level": "Dark",
+    "hex": "#565E22",
+    "hsl": "hsl(68, 47%, 25%)",
+    "hsl_values": {
+      "h": 68,
+      "s": 47,
+      "l": 25
+    },
+    "rgb": "rgb(86, 94, 34)",
+    "relative_luminance": 0.101,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Teal / Blue-Green Light",
+    "family": "Teal / Blue-Green",
+    "level": "Light",
+    "hex": "#8FB9A8",
+    "hsl": "hsl(156, 23%, 64%)",
+    "hsl_values": {
+      "h": 156,
+      "s": 23,
+      "l": 64
+    },
+    "rgb": "rgb(143, 185, 168)",
+    "relative_luminance": 0.434,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Teal / Blue-Green Medium",
+    "family": "Teal / Blue-Green",
+    "level": "Medium",
+    "hex": "#4C7C6C",
+    "hsl": "hsl(160, 24%, 39%)",
+    "hsl_values": {
+      "h": 160,
+      "s": 24,
+      "l": 39
+    },
+    "rgb": "rgb(76, 124, 108)",
+    "relative_luminance": 0.17,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Teal / Blue-Green Dark",
+    "family": "Teal / Blue-Green",
+    "level": "Dark",
+    "hex": "#2A4A3F",
+    "hsl": "hsl(159, 28%, 23%)",
+    "hsl_values": {
+      "h": 159,
+      "s": 28,
+      "l": 23
+    },
+    "rgb": "rgb(42, 74, 63)",
+    "relative_luminance": 0.057,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Indigo / Blue-Violet Light",
+    "family": "Indigo / Blue-Violet",
+    "level": "Light",
+    "hex": "#9C8FC2",
+    "hsl": "hsl(255, 29%, 66%)",
+    "hsl_values": {
+      "h": 255,
+      "s": 29,
+      "l": 66
+    },
+    "rgb": "rgb(156, 143, 194)",
+    "relative_luminance": 0.306,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Indigo / Blue-Violet Medium",
+    "family": "Indigo / Blue-Violet",
+    "level": "Medium",
+    "hex": "#5F4E96",
+    "hsl": "hsl(254, 32%, 45%)",
+    "hsl_values": {
+      "h": 254,
+      "s": 32,
+      "l": 45
+    },
+    "rgb": "rgb(95, 78, 150)",
+    "relative_luminance": 0.101,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Indigo / Blue-Violet Dark",
+    "family": "Indigo / Blue-Violet",
+    "level": "Dark",
+    "hex": "#332963",
+    "hsl": "hsl(250, 41%, 27%)",
+    "hsl_values": {
+      "h": 250,
+      "s": 41,
+      "l": 27
+    },
+    "rgb": "rgb(51, 41, 99)",
+    "relative_luminance": 0.032,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Plum / Red-Violet Light",
+    "family": "Plum / Red-Violet",
+    "level": "Light",
+    "hex": "#C98FA8",
+    "hsl": "hsl(334, 35%, 67%)",
+    "hsl_values": {
+      "h": 334,
+      "s": 35,
+      "l": 67
+    },
+    "rgb": "rgb(201, 143, 168)",
+    "relative_luminance": 0.349,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Plum / Red-Violet Medium",
+    "family": "Plum / Red-Violet",
+    "level": "Medium",
+    "hex": "#9C4E6C",
+    "hsl": "hsl(337, 33%, 46%)",
+    "hsl_values": {
+      "h": 337,
+      "s": 33,
+      "l": 46
+    },
+    "rgb": "rgb(156, 78, 108)",
+    "relative_luminance": 0.136,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  },
+  {
+    "name": "Plum / Red-Violet Dark",
+    "family": "Plum / Red-Violet",
+    "level": "Dark",
+    "hex": "#63293F",
+    "hsl": "hsl(337, 41%, 27%)",
+    "hsl_values": {
+      "h": 337,
+      "s": 41,
+      "l": 27
+    },
+    "rgb": "rgb(99, 41, 63)",
+    "relative_luminance": 0.046,
+    "source": "eyeballed approximation from photos of traditional yarn color cards (e.g. Rauma \u00c5kl\u00e6garn/Ryegarn style) \u2014 not measured yarn data"
+  }
+]
