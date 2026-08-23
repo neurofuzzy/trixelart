@@ -324,12 +324,22 @@ export class GLRenderer {
     this.gl = gl;
     this.maxSamples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number);
 
-    this.tri = twgl.createProgramInfo(gl, { vs: VS_SOLID, fs: FS_SOLID });
-    this.line = twgl.createProgramInfo(gl, { vs: VS_LINE, fs: FS_LINE });
-    this.quad = twgl.createProgramInfo(gl, { vs: VS_QUAD, fs: FS_QUAD });
-    this.solidQuad = twgl.createProgramInfo(gl, { vs: VS_QUAD, fs: FS_SOLID_QUAD });
-    this.blurPrg = twgl.createProgramInfo(gl, { vs: VS_QUAD, fs: FS_BLUR });
-    this.compositePrg = twgl.createProgramInfo(gl, { vs: VS_QUAD, fs: FS_COMPOSITE });
+    this.tri = twgl.createProgramInfo(gl, [VS_SOLID, FS_SOLID]);
+    this.line = twgl.createProgramInfo(gl, [VS_LINE, FS_LINE]);
+    this.quad = twgl.createProgramInfo(gl, [VS_QUAD, FS_QUAD]);
+    this.solidQuad = twgl.createProgramInfo(gl, [VS_QUAD, FS_SOLID_QUAD]);
+    this.blurPrg = twgl.createProgramInfo(gl, [VS_QUAD, FS_BLUR]);
+    this.compositePrg = twgl.createProgramInfo(gl, [VS_QUAD, FS_COMPOSITE]);
+    for (const [name, info] of [
+      ["solid", this.tri],
+      ["line", this.line],
+      ["quad", this.quad],
+      ["solidQuad", this.solidQuad],
+      ["blur", this.blurPrg],
+      ["composite", this.compositePrg],
+    ] as const) {
+      if (!info) throw new Error(`WebGL shader failed to link: ${name}`);
+    }
 
     // A single oversized triangle covers the whole viewport; UVs stretch with
     // it, so a render target is sampled with no half-texel seam.
@@ -439,13 +449,13 @@ export class GLRenderer {
   setView(view: ViewTransform): void {
     const { m4 } = twgl;
     this.zoom = view.zoom;
-    let m = m4.translation(view.x, view.y, 0);
+    let m = m4.translation([view.x, view.y, 0]);
     m = m4.multiply(m4.rotationZ(view.rotation), m);
     m = m4.multiply(m4.scaling([view.zoom, view.zoom, 1]), m);
-    m = m4.multiply(m4.translation(this.cssWidth / 2, this.cssHeight / 2, 0), m);
+    m = m4.multiply(m4.translation([this.cssWidth / 2, this.cssHeight / 2, 0]), m);
     m = m4.multiply(m4.scaling([this.dpr, this.dpr, 1]), m);
     m = m4.multiply(m4.scaling([2 / this.deviceW, -2 / this.deviceH, 1]), m);
-    m = m4.multiply(m4.translation(-1, 1, 0), m);
+    m = m4.multiply(m4.translation([-1, 1, 0]), m);
     this.uMVP = m;
   }
 
@@ -766,11 +776,11 @@ export class GLRenderer {
     if (round) {
       const segs = Math.max(6, Math.ceil(hw));
       for (let i = 0; i < n; i++) {
-        this.pushDisk(positions, lens, points[i * 2], points[i * 2 + 1], hw, cum[i], segs);
+        this.pushDisk(positions, lens, colors, color, points[i * 2], points[i * 2 + 1], hw, cum[i], segs);
       }
       if (!opts.close) {
-        this.pushDisk(positions, lens, points[0], points[1], hw, cum[0], segs);
-        this.pushDisk(positions, lens, points[(n - 1) * 2], points[(n - 1) * 2 + 1], hw, cum[n - 1], segs);
+        this.pushDisk(positions, lens, colors, color, points[0], points[1], hw, cum[0], segs);
+        this.pushDisk(positions, lens, colors, color, points[(n - 1) * 2], points[(n - 1) * 2 + 1], hw, cum[n - 1], segs);
       }
     }
 
@@ -794,6 +804,8 @@ export class GLRenderer {
   private pushDisk(
     positions: number[],
     lens: number[],
+    colors: number[],
+    color: Color4,
     cx: number,
     cy: number,
     radius: number,
@@ -810,6 +822,9 @@ export class GLRenderer {
         cx + Math.cos(a1) * radius, cy + Math.sin(a1) * radius,
       );
       lens.push(len, len, len);
+      colors.push(color[0], color[1], color[2], color[3]);
+      colors.push(color[0], color[1], color[2], color[3]);
+      colors.push(color[0], color[1], color[2], color[3]);
     }
   }
 
@@ -869,7 +884,7 @@ export class GLRenderer {
       const a0 = (i / segs) * Math.PI * 2;
       const a1 = ((i + 1) / segs) * Math.PI * 2;
       positions.push(cx, cy, cx + Math.cos(a0) * radius, cy + Math.sin(a0) * radius, cx + Math.cos(a1) * radius, cy + Math.sin(a1) * radius);
-      colors.push(color[0], color[1], color[2], color[3]);
+      for (let k = 0; k < 3; k++) colors.push(color[0], color[1], color[2], color[3]);
     }
     this.drawDynamic(
       this.tri,

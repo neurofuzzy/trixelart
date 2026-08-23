@@ -152,7 +152,7 @@ function subFillsTriangles(fills: SubFill[], adjust?: (hex: string) => string): 
   ) => {
     const rgb = hexColor(hex);
     pos.push(a.x, a.y, b.x, b.y, c.x, c.y);
-    col.push(rgb[0], rgb[1], rgb[2], 1);
+    for (let k = 0; k < 3; k++) col.push(rgb[0], rgb[1], rgb[2], rgb[3]);
   };
   for (const f of fills) {
     const hex = adjust ? adjust(f.hex) : f.hex;
@@ -192,7 +192,7 @@ function fillStepGeometry(
     rgb: Color4,
   ) => {
     pos.push(a.x, a.y, b.x, b.y, c.x, c.y);
-    col.push(rgb[0], rgb[1], rgb[2], rgb[3]);
+    for (let k = 0; k < 3; k++) col.push(rgb[0], rgb[1], rgb[2], rgb[3]);
   };
 
   for (const [key, encoded] of Object.entries(step.painted)) {
@@ -752,39 +752,44 @@ function drawGrid(r: GLRenderer, view: DrawView, gridDivisions: number): void {
 }
 
 function drawHexOverlay(r: GLRenderer, view: DrawView, hexMode: HexMode, gridDivisions: number, zoom: number): void {
-  if (hexMode === "world" || gridDivisions <= 0) return;
-  const N = gridDivisions;
-  const s = N * SIDE;
-  const vHalf = N * H;
-  const colWidth = 1.5 * s;
-  const rowHeight = 2 * vHalf;
+  if (hexMode !== "world" && gridDivisions > 0) {
+    const N = gridDivisions;
+    const s = N * SIDE;
+    const vHalf = N * H;
+    const colWidth = 1.5 * s;
+    const rowHeight = 2 * vHalf;
 
-  const cMin = Math.floor(view.minX / colWidth) - 1;
-  const cMax = Math.ceil(view.maxX / colWidth) + 1;
-  const width = Math.max(1.5 / zoom, 1);
-  const dotR = Math.max(5 / zoom, 2);
+    const cMin = Math.floor(view.minX / colWidth) - 1;
+    const cMax = Math.ceil(view.maxX / colWidth) + 1;
+    const width = Math.max(1.5 / zoom, 1);
+    const dotR = Math.max(5 / zoom, 2);
 
-  r.setOverlay();
+    r.setOverlay();
 
-  for (let c = cMin; c <= cMax; c++) {
-    const cx = 1.5 * c * N * SIDE;
-    const cyBase = c * N * H;
-    const kMin = Math.floor((view.minY - cyBase) / rowHeight) - 1;
-    const kMax = Math.ceil((view.maxY - cyBase) / rowHeight) + 1;
-    for (let k = kMin; k <= kMax; k++) {
-      const cy = cyBase + k * rowHeight;
-      r.strokePolyline(
-        [cx + s, cy, cx + s / 2, cy + vHalf, cx - s / 2, cy + vHalf, cx - s, cy, cx - s / 2, cy - vHalf, cx + s / 2, cy - vHalf],
-        hexColor("#ffffff", 0.16),
-        width,
-        { close: true },
-      );
-      if (hexMode === "honeycomb") {
-        r.fillCircle(cx, cy, dotR, hexColor("#ffffff", 0.4));
+    for (let c = cMin; c <= cMax; c++) {
+      const cx = 1.5 * c * N * SIDE;
+      const cyBase = c * N * H;
+      const kMin = Math.floor((view.minY - cyBase) / rowHeight) - 1;
+      const kMax = Math.ceil((view.maxY - cyBase) / rowHeight) + 1;
+      for (let k = kMin; k <= kMax; k++) {
+        const cy = cyBase + k * rowHeight;
+        r.strokePolyline(
+          [cx + s, cy, cx + s / 2, cy + vHalf, cx - s / 2, cy + vHalf, cx - s, cy, cx - s / 2, cy - vHalf, cx + s / 2, cy - vHalf],
+          hexColor("#ffffff", 0.16),
+          width,
+          { close: true },
+        );
+        if (hexMode === "honeycomb") {
+          // Center markers — the origin dot's radius, but dimmer, as the 2D
+          // original drew them.
+          r.fillCircle(cx, cy, dotR, hexColor("#ffffff", 0.4));
+        }
       }
     }
   }
 
+  // Origin marker — the 2D original draws it in every hex mode.
+  r.setOverlay();
   r.fillCircle(0, 0, Math.max(5 / zoom, 2), hexColor("#ffffff"));
 }
 

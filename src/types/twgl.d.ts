@@ -28,7 +28,7 @@ declare module "twgl" {
 
   export function createProgramInfo(
     gl: WebGL2RenderingContext,
-    sources: { vs: string; fs: string },
+    sources: string[] | { vs: string; fs: string },
   ): ProgramInfo;
 
   export function createBufferInfoFromArrays(
@@ -63,7 +63,7 @@ declare module "twgl" {
   export const m4: {
     multiply(a: number[], b: number[], out?: number[]): number[];
     identity(out?: number[]): number[];
-    translation(x: number, y: number, z: number): number[];
+    translation(v: number[], out?: number[]): number[];
     translate(m: number[], v: number[]): number[];
     scaling(v: number | number[]): number[];
     scale(m: number[], v: number[]): number[];
