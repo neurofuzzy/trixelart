@@ -240,6 +240,85 @@ function segNormal(x0: number, y0: number, x1: number, y1: number): [number, num
   return [-dy / l, dx / l];
 }
 
+/**
+ * The rounding radius the renderer may actually hold. `roundRing`'s clamp lets a
+ * corner's arc tangent pass a *sharp* vertex along a straight run — fine for a
+ * canvas path, but the flattened polygon then overshoots the boundary and
+ * self-intersects, which no ear clip can tile. Capping each corner's radius at
+ * its own adjacent edges keeps the tangent inside both, so the flattened ring
+ * stays simple at any slider setting. Lattice corners are 60°, so the tangent
+ * distance is `r · cot(30°) = 1.732 r`; dividing by that keeps it ≤ the shorter
+ * edge.
+ */
+function clampedRing(ring: RoundedRing): RoundedRing {
+  const n = ring.length;
+  return ring.map((c, i) => {
+    if (c.radius <= 0 || n < 3) return c;
+    const prev = ring[(i - 1 + n) % n];
+    const next = ring[(i + 1) % n];
+    const ePrev = Math.hypot(c.x - prev.x, c.y - prev.y) || 1;
+    const eNext = Math.hypot(next.x - c.x, next.y - c.y) || 1;
+    return {
+      x: c.x,
+      y: c.y,
+      radius: Math.min(c.radius, Math.min(ePrev, eNext) / 1.75),
+    };
+  });
+}
+
+/** Flat `[x, y, ...]` polygon → a `RoundedRing` of sharp corners, for feeding
+ *  offset curves back into the ring fill machinery. */
+function pointsToRing(flat: number[]): RoundedRing {
+  const ring: RoundedRing = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    ring.push({ x: flat[i], y: flat[i + 1], radius: 0 });
+  }
+  return ring;
+}
+
+/** The two miter-offset curves of a closed polygon at a perpendicular distance
+ *  `hw`. Each vertex is pushed along the bisector of its edge normals so the
+ *  offset polygon matches the original edge for edge; a miter limit turns a
+ *  pathological spike into a flat bevel instead. */
+function offsetDonut(
+  pts: number[],
+  hw: number,
+): { outer: number[]; inner: number[] } {
+  const n = pts.length / 2;
+  const outer: number[] = [];
+  const inner: number[] = [];
+  const MITER_LIMIT = 4;
+  for (let i = 0; i < n; i++) {
+    const p0x = pts[((i - 1 + n) % n) * 2], p0y = pts[((i - 1 + n) % n) * 2 + 1];
+    const p1x = pts[i * 2], p1y = pts[i * 2 + 1];
+    const p2x = pts[((i + 1) % n) * 2], p2y = pts[((i + 1) % n) * 2 + 1];
+    let u0x = p1x - p0x, u0y = p1y - p0y;
+    const l0 = Math.hypot(u0x, u0y) || 1;
+    u0x /= l0;
+    u0y /= l0;
+    let u2x = p2x - p1x, u2y = p2y - p1y;
+    const l2 = Math.hypot(u2x, u2y) || 1;
+    u2x /= l2;
+    u2y /= l2;
+    const n0x = -u0y, n0y = u0x;
+    const n2x = -u2y, n2y = u2x;
+    const dot = n0x * n2x + n0y * n2y;
+    const bx = n0x + n2x, by = n0y + n2y;
+    const denom = 1 + Math.max(-0.98, Math.min(0.98, dot));
+    const k = hw / denom;
+    if (Math.hypot(bx, by) * Math.abs(k) > hw * MITER_LIMIT) {
+      outer.push(p1x + n0x * hw, p1y + n0y * hw);
+      outer.push(p1x + n2x * hw, p1y + n2y * hw);
+      inner.push(p1x - n0x * hw, p1y - n0y * hw);
+      inner.push(p1x - n2x * hw, p1y - n2y * hw);
+    } else {
+      outer.push(p1x + k * bx, p1y + k * by);
+      inner.push(p1x - k * bx, p1y - k * by);
+    }
+  }
+  return { outer, inner };
+}
+
 /** Signed area sign of the first triangle in a flat ear-clip output: the
  *  winding the stencil pass winds by. */
 function trisAreaSign(tris: number[]): number {
@@ -616,7 +695,7 @@ export class GLRenderer {
   // ---------------------------------------------------------------- regions
 
   private ringTriangles(ring: RoundedRing): number[] | null {
-    const flat = flattenRoundedRing(ring);
+    const flat = flattenRoundedRing(clampedRing(ring));
     const pts = dedupeRing(flat);
     return triangulatePolygon(pts);
   }
@@ -776,7 +855,19 @@ export class GLRenderer {
     if (round) {
       const segs = Math.max(6, Math.ceil(hw));
       for (let i = 0; i < n; i++) {
-        this.pushDisk(positions, lens, colors, color, points[i * 2], points[i * 2 + 1], hw, cum[i], segs);
+        // A join disk belongs only where the polyline actually turns. On a
+        // straight run — every lattice point along a region edge, or the
+        // flattened points on a line — a disk would bulge the stroke to twice
+        // its width at each vertex; skipping collinear ones keeps the width
+        // constant exactly as the 2D context's joins do.
+        const px = points[i * 2], py = points[i * 2 + 1];
+        const qx = points[((i + 1) % n) * 2], qy = points[((i + 1) % n) * 2 + 1];
+        const mx = points[((i - 1 + n) % n) * 2], my = points[((i - 1 + n) % n) * 2 + 1];
+        const d1x = px - mx, d1y = py - my;
+        const d2x = qx - px, d2y = qy - py;
+        if (Math.abs(d1x * d2y - d1y * d2x) > 1e-6 * Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y)) {
+          this.pushDisk(positions, lens, colors, color, px, py, hw, cum[i], segs);
+        }
       }
       if (!opts.close) {
         this.pushDisk(positions, lens, colors, color, points[0], points[1], hw, cum[0], segs);
@@ -903,6 +994,29 @@ export class GLRenderer {
       new Float32Array([x, y, x + w, y, x, y + h, x + w, y, x + w, y + h, x, y + h]),
       color,
     );
+  }
+
+  /**
+   * The outline effect: a ring stroked at a uniform world width. Rather than
+   * parking disks at every flattened vertex (which lumps where the ring runs
+   * straight and reads as "joins twice the width"), the ring is offset outward
+   * and inward by half the width with miter joins and the resulting donut is
+   * filled as two rings — width is constant along every straight run and
+   * follows the arcs. A miter limit falls back to a bevel so a sharp turn
+   * cannot spike.
+   */
+  strokeRingOutline(rings: RoundedRing[], width: number, color: Color4): void {
+    if (width <= 0 || rings.length === 0) return;
+    const hw = width / 2;
+    const donuts: RoundedRing[] = [];
+    for (const ring of rings) {
+      const pts = dedupeRing(flattenRoundedRing(clampedRing(ring)));
+      if (pts.length < 3) continue;
+      const flat = pts.flat();
+      const { outer, inner } = offsetDonut(flat, hw);
+      donuts.push(pointsToRing(outer), pointsToRing(inner));
+    }
+    if (donuts.length) this.fillRings(donuts, color);
   }
 
   /** A stroked axis-aligned rect (the crop frame). */
@@ -1205,4 +1319,4 @@ export class GLRenderer {
   }
 }
 
-export { BLEND_MODE_INDEX };
+export { BLEND_MODE_INDEX, clampedRing };

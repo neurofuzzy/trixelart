@@ -39,7 +39,7 @@ import {
 } from "@/lib/round-corners";
 import { silhouetteGeometry } from "@/lib/glow";
 import { triangulatePolygon, dedupeRing } from "@/lib/webgl/triangulate";
-import { GLRenderer, hexColor, type FillBatch, type Color4 } from "@/lib/webgl/renderer";
+import { GLRenderer, hexColor, clampedRing, type FillBatch, type Color4 } from "@/lib/webgl/renderer";
 
 /**
  * The hexagon the stamp and select hover cues outline: the region their next
@@ -132,7 +132,7 @@ interface GlowStep {
 function ringsTriangles(rings: RoundedRing[]): Float32Array | null {
   const tris: number[] = [];
   for (const ring of rings) {
-    const flat = flattenRoundedRing(ring);
+    const flat = flattenRoundedRing(clampedRing(ring));
     const tri = triangulatePolygon(dedupeRing(flat));
     if (tri) tris.push(...tri);
   }
@@ -604,12 +604,11 @@ function drawFillStep(
       r.endClip();
     } else if (geom.outline > 0) {
       // The outline effect swaps the solid for a stroke of the region boundary
-      // at the layer's selected weight; the interior stays empty. Round joins
-      // land exactly on the stroke edge.
+      // at the layer's selected weight; the interior stays empty. Drawn as a
+      // uniform-width ring fill, so the joins scale with the weight and never
+      // lump on straight runs.
       r.setOpaque();
-      for (const ring of rings) {
-        r.strokePolyline(flattenRoundedRing(ring).flat(), hexColor(region.fill), geom.outline, { close: true });
-      }
+      r.strokeRingOutline(rings, geom.outline, hexColor(region.fill));
     } else {
       r.fillRings(rings, hexColor(region.fill));
     }

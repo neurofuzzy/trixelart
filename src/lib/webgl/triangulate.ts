@@ -82,17 +82,22 @@ function isEar(node: Node): boolean {
  * triangles, or `null` when there is nothing worth drawing (degenerate input).
  */
 export function triangulatePolygon(points: Pt[]): number[] | null {
-  const ring = linkPolygon(points);
-  if (!ring) return null;
-
-  // Discard an outer ring with (almost) no area; every lattice ring has plenty.
+  // Establish the winding up front and flip the ring to the one the ear test
+  // expects (a clockwise walk in these coordinates; `isEar`'s reflex check
+  // reads the turn sign). Region rings arrive wound either way — screen-space
+  // ring walks and offset curves don't share a convention — so forcing one here
+  // is what keeps an inverted corner from being treated as reflex.
   let area = 0;
-  for (let p = ring; ; p = p.next) {
-    const q = p.next;
-    area += p.x * q.y - q.x * p.y;
-    if (q === ring) break;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const q = points[(i + 1) % points.length];
+    area += p[0] * q[1] - q[0] * p[1];
   }
   if (Math.abs(area) < EPS) return null;
+  const pts = area > 0 ? points.slice().reverse() : points;
+
+  const ring = linkPolygon(pts);
+  if (!ring) return null;
 
   const out: number[] = [];
   let count = 0;
