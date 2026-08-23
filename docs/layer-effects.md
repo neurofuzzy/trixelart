@@ -587,6 +587,46 @@ cutting and plotter exports walk `painted` directly and see no colour effect at
 all — nor in the apparel *cut*, which is `RawSeg` geometry with no compositing to
 speak of.
 
+## The WebGL preview backend
+
+The live preview is a fourth backend (`src/lib/webgl/renderer.ts`), walking the
+same plan and reading the same step readers as the other three. It reproduces
+canvas semantics rather than approximating them, through three decisions worth
+recording:
+
+- **Region fills are a nonzero-winding stencil fill, not a triangulation.** Each
+  ring is flattened once — `flattenRoundedRing`, the same function the cropped
+  SVG export uses — and drawn as fan triangles into the stencil buffer with
+  INCR/DECR chosen per triangle orientation; a masked quad then paints where
+  the count is nonzero. That is the GPU phrasing of exactly what canvas's
+  default `fill()` computes, and it needs no polygon machinery: holes cancel by
+  winding, concavities and even self-intersections come out right, and there is
+  no ear clipper to bail out or misfile a ring. The previous port triangulated
+  each ring and classified outer vs hole from the first output triangle's sign,
+  but the clipper normalised windings first — every ring got the same sign, so
+  **holes filled solid**, and its bail-out could drop regions whole.
+- **No preview-only clamp.** An earlier port re-clamped each corner's radius
+  against region-local edges so its polygons stayed simple enough to clip;
+  that is the region-local clamp the round-corners section above names as the
+  way to tear seams and diverge from the files. The preview now flattens with
+  the exporters' own radii, and ties the flattening *sagitta* to the view
+  instead — small enough that a chord deviates from its arc by well under half
+  a device pixel — so what is on screen matches what an exporter draws at any
+  zoom.
+- **Outline is a real stroke, not offset geometry.** Ribbon quads plus a round
+  join disk wherever the path turns by enough for the disk to be visible
+  (below half a device pixel the gap reads as the join canvas would draw).
+  Straight lattice runs get no disk, so the width never lumps there. This
+  replaced miter-offset donuts, whose inner offset self-intersects on small
+  features — anything canvas's `stroke()` survives.
+
+One renderer-internal rule keeps all of this deterministic: enabled vertex-
+attrib arrays are global GL state, and a deleted buffer leaves a dangling
+enabled array that makes the next `drawArrays` fail silently (INVALID_OPERATION,
+nothing painted). Every draw therefore disables the attribute locations it does
+not use — the class of bug that presented as whole regions vanishing depending
+on which other layers were edited first.
+
 ## Rounding in the cutting export
 
 The cutting export honours the effect too, but through a **different path** — it

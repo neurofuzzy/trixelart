@@ -22,6 +22,20 @@
  *   ants tick never re-upload the artwork. Line work, clips and overlays rebuild
  *   each frame, exactly as the canvas did.
  *
+ * **Every region fill — rounded rings, glow casters and receivers, clips — goes
+ * through one primitive: `fillRings`, a nonzero-winding stencil fill.** Each
+ * ring's fan triangles are rasterised into the stencil with INCR/DECR_WRAP
+ * chosen by the triangle's own orientation, so the stencil ends up holding the
+ * ring set's exact winding number at every sample; a masked cover quad then
+ * paints where it is nonzero. This is the GPU phrasing of what a 2D context's
+ * default `fill()` computes — the same rule the SVG exporters emit — and it
+ * needs no triangulation: holes cancel by winding, concavities and
+ * self-intersections come out right by construction, and there is no ear clip
+ * to bail out or misfile a ring. (An earlier port triangulated each ring and
+ * classified outer vs hole from the first output triangle's sign; the clipper
+ * normalised windings first, so every ring landed in one bucket and holes
+ * filled solid.)
+ *
  * Blend modes are evaluated in a fragment shader over two resolved textures
  * (the accumulated artwork and the isolated step), matching the Canvas spec's
  * "backdrop alpha is dropped" separable-mode formulas. Glow is a two-pass
@@ -32,7 +46,6 @@
 
 import * as twgl from "twgl";
 import { flattenRoundedRing, type RoundedRing } from "@/lib/round-corners";
-import { triangulatePolygon, dedupeRing } from "@/lib/webgl/triangulate";
 
 /** A colour ready for a vertex: straight RGBA in 0..1. */
 export type Color4 = [number, number, number, number];
@@ -240,94 +253,13 @@ function segNormal(x0: number, y0: number, x1: number, y1: number): [number, num
   return [-dy / l, dx / l];
 }
 
-/**
- * The rounding radius the renderer may actually hold. `roundRing`'s clamp lets a
- * corner's arc tangent pass a *sharp* vertex along a straight run — fine for a
- * canvas path, but the flattened polygon then overshoots the boundary and
- * self-intersects, which no ear clip can tile. Capping each corner's radius at
- * its own adjacent edges keeps the tangent inside both, so the flattened ring
- * stays simple at any slider setting. Lattice corners are 60°, so the tangent
- * distance is `r · cot(30°) = 1.732 r`; dividing by that keeps it ≤ the shorter
- * edge.
- */
-function clampedRing(ring: RoundedRing): RoundedRing {
-  const n = ring.length;
-  return ring.map((c, i) => {
-    if (c.radius <= 0 || n < 3) return c;
-    const prev = ring[(i - 1 + n) % n];
-    const next = ring[(i + 1) % n];
-    const ePrev = Math.hypot(c.x - prev.x, c.y - prev.y) || 1;
-    const eNext = Math.hypot(next.x - c.x, next.y - c.y) || 1;
-    return {
-      x: c.x,
-      y: c.y,
-      radius: Math.min(c.radius, Math.min(ePrev, eNext) / 1.75),
-    };
-  });
-}
-
-/** Flat `[x, y, ...]` polygon → a `RoundedRing` of sharp corners, for feeding
- *  offset curves back into the ring fill machinery. */
-function pointsToRing(flat: number[]): RoundedRing {
-  const ring: RoundedRing = [];
-  for (let i = 0; i < flat.length; i += 2) {
-    ring.push({ x: flat[i], y: flat[i + 1], radius: 0 });
-  }
-  return ring;
-}
-
-/** The two miter-offset curves of a closed polygon at a perpendicular distance
- *  `hw`. Each vertex is pushed along the bisector of its edge normals so the
- *  offset polygon matches the original edge for edge; a miter limit turns a
- *  pathological spike into a flat bevel instead. */
-function offsetDonut(
-  pts: number[],
-  hw: number,
-): { outer: number[]; inner: number[] } {
-  const n = pts.length / 2;
-  const outer: number[] = [];
-  const inner: number[] = [];
-  const MITER_LIMIT = 4;
-  for (let i = 0; i < n; i++) {
-    const p0x = pts[((i - 1 + n) % n) * 2], p0y = pts[((i - 1 + n) % n) * 2 + 1];
-    const p1x = pts[i * 2], p1y = pts[i * 2 + 1];
-    const p2x = pts[((i + 1) % n) * 2], p2y = pts[((i + 1) % n) * 2 + 1];
-    let u0x = p1x - p0x, u0y = p1y - p0y;
-    const l0 = Math.hypot(u0x, u0y) || 1;
-    u0x /= l0;
-    u0y /= l0;
-    let u2x = p2x - p1x, u2y = p2y - p1y;
-    const l2 = Math.hypot(u2x, u2y) || 1;
-    u2x /= l2;
-    u2y /= l2;
-    const n0x = -u0y, n0y = u0x;
-    const n2x = -u2y, n2y = u2x;
-    const dot = n0x * n2x + n0y * n2y;
-    const bx = n0x + n2x, by = n0y + n2y;
-    const denom = 1 + Math.max(-0.98, Math.min(0.98, dot));
-    const k = hw / denom;
-    if (Math.hypot(bx, by) * Math.abs(k) > hw * MITER_LIMIT) {
-      outer.push(p1x + n0x * hw, p1y + n0y * hw);
-      outer.push(p1x + n2x * hw, p1y + n2y * hw);
-      inner.push(p1x - n0x * hw, p1y - n0y * hw);
-      inner.push(p1x - n2x * hw, p1y - n2y * hw);
-    } else {
-      outer.push(p1x + k * bx, p1y + k * by);
-      inner.push(p1x - k * bx, p1y - k * by);
-    }
-  }
-  return { outer, inner };
-}
-
-/** Signed area sign of the first triangle in a flat ear-clip output: the
- *  winding the stencil pass winds by. */
-function trisAreaSign(tris: number[]): number {
-  if (tris.length < 6) return 0;
-  const a = tris[0], b = tris[1];
-  const c = tris[2], d = tris[3];
-  const e = tris[4], f = tris[5];
-  const shoe = a * d + c * f + e * b - (b * c + d * e + f * a);
-  return shoe > 0 ? 1 : shoe < 0 ? -1 : 0;
+/** Signed twice-area of one fan triangle. */
+function triArea2(
+  ax: number, ay: number,
+  bx: number, by: number,
+  cx: number, cy: number,
+): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
 }
 
 /** A symmetric 31-tap gaussian kernel covering ±3σ, centred at index 0.
@@ -607,6 +539,32 @@ export class GLRenderer {
     return buf;
   }
 
+  // Attribute-array hygiene. There are no VAOs here, so enabled attribute
+  // arrays are *global* context state that outlives every draw — and a draw
+  // that leaves a location enabled without binding a buffer to it makes the
+  // next `drawArrays` fail with INVALID_OPERATION and paint nothing (a deleted
+  // fill batch resets any attrib pointing at its buffers to null). Every draw
+  // therefore declares the locations it uses and `syncAttribs` disables
+  // everything else before the call.
+  private enabledAttribs = new Set<number>();
+
+  private syncAttribs(used: Iterable<number>): void {
+    const gl = this.gl;
+    const keep = used instanceof Set ? used : new Set(used);
+    for (const loc of this.enabledAttribs) {
+      if (!keep.has(loc)) {
+        gl.disableVertexAttribArray(loc);
+        this.enabledAttribs.delete(loc);
+      }
+    }
+    for (const loc of keep) {
+      if (!this.enabledAttribs.has(loc)) {
+        gl.enableVertexAttribArray(loc);
+        this.enabledAttribs.add(loc);
+      }
+    }
+  }
+
   private drawDynamic(
     program: twgl.ProgramInfo,
     attribs: Array<{ name: string; data: Float32Array; size: number }>,
@@ -614,16 +572,29 @@ export class GLRenderer {
     uniforms: Record<string, unknown>,
   ): void {
     const gl = this.gl;
+    const used = new Set<number>();
     gl.useProgram(program.program);
     attribs.forEach((a, i) => {
       const loc = gl.getAttribLocation(program.program, a.name);
-      gl.enableVertexAttribArray(loc);
       const buf = this.uploadScratch(a.data, i);
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.vertexAttribPointer(loc, a.size, gl.FLOAT, false, 0, 0);
+      used.add(loc);
     });
+    this.syncAttribs(used);
     twgl.setUniforms(program, uniforms as never);
     gl.drawArrays(gl.TRIANGLES, 0, count);
+  }
+
+  /** Binds one static buffer to an attribute of the current program and records
+   *  the location in `used` — the retained-batch and quad-blit draws' shared
+   *  half of the `drawDynamic` sequence. */
+  private bindAttrib(program: twgl.ProgramInfo, name: string, size: number, buf: WebGLBuffer, used: Set<number>): void {
+    const gl = this.gl;
+    const loc = gl.getAttribLocation(program.program, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+    used.add(loc);
   }
 
   /** One immediate triangle draw with per-vertex colours. */
@@ -680,88 +651,251 @@ export class GLRenderer {
     const gl = this.gl;
     const program = this.tri;
     gl.useProgram(program.program);
-    const pos = gl.getAttribLocation(program.program, "aPos");
-    const col = gl.getAttribLocation(program.program, "aColor");
-    gl.enableVertexAttribArray(pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, batch.positions);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(col);
-    gl.bindBuffer(gl.ARRAY_BUFFER, batch.colors);
-    gl.vertexAttribPointer(col, 4, gl.FLOAT, false, 0, 0);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, batch.positions, used);
+    this.bindAttrib(program, "aColor", 4, batch.colors, used);
+    this.syncAttribs(used);
     twgl.setUniforms(program, { uMVP: this.uMVP } as never);
     gl.drawArrays(gl.TRIANGLES, 0, batch.count);
   }
 
   // ---------------------------------------------------------------- regions
 
-  private ringTriangles(ring: RoundedRing): number[] | null {
-    const flat = flattenRoundedRing(clampedRing(ring));
-    const pts = dedupeRing(flat);
-    return triangulatePolygon(pts);
+  /**
+   * Sagitta bound for arc flattening, in world units: small enough that a chord
+   * deviates from its arc by well under half a device pixel at the current
+   * view. The exporters flatten to a fixed 0.5 world units because their output
+   * is resolution-independent; the preview is watched at a particular zoom, so
+   * it buys accuracy only where the screen can show it.
+   */
+  private sagitta(): number {
+    return Math.min(0.5, 0.35 / Math.max(this.zoom * this.dpr, 1e-6));
+  }
+
+  /** One ring flattened for the current view, as a flat `x,y` list.
+   *  `flattenRoundedRing` already drops coincident points. */
+  private flattenRing(ring: RoundedRing): NumList {
+    const pts = flattenRoundedRing(ring, this.sagitta());
+    const out: number[] = [];
+    for (const p of pts) out.push(p[0], p[1]);
+    return out;
+  }
+
+  /** Device-pixel bounds of a flat world-space point list under the current
+   *  view, padded a couple of pixels — the scissor box that bounds a stencil
+   *  pass, so a big ring costs only its own area rather than the screen's. */
+  private deviceBounds(flat: NumList): { x: number; y: number; w: number; h: number } | null {
+    const m = this.uMVP;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < flat.length; i += 2) {
+      const x = flat[i];
+      const y = flat[i + 1];
+      const cx = m[0] * x + m[4] * y + m[12];
+      const cy = m[1] * x + m[5] * y + m[13];
+      const dx = (cx + 1) * 0.5 * this.deviceW;
+      const dy = (1 - cy) * 0.5 * this.deviceH;
+      if (dx < minX) minX = dx;
+      if (dy < minY) minY = dy;
+      if (dx > maxX) maxX = dx;
+      if (dy > maxY) maxY = dy;
+    }
+    if (!Number.isFinite(minX)) return null;
+    const pad = 2;
+    const x0 = Math.max(0, Math.floor(minX - pad));
+    const y0 = Math.max(0, Math.floor(minY - pad));
+    const x1 = Math.min(this.deviceW, Math.ceil(maxX + pad));
+    const y1 = Math.min(this.deviceH, Math.ceil(maxY + pad));
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
   /**
-   * Fills a set of rings (outer first, holes after) with one colour — the same
-   * shape a Canvas2D `fill()` of the same paths would paint. Opaque fills
-   * disable blending so a region sharing an edge with its neighbour never draws
-   * over it; a single ring skips the stencil entirely and draws its ear-clipped
-   * triangles directly.
+   * The visible world box, recovered by pushing the viewport's corners back
+   * through the inverse of the current transform. Fan triangles entirely
+   * outside it are skipped before upload — a large rounded layer off-screen
+   * then costs nothing per frame.
    */
-  fillRings(rings: RoundedRing[], color: Color4): void {
-    if (rings.length === 0) return;
+  private viewWorldBox(): { minX: number; minY: number; maxX: number; maxY: number } {
+    const inv = twgl.m4.inverse(this.uMVP as Float32Array);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const cx of [-1, 1]) {
+      for (const cy of [-1, 1]) {
+        // The transform is affine, so the inverse needs no perspective divide.
+        const wx = inv[0] * cx + inv[4] * cy + inv[12];
+        const wy = inv[1] * cx + inv[5] * cy + inv[13];
+        if (wx < minX) minX = wx;
+        if (wy < minY) minY = wy;
+        if (wx > maxX) maxX = wx;
+        if (wy > maxY) maxY = wy;
+      }
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  /**
+   * Fan triangles of one flat ring list, split by orientation into the INCR and
+   * DECR batches of the winding pass. The fan `(p0, pi, pi+1)` over a closed
+   * ring covers every point of the plane with signed multiplicity summing to
+   * the ring's winding number there — the discrete Green's-theorem identity —
+   * so incrementing where a fan triangle is positively oriented and decrementing
+   * where negative leaves the stencil holding exactly what canvas's nonzero
+   * rule tests. Zero-area triangles (duplicate points, collinear runs) are
+   * dropped, triangles entirely outside the visible box are too.
+   */
+  private windingBatches(
+    flats: NumList[],
+  ): { positive: Float32Array; negative: Float32Array } {
+    const box = this.viewWorldBox();
+    const pad = Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.05 + 1;
+    const pos: number[] = [];
+    const neg: number[] = [];
+    for (const flat of flats) {
+      const n = flat.length / 2;
+      if (n < 3) continue;
+      const x0 = flat[0], y0 = flat[1];
+      for (let i = 1; i < n - 1; i++) {
+        const ax = flat[i * 2], ay = flat[i * 2 + 1];
+        const bx = flat[(i + 1) * 2], by = flat[(i + 1) * 2 + 1];
+        const area = triArea2(x0, y0, ax, ay, bx, by);
+        if (area === 0) continue;
+        // Cull: bounding box of the triangle against the padded view box.
+        const tMinX = Math.min(x0, ax, bx), tMaxX = Math.max(x0, ax, bx);
+        const tMinY = Math.min(y0, ay, by), tMaxY = Math.max(y0, ay, by);
+        if (
+          tMaxX < box.minX - pad || tMinX > box.maxX + pad ||
+          tMaxY < box.minY - pad || tMinY > box.maxY + pad
+        ) {
+          continue;
+        }
+        const sink = area > 0 ? pos : neg;
+        sink.push(x0, y0, ax, ay, bx, by);
+      }
+    }
+    return { positive: new Float32Array(pos), negative: new Float32Array(neg) };
+  }
+
+  /**
+   * Writes the nonzero winding of a ring set into the stencil buffer of the
+   * current target, scissored to the rings' own footprint. Returns whether a
+   * usable mask is in place: `true` means the caller may draw through it (for
+   * a fill: paint its colour; for a clip: proceed), `false` means the ring set
+   * is degenerate or wholly off-screen and a fill has nothing to do. An empty
+   * *clip* still returns true — with a NEVER test, so nothing draws through
+   * it, matching canvas's clip() on an empty path.
+   */
+  private beginWinding(
+    flats: NumList[],
+    emptyMeansClipAll: boolean,
+  ): boolean {
     const gl = this.gl;
-
-    if (rings.length === 1) {
-      const tris = this.ringTriangles(rings[0]);
-      if (!tris) return;
-      if (color[3] >= 1) this.setOpaque();
-      else this.setOverlay();
-      this.fillTris(new Float32Array(tris), color);
-      return;
+    const bounds = this.deviceBoundsOf(flats);
+    if (!bounds) {
+      gl.enable(gl.STENCIL_TEST);
+      gl.stencilFunc(emptyMeansClipAll ? gl.NEVER : gl.ALWAYS, 0, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      gl.stencilMask(0);
+      return emptyMeansClipAll;
     }
+    const { positive, negative } = this.windingBatches(flats);
 
-    // Stencil winding fill: outer rings wind the stencil +1 per covered sample,
-    // holes -1; a fullscreen quad then fills where the count is non-zero.
-    const positive: number[] = [];
-    const negative: number[] = [];
-    for (const ring of rings) {
-      const tris = this.ringTriangles(ring);
-      if (!tris) continue;
-      if (trisAreaSign(tris) >= 0) positive.push(...tris);
-      else negative.push(...tris);
-    }
-    if (positive.length === 0 && negative.length === 0) return;
-
+    // The bounds are in top-down device coordinates; scissor counts from the
+    // bottom edge.
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(bounds.x, this.deviceH - (bounds.y + bounds.h), bounds.w, bounds.h);
     this.clearStencil();
     gl.enable(gl.STENCIL_TEST);
     gl.stencilMask(0xff);
     gl.colorMask(false, false, false, false);
 
-    const write = (data: number[], op: number) => {
-      if (!data.length) return;
+    const write = (data: Float32Array, op: number) => {
+      if (data.length === 0) return;
       gl.stencilFunc(gl.ALWAYS, 0, 0xff);
       gl.stencilOp(op, op, op);
       this.drawDynamic(
         this.tri,
-        [{ name: "aPos", data: new Float32Array(data), size: 2 }],
+        [{ name: "aPos", data, size: 2 }],
         data.length / 2,
         { uMVP: this.uMVP },
       );
     };
-
     write(positive, gl.INCR_WRAP);
     write(negative, gl.DECR_WRAP);
 
     gl.colorMask(true, true, true, true);
     gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.stencilMask(0);
+    return true;
+  }
+
+  /** Device bounds across several flattened rings, or null when none is on
+   *  screen. */
+  private deviceBoundsOf(flats: NumList[]): { x: number; y: number; w: number; h: number } | null {
+    let merged: { x: number; y: number; w: number; h: number } | null = null;
+    for (const flat of flats) {
+      const b = this.deviceBounds(flat);
+      if (!b) continue;
+      if (!merged) {
+        merged = b;
+        continue;
+      }
+      const x0 = Math.min(merged.x, b.x);
+      const y0 = Math.min(merged.y, b.y);
+      const x1 = Math.max(merged.x + merged.w, b.x + b.w);
+      const y1 = Math.max(merged.y + merged.h, b.y + b.h);
+      merged = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+    return merged;
+  }
+
+  /** Tears down the state `beginWinding` left behind. */
+  private endWinding(): void {
+    const gl = this.gl;
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.STENCIL_TEST);
+    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.stencilMask(0);
+  }
+
+  /**
+   * Fills a set of rings (outers and holes in any order) with one colour — the
+   * same shape a Canvas2D `fill()` of the same paths would paint, by the same
+   * nonzero rule. Opaque fills disable blending so a region sharing an edge
+   * with its neighbour never draws over it. No triangulation anywhere: see the
+   * class header for why the winding-stencil pair replaced the ear clip.
+   */
+  fillRings(rings: RoundedRing[], color: Color4): void {
+    if (rings.length === 0) return;
+    const flats = rings.map((r) => this.flattenRing(r));
+    if (!this.beginWinding(flats, false)) return;
     if (color[3] >= 1) this.setOpaque();
     else this.setOverlay();
     this.blitSolid(color);
-    gl.stencilMask(0);
-    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-    gl.disable(gl.STENCIL_TEST);
+    this.endWinding();
+  }
+
+  /** Begins a stencil clip: only what the given rings cover is drawn by calls
+   *  between this and `endClip()`. Rings wind, so holes clip out for free. An
+   *  empty or off-screen ring set clips everything, matching canvas. */
+  beginClip(rings: RoundedRing[]): void {
+    if (rings.length === 0) {
+      const gl = this.gl;
+      gl.enable(gl.STENCIL_TEST);
+      gl.stencilFunc(gl.NEVER, 0, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      gl.stencilMask(0);
+      return;
+    }
+    this.beginWinding(
+      rings.map((r) => this.flattenRing(r)),
+      true,
+    );
+  }
+
+  /** Ends a clip. Safe to call even when none was begun. */
+  endClip(): void {
+    this.endWinding();
   }
 
   /** A fullscreen draw in one flat colour, the masked fill of a stencil pass. */
@@ -769,14 +903,10 @@ export class GLRenderer {
     const gl = this.gl;
     const program = this.solidQuad;
     gl.useProgram(program.program);
-    const pos = gl.getAttribLocation(program.program, "aPos");
-    const uv = gl.getAttribLocation(program.program, "aUV");
-    gl.enableVertexAttribArray(pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(uv);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadUV);
-    gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 0, 0);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, this.quadBuf!, used);
+    this.bindAttrib(program, "aUV", 2, this.quadUV!, used);
+    this.syncAttribs(used);
     gl.uniform4f(gl.getUniformLocation(program.program, "uColor"), color[0], color[1], color[2], color[3]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -854,24 +984,31 @@ export class GLRenderer {
 
     if (round) {
       const segs = Math.max(6, Math.ceil(hw));
+      // A join disk belongs only where the polyline actually turns by enough
+      // for the disk to be visible: the wedge a skipped disk leaves open is
+      // `hw·sin(turn)` tall, and below half a device pixel it reads as the
+      // round join canvas would have drawn. Straight runs — every lattice
+      // vertex along a region edge, or the flattened points of a nearly flat
+      // arc — then get no disk, and the width stays constant instead of
+      // lumping to twice itself at each vertex.
+      const pxPerUnit = this.zoom * this.dpr;
       for (let i = 0; i < n; i++) {
-        // A join disk belongs only where the polyline actually turns. On a
-        // straight run — every lattice point along a region edge, or the
-        // flattened points on a line — a disk would bulge the stroke to twice
-        // its width at each vertex; skipping collinear ones keeps the width
-        // constant exactly as the 2D context's joins do.
+        if (!opts.close && (i === 0 || i === n - 1)) {
+          this.pushDisk(positions, lens, colors, color, points[i * 2], points[i * 2 + 1], hw, cum[i], segs);
+          continue;
+        }
         const px = points[i * 2], py = points[i * 2 + 1];
         const qx = points[((i + 1) % n) * 2], qy = points[((i + 1) % n) * 2 + 1];
         const mx = points[((i - 1 + n) % n) * 2], my = points[((i - 1 + n) % n) * 2 + 1];
         const d1x = px - mx, d1y = py - my;
         const d2x = qx - px, d2y = qy - py;
-        if (Math.abs(d1x * d2y - d1y * d2x) > 1e-6 * Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y)) {
+        const l1 = Math.hypot(d1x, d1y);
+        const l2 = Math.hypot(d2x, d2y);
+        if (l1 === 0 || l2 === 0) continue;
+        const sinTurn = Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2);
+        if (hw * sinTurn * pxPerUnit > 0.5) {
           this.pushDisk(positions, lens, colors, color, px, py, hw, cum[i], segs);
         }
-      }
-      if (!opts.close) {
-        this.pushDisk(positions, lens, colors, color, points[0], points[1], hw, cum[0], segs);
-        this.pushDisk(positions, lens, colors, color, points[(n - 1) * 2], points[(n - 1) * 2 + 1], hw, cum[n - 1], segs);
       }
     }
 
@@ -997,26 +1134,19 @@ export class GLRenderer {
   }
 
   /**
-   * The outline effect: a ring stroked at a uniform world width. Rather than
-   * parking disks at every flattened vertex (which lumps where the ring runs
-   * straight and reads as "joins twice the width"), the ring is offset outward
-   * and inward by half the width with miter joins and the resulting donut is
-   * filled as two rings — width is constant along every straight run and
-   * follows the arcs. A miter limit falls back to a bevel so a sharp turn
-   * cannot spike.
+   * The outline effect: each region ring stroked at a uniform world width —
+   * the same thing a 2D context's `stroke()` with round joins draws. The ribbon
+   * is segment quads plus a join disk wherever the path actually turns by
+   * enough for the disk to be visible; straight runs (every lattice vertex
+   * along an edge) get no disk, so the width never lumps there.
    */
   strokeRingOutline(rings: RoundedRing[], width: number, color: Color4): void {
     if (width <= 0 || rings.length === 0) return;
-    const hw = width / 2;
-    const donuts: RoundedRing[] = [];
     for (const ring of rings) {
-      const pts = dedupeRing(flattenRoundedRing(clampedRing(ring)));
-      if (pts.length < 3) continue;
-      const flat = pts.flat();
-      const { outer, inner } = offsetDonut(flat, hw);
-      donuts.push(pointsToRing(outer), pointsToRing(inner));
+      const flat = this.flattenRing(ring);
+      if (flat.length < 6) continue;
+      this.strokePolyline(flat, color, width, { close: true });
     }
-    if (donuts.length) this.fillRings(donuts, color);
   }
 
   /** A stroked axis-aligned rect (the crop frame). */
@@ -1025,59 +1155,6 @@ export class GLRenderer {
   }
 
   // ---------------------------------------------------------------- clipping
-
-  /**
-   * Begins a stencil clip: only what the given rings cover is drawn by calls
-   * between this and `endClip()`. Rings are filled by winding, so a ring list
-   * with holes clips the holes out for free.
-   */
-  beginClip(rings: RoundedRing[]): void {
-    if (rings.length === 0) return;
-    const gl = this.gl;
-    const positive: number[] = [];
-    const negative: number[] = [];
-    for (const ring of rings) {
-      const tris = this.ringTriangles(ring);
-      if (!tris) continue;
-      if (trisAreaSign(tris) >= 0) positive.push(...tris);
-      else negative.push(...tris);
-    }
-    if (positive.length === 0 && negative.length === 0) return;
-
-    this.clearStencil();
-    gl.enable(gl.STENCIL_TEST);
-    gl.stencilMask(0xff);
-    gl.colorMask(false, false, false, false);
-
-    const write = (data: number[], op: number) => {
-      if (!data.length) return;
-      gl.stencilFunc(gl.ALWAYS, 0, 0xff);
-      gl.stencilOp(op, op, op);
-      this.drawDynamic(
-        this.tri,
-        [{ name: "aPos", data: new Float32Array(data), size: 2 }],
-        data.length / 2,
-        { uMVP: this.uMVP },
-      );
-    };
-
-    write(positive, gl.INCR_WRAP);
-    write(negative, gl.DECR_WRAP);
-
-    gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-    gl.stencilMask(0);
-    gl.colorMask(true, true, true, true);
-  }
-
-  /** Ends a clip. Safe to call even when none was begun. */
-  endClip(): void {
-    const gl = this.gl;
-    gl.disable(gl.STENCIL_TEST);
-    gl.stencilMask(0);
-    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-  }
 
   /** Clips to a union of grid triangles (a hatch group): draws between the call
    *  and `endClip()` are confined to their interior. */
@@ -1142,14 +1219,10 @@ export class GLRenderer {
 
     const program = this.compositePrg;
     gl.useProgram(program.program);
-    const pos = gl.getAttribLocation(program.program, "aPos");
-    const uv = gl.getAttribLocation(program.program, "aUV");
-    gl.enableVertexAttribArray(pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(uv);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadUV);
-    gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 0, 0);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, this.quadBuf!, used);
+    this.bindAttrib(program, "aUV", 2, this.quadUV!, used);
+    this.syncAttribs(used);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.artTex!);
     gl.activeTexture(gl.TEXTURE1);
@@ -1211,14 +1284,10 @@ export class GLRenderer {
     const uvStep = horizontal ? stepTexel / this.deviceW : stepTexel / this.deviceH;
     const program = this.blurPrg;
     gl.useProgram(program.program);
-    const pos = gl.getAttribLocation(program.program, "aPos");
-    const uv = gl.getAttribLocation(program.program, "aUV");
-    gl.enableVertexAttribArray(pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(uv);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadUV);
-    gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 0, 0);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, this.quadBuf!, used);
+    this.bindAttrib(program, "aUV", 2, this.quadUV!, used);
+    this.syncAttribs(used);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, src);
     gl.uniform1i(gl.getUniformLocation(program.program, "uTex"), 0);
@@ -1290,14 +1359,10 @@ export class GLRenderer {
     const gl = this.gl;
     const program = this.quad;
     gl.useProgram(program.program);
-    const pos = gl.getAttribLocation(program.program, "aPos");
-    const uv = gl.getAttribLocation(program.program, "aUV");
-    gl.enableVertexAttribArray(pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(uv);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadUV);
-    gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 0, 0);
+    const used = new Set<number>();
+    this.bindAttrib(program, "aPos", 2, this.quadBuf!, used);
+    this.bindAttrib(program, "aUV", 2, this.quadUV!, used);
+    this.syncAttribs(used);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(gl.getUniformLocation(program.program, "uTex"), 0);
@@ -1319,4 +1384,4 @@ export class GLRenderer {
   }
 }
 
-export { BLEND_MODE_INDEX, clampedRing };
+export { BLEND_MODE_INDEX };

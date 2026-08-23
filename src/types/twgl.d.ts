@@ -63,6 +63,7 @@ declare module "twgl" {
   export const m4: {
     multiply(a: number[], b: number[], out?: number[]): number[];
     identity(out?: number[]): number[];
+    inverse(m: number[] | Float32Array, out?: number[]): number[];
     translation(v: number[], out?: number[]): number[];
     translate(m: number[], v: number[]): number[];
     scaling(v: number | number[]): number[];

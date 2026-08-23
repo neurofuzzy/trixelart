@@ -34,12 +34,10 @@ import {
 } from "@/lib/subdivision-noise";
 import {
   stepRegionGeometry,
-  flattenRoundedRing,
   type RoundedRing,
 } from "@/lib/round-corners";
 import { silhouetteGeometry } from "@/lib/glow";
-import { triangulatePolygon, dedupeRing } from "@/lib/webgl/triangulate";
-import { GLRenderer, hexColor, clampedRing, type FillBatch, type Color4 } from "@/lib/webgl/renderer";
+import { GLRenderer, hexColor, type FillBatch, type Color4 } from "@/lib/webgl/renderer";
 
 /**
  * The hexagon the stamp and select hover cues outline: the region their next
@@ -125,18 +123,6 @@ interface GlowStep {
   spec: { sigma: number; opacity: number; color: string };
   caster: RoundedRing[];
   receiver: RoundedRing[];
-}
-
-/** A region's rings as ear-clipped triangles, for drawing solid colour inside a
- *  stencil clip (the grain path). */
-function ringsTriangles(rings: RoundedRing[]): Float32Array | null {
-  const tris: number[] = [];
-  for (const ring of rings) {
-    const flat = flattenRoundedRing(clampedRing(ring));
-    const tri = triangulatePolygon(dedupeRing(flat));
-    if (tri) tris.push(...tri);
-  }
-  return tris.length ? new Float32Array(tris) : null;
 }
 
 /** Sub-fill pieces flattened into triangles, with the colour-adjust filter
@@ -593,13 +579,14 @@ function drawFillStep(
     const grain = geom.regionFills?.get(region.base);
     const rings = region.rings;
     if (grain?.length) {
-      // Solid first, grain clipped over it: the clip is antialiased, so painting
-      // only the sub-triangles would feather the region's edge.
-      const tris = ringsTriangles(rings);
-      r.beginClip(rings);
+      // Solid first, grain clipped over it — the same order the canvas path
+      // draws in. The grain covers only the cells the artwork was painted in,
+      // while a rounded ring bulges past them at every reflex corner, so the
+      // solid fill under the clip is what paints that bulge.
       r.setOpaque();
-      if (tris) r.fillTris(tris, hexColor(region.fill));
+      r.fillRings(rings, hexColor(region.fill));
       const grainGeo = subFillsTriangles(grain, geom.adjust);
+      r.beginClip(rings);
       r.drawTriangles(grainGeo.positions, grainGeo.colors);
       r.endClip();
     } else if (geom.outline > 0) {
