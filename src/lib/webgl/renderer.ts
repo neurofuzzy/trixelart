@@ -97,6 +97,41 @@ void main() {
   vLen = aLen;
 }`;
 
+// The outline effect. One expanded quad per segment of the region ring; the
+// fragment shader measures the pixel's true distance to the segment centreline
+// and applies a one-device-pixel coverage ramp, so the drawn set is exactly the
+// union of capsules (segment ⊕ disk halfWidth) — the same shape canvas's
+// round-join stroke covers — with analytic antialiasing at any zoom.
+const VS_OUTLINE = `#version 300 es
+precision highp float;
+uniform mat4 uMVP;
+in vec2 aPos;   // expanded corner, world units
+in vec4 aSeg;   // the segment's own endpoints, world: p0.xy -> p1.zw
+out vec2 vWorld;
+out vec4 vSeg;
+void main() {
+  vWorld = aPos;
+  vSeg = aSeg;
+  gl_Position = uMVP * vec4(aPos, 0.0, 1.0);
+}`;
+
+const FS_OUTLINE = `#version 300 es
+precision highp float;
+uniform vec4 uColor;    // straight rgb + alpha
+uniform float uHalf;    // half stroke width, world units
+uniform float uPxScale; // device pixels per world unit under the current view
+in vec2 vWorld;
+in vec4 vSeg;
+out vec4 outColor;
+void main() {
+  vec2 pa = vWorld - vSeg.xy;
+  vec2 ba = vSeg.zw - vSeg.xy;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+  float d = length(pa - ba * h);
+  float cov = clamp(uHalf + 0.5 / uPxScale - d, 0.0, 1.0);
+  outColor = vec4(uColor.rgb * uColor.a * cov, uColor.a * cov);
+}`;
+
 const FS_SOLID = `#version 300 es
 precision highp float;
 in vec4 vColor;
@@ -285,6 +320,7 @@ export class GLRenderer {
 
   private tri: twgl.ProgramInfo;
   private line: twgl.ProgramInfo;
+  private outlinePrg: twgl.ProgramInfo;
   private quad: twgl.ProgramInfo;
   private solidQuad: twgl.ProgramInfo;
   private blurPrg: twgl.ProgramInfo;
@@ -337,6 +373,7 @@ export class GLRenderer {
 
     this.tri = twgl.createProgramInfo(gl, [VS_SOLID, FS_SOLID]);
     this.line = twgl.createProgramInfo(gl, [VS_LINE, FS_LINE]);
+    this.outlinePrg = twgl.createProgramInfo(gl, [VS_OUTLINE, FS_OUTLINE]);
     this.quad = twgl.createProgramInfo(gl, [VS_QUAD, FS_QUAD]);
     this.solidQuad = twgl.createProgramInfo(gl, [VS_QUAD, FS_SOLID_QUAD]);
     this.blurPrg = twgl.createProgramInfo(gl, [VS_QUAD, FS_BLUR]);
@@ -344,6 +381,7 @@ export class GLRenderer {
     for (const [name, info] of [
       ["solid", this.tri],
       ["line", this.line],
+      ["outline", this.outlinePrg],
       ["quad", this.quad],
       ["solidQuad", this.solidQuad],
       ["blur", this.blurPrg],
@@ -523,17 +561,24 @@ export class GLRenderer {
   }
 
   /** Direct-mode primitives share a small scratch that persists across frames
-   *  so uploads reuse a live buffer rather than churning the allocator. */
+   *  so uploads reuse a live buffer rather than churning the allocator. Slot 3
+   *  carries the interleaved outline segments. */
   private scratchPos: WebGLBuffer | null = null;
   private scratchCol: WebGLBuffer | null = null;
   private scratchLen: WebGLBuffer | null = null;
+  private scratchOutline: WebGLBuffer | null = null;
 
   private uploadScratch(data: Float32Array, which: number): WebGLBuffer {
     const gl = this.gl;
     if (which === 0) this.scratchPos ??= gl.createBuffer();
     else if (which === 1) this.scratchCol ??= gl.createBuffer();
-    else this.scratchLen ??= gl.createBuffer();
-    const buf = which === 0 ? this.scratchPos! : which === 1 ? this.scratchCol! : this.scratchLen!;
+    else if (which === 2) this.scratchLen ??= gl.createBuffer();
+    else this.scratchOutline ??= gl.createBuffer();
+    const buf =
+      which === 0 ? this.scratchPos!
+      : which === 1 ? this.scratchCol!
+      : which === 2 ? this.scratchLen!
+      : this.scratchOutline!;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
     return buf;
@@ -1135,18 +1180,86 @@ export class GLRenderer {
 
   /**
    * The outline effect: each region ring stroked at a uniform world width —
-   * the same thing a 2D context's `stroke()` with round joins draws. The ribbon
-   * is segment quads plus a join disk wherever the path actually turns by
-   * enough for the disk to be visible; straight runs (every lattice vertex
-   * along an edge) get no disk, so the width never lumps there.
+   * the shape canvas's `stroke()` with round joins covers, built from first
+   * principles rather than approximated.
+   *
+   * A round-join stroke of a closed polyline is exactly the **union of
+   * capsules** — one per segment, the segment swept by a disk of half the
+   * width (the Minkowski sum of the polyline with that disk). So each segment
+   * emits one quad, expanded past its ends and sides by half the width plus an
+   * antialias margin, and the fragment shader keeps only the pixels within
+   * half a width of the centreline, ramped over one device pixel. Uniform
+   * width by construction; joins are exact circles wherever segments meet, so
+   * there are no threshold heuristics to leave notches at corners or lump
+   * straight runs; and the coverage ramp antialiases analytically instead of
+   * leaning on multisample edges.
+   *
+   * Overlaps are safe without a mask: interior pixels write coverage 1, which
+   * under premultiplied source-over replaces what is beneath, and two capsules'
+   * fringes coincide only where their boundaries cross at an outer corner,
+   * where stacking two partial coverages just softens the AA slightly.
    */
   strokeRingOutline(rings: RoundedRing[], width: number, color: Color4): void {
     if (width <= 0 || rings.length === 0) return;
+    const pxScale = this.zoom * this.dpr;
+    const half = width / 2;
+    // Expand quads past the capsule by ~1.5 device pixels so the fragment
+    // shader's one-pixel coverage ramp is fully contained in real geometry.
+    const pad = 1.5 / Math.max(pxScale, 1e-6);
+    const ext = half + pad;
+
+    const verts: number[] = [];
     for (const ring of rings) {
-      const flat = this.flattenRing(ring);
-      if (flat.length < 6) continue;
-      this.strokePolyline(flat, color, width, { close: true });
+      const pts = flattenRoundedRing(ring, this.sagitta());
+      const n = pts.length;
+      if (n < 3) continue;
+      for (let i = 0; i < n; i++) {
+        const p0x = pts[i][0], p0y = pts[i][1];
+        const p1x = pts[(i + 1) % n][0], p1y = pts[(i + 1) % n][1];
+        const dx = p1x - p0x, dy = p1y - p0y;
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 1e-12) continue;
+        const inv = ext / Math.sqrt(len2);
+        const tx = dx * inv, ty = dy * inv; // tangent scaled to `ext`
+        const nx = -ty, ny = tx;            // normal, same length
+        // Quad corners: p0 backed off by ext along the tangent, p1 extended
+        // past by ext, both widened by ext on each side.
+        const ax = p0x - tx, ay = p0y - ty;
+        const bx = p1x + tx, by = p1y + ty;
+        const push = (x: number, y: number) => {
+          verts.push(x, y, p0x, p0y, p1x, p1y);
+        };
+        push(ax + nx, ay + ny);
+        push(ax - nx, ay - ny);
+        push(bx + nx, by + ny);
+        push(bx + nx, by + ny);
+        push(ax - nx, ay - ny);
+        push(bx - nx, by - ny);
+      }
     }
+    if (verts.length === 0) return;
+
+    const gl = this.gl;
+    const program = this.outlinePrg;
+    gl.useProgram(program.program);
+    const used = new Set<number>();
+    const locPos = gl.getAttribLocation(program.program, "aPos");
+    const locSeg = gl.getAttribLocation(program.program, "aSeg");
+    const buf = this.uploadScratch(new Float32Array(verts), 3);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(locSeg, 4, gl.FLOAT, false, 24, 8);
+    used.add(locPos);
+    used.add(locSeg);
+    this.syncAttribs(used);
+    twgl.setUniforms(program, {
+      uMVP: this.uMVP,
+      uColor: [color[0], color[1], color[2], color[3]],
+      uHalf: half,
+      uPxScale: pxScale,
+    } as never);
+    this.setOverlay();
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
   }
 
   /** A stroked axis-aligned rect (the crop frame). */

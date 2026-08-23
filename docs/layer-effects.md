@@ -613,12 +613,18 @@ recording:
   instead — small enough that a chord deviates from its arc by well under half
   a device pixel — so what is on screen matches what an exporter draws at any
   zoom.
-- **Outline is a real stroke, not offset geometry.** Ribbon quads plus a round
-  join disk wherever the path turns by enough for the disk to be visible
-  (below half a device pixel the gap reads as the join canvas would draw).
-  Straight lattice runs get no disk, so the width never lumps there. This
-  replaced miter-offset donuts, whose inner offset self-intersects on small
-  features — anything canvas's `stroke()` survives.
+- **The outline is an exact capsule union, not an approximation of a stroke.**
+  A round-join stroke of a closed polyline is precisely the union of
+  per-segment capsules — each segment swept by a disk of half the width — so
+  the renderer emits one expanded quad per segment and the fragment shader
+  keeps only pixels within half a width of the centreline, ramped over one
+  device pixel. Uniform width by construction, joins are true circles, and the
+  antialiasing is analytic rather than riding on multisample edges. An earlier
+  take reused the generic polyline stroker (segment quads plus join disks
+  emitted only above a turn-angle threshold), which left sub-pixel wedge notches
+  at corners and tessellation lumps on dense arcs; before that, miter-offset
+  donuts self-intersected on small features — anything canvas's `stroke()`
+  survives.
 
 One renderer-internal rule keeps all of this deterministic: enabled vertex-
 attrib arrays are global GL state, and a deleted buffer leaves a dangling

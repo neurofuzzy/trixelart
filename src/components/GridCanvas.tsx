@@ -591,10 +591,9 @@ function drawFillStep(
       r.endClip();
     } else if (geom.outline > 0) {
       // The outline effect swaps the solid for a stroke of the region boundary
-      // at the layer's selected weight; the interior stays empty. Drawn as a
-      // uniform-width ring fill, so the joins scale with the weight and never
-      // lump on straight runs.
-      r.setOpaque();
+      // at the layer's selected weight; the interior stays empty. Drawn as an
+      // exact capsule union with analytic coverage, so width is constant by
+      // construction and joins are true circles.
       r.strokeRingOutline(rings, geom.outline, hexColor(region.fill));
     } else {
       r.fillRings(rings, hexColor(region.fill));
