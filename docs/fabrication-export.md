@@ -406,3 +406,75 @@ file will cut. Then:
   outright, without measuring, loses most of the sites on a woven design — and
   the dialog has to *pass* `neck` for the test to mean anything, which it did
   not at first.
+
+---
+
+## 11. The multicolor ("flat") cut (`src/lib/multicolor-export.ts`)
+
+A sibling of the stack cut: each color becomes its own **flat silhouette
+sheet**, carrying every region polygon of the design, so any polygon comes out
+in any color and assembly is colour-cycled with zero paper wasted. Every tile
+also carries the mat structure — the sheet's rectangle with the design's
+rounded silhouette as its window — so the leftover of a cut sheet is already a
+coloured mat.
+
+### Outline mats
+
+Optionally (mats file only; the pieces are untouched), the mat keeps an
+**outline band of a chosen thickness along every colour boundary**. This is
+the outline layer effect's geometry lifted from ink to cut area: the merged
+artwork is one multi-region layer, and the band is its centred stroke —
+
+```text
+bands = (∪ᵢ grow(Rᵢ, +h)) \ (∪ᵢ grow(Rᵢ, −h))     h = thickness / 2
+```
+
+computed by `computeMatOutline` over `plan.regionRings` (the rounded regions,
+so the bands hug exactly what the pieces hug). **Per-region offsets, never one
+union-level offset** — a boolean on the merged silhouette cannot see interior
+colour seams, and the seams are the point. Full-size pieces overlap the seam
+bands, so an outlined mat is a backing and alignment guide rather than a flush
+fit.
+
+Two visible-form decisions:
+
+- **The silhouette's own band is replaced by the page rect**, so a piece still
+  sits flush against the window edge. The band is still *built*: where each
+  interior seam meets the silhouette it is what welds that seam's band to the
+  frame body across the silhouette line (a bare seam band stops half a width
+  short of contact); the final union then absorbs it invisibly into the page.
+- **Non-zero winding, not even-odd.** The result is one boolean union, emitted
+  as plain loops; nesting resolves by winding instead of parity.
+
+The user's two rules, both enforced in `computeMatOutline`:
+
+- **Nothing thinner than 3 mm is offered; band fragments narrower than 2.75 mm
+  are pruned** (`MIN_MAT_OUTLINE_MM`, `PRUNE_WIDTH_MM`). The thickness field
+  clamps to the first; an opening — erode by half the second, dilate back —
+  removes band fragments narrower than it: slivers pinched off where two seams
+  run close, thin shapes swallowed whole by their own band. The prune threshold
+  sits deliberately *below* the clamp: the opening takes half of it out of each
+  side of a band, so a threshold equal to the minimum would make a band cut at
+  exactly 3 mm erase itself (observed: at 3 mm the cleanup ate whole mats).
+  The 0.25 mm margin keeps the smallest allowed band intact.
+- **No floating edges**: a band component is kept only where it overlaps the
+  frame body with positive area (the paper outside the silhouette, always one
+  connected piece — the complement of a bounded blob in a rectangle). Zero-area
+  contact does not count, because a cut along a tangent falls apart anyway;
+  this is also what makes the filter cause-agnostic. Isolation is the common
+  case (an island's grout ring inside another colour reaches nothing else);
+  rounding contributes the rest, since bands derive from the rounded rings and
+  a chain welded only through geometry that rounding pulls apart drops with it.
+  Verified on a synthetic buried island: the dropped material equals the ring
+  estimate to within a few percent, all of it interior.
+
+Grouping loops back into components after the booleans is sign-led: Clipper
+winds outers positive and holes negative here, so each negative loop joins the
+smallest positive ring containing it — containment alone would swallow an
+island outer sitting inside another component's hole.
+
+Clipper loads on demand (`clipper-offset.ts`), so the computation is async like
+every other consumer; the dialog mirrors PlotterDialog's request-id + debounce
+pattern, computes once, and hands the same loops to both the mats preview and
+the SVG builder. `difference` and `intersect` were added to the Clipper API for
+this — same non-zero, cleaned-path shape as `union`.

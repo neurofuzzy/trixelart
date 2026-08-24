@@ -1,8 +1,8 @@
 ```
 # Auto-generated project map
-# Last updated: 2026-08-23 22:15:33
+# Last updated: 2026-08-24 21:24:36
 # Files: 103
-# Lines of code: ~32658
+# Lines of code: ~32990
 ```
 - **/app**
   - **/lib**
@@ -520,6 +520,8 @@
     - Function: `planMulticolor` - Plans the multicolor cut: the region polygons, ...
     - Interface: `MulticolorMetrics`
     - Function: `multicolorMetrics`
+    - Variable: `MIN_MAT_OUTLINE_MM` - Smallest outline weight the mat will cut, mm. T...
+    - Function: `computeMatOutline` - The outlined mat's kept paper, as tile-local do...
     - Function: `buildMulticolorSVG` - The color-sheets file: one tiled paper-sized sh...
     - Function: `buildMulticolorMatsSVG` - The mats file: one paper-sized tile per color —...
     - Type: `MulticolorPreviewMode` - // --------------------------------------------...

@@ -5,7 +5,8 @@ import {
   ROUND_RADIUS_AT_FULL,
 } from "@/lib/round-corners";
 import { traceUnionLoops } from "@/lib/cut-svg";
-import { FAB_CHORD_MM, type Pt } from "@/lib/mesh-export";
+import { FAB_CHORD_MM, signedArea, type Pt } from "@/lib/mesh-export";
+import { loadClipper, type PlotPoly } from "@/lib/clipper-offset";
 import { rotatePoint } from "@/lib/crop";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,17 @@ import { rotatePoint } from "@/lib/crop";
 // on-screen SVG draws); paper-first sizing fits the design into a user-defined
 // sheet minus margins; and an optional second file holds the mats alone — one
 // paper-sized tile per color — for a clean mat without the pieces.
+//
+// The mats can also carry **shape outlines**: a band of a chosen thickness
+// along every color boundary, kept by the mat. Geometrically this is the
+// outline layer effect applied to the merged artwork — a centred stroke of the
+// given weight along every region ring, composed with round corners — lifted
+// from ink to cut area. The one visible difference: the outermost outline (the
+// silhouette's own band) is replaced by the page rectangle, so a piece still
+// sits flush against the window edge. Internally that band is still built — it
+// is the weld that ties every seam band's endpoint to the frame body across
+// the silhouette line; the union then absorbs it into the page. See
+// `computeMatOutline`.
 // ---------------------------------------------------------------------------
 
 export interface MulticolorOptions {
@@ -41,6 +53,9 @@ export interface MulticolorOptions {
   pageSpacingMm: number;
   /** Build the separate mats file (with its own download button). */
   mat: boolean;
+  /** Outline weight on the mats, mm. 0 (the default) means no outlines.
+   *  Clamped up to `MIN_MAT_OUTLINE_MM` wherever it is used. */
+  matOutlineMm?: number;
 }
 
 export interface MulticolorSheet {
@@ -63,6 +78,11 @@ export interface MulticolorPlan {
   /** Every region ring, in artwork order — the full set of polygons each sheet
    *  is cut into. World space, unrotated. */
   polygons: Pt[][];
+  /** The rings again, grouped per region (a region may carry several: its
+   *  outer boundary plus enclosed holes). Index-aligned with `sheets`, and the
+   *  input the mat outline offsets region by region — a union-level offset
+   *  cannot see interior color seams. */
+  regionRings: Pt[][][];
   /** The design's rounded silhouette loops (outer + interior windows), world
    *  space, unrotated. The mat's cut-out window. */
   outline: Pt[][];
@@ -153,6 +173,7 @@ export function planMulticolor(
   return {
     sheets,
     polygons: regions.flatMap((r) => r.rings),
+    regionRings: regions.map((r) => r.rings),
     outline,
     scale,
     box,
@@ -189,6 +210,186 @@ export function multicolorMetrics(
 
 function toPt([x, y]: [number, number]): Pt {
   return { x, y };
+}
+
+// ---------------------------------------------------------------------------
+// The outlined mat
+// ---------------------------------------------------------------------------
+
+/** Smallest outline weight the mat will cut, mm. Thinner bands do not survive
+ *  weeding, so the dialog clamps its field to this. */
+export const MIN_MAT_OUTLINE_MM = 3;
+
+/** Feature width the cleanup opening removes, mm — anything narrower than
+ *  this is pruned from the band set. Deliberately below `MIN_MAT_OUTLINE_MM`:
+ *  the opening takes half of it out of *each side* of a band, so a threshold
+ *  equal to the minimum thickness would leave a band cut at exactly 3 mm with
+ *  no core at all and erase itself. The 0.25 mm margin keeps the smallest
+ *  allowed band intact while still catching pinch-off slivers. */
+const PRUNE_WIDTH_MM = 2.75;
+
+/** Shoelace area of a doc-space ring; sign gives the winding. */
+function loopArea(loop: PlotPoly): number {
+  return signedArea(loop.map(([x, y]) => ({ x, y })));
+}
+
+/** Even-odd point test. Holes lie strictly inside their outer after Clipper's
+ *  clean, so a ring vertex is a safe probe. */
+function loopContains(outer: PlotPoly, pt: [number, number]): boolean {
+  let inside = false;
+  for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
+    const [xi, yi] = outer[i];
+    const [xj, yj] = outer[j];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+interface BandComponent {
+  outer: PlotPoly;
+  holes: PlotPoly[];
+}
+
+/**
+ * Groups a flat Clipper solution into per-component ring sets — each outer
+ * loop with the holes nested in it. Clipper winds outers and holes oppositely,
+ * so the split is by sign: positive loops are outers, and each negative loop
+ * joins the *smallest* positive ring holding it (an outer inside another
+ * outer's hole — an island in a window — must not be swallowed as its
+ * sibling's hole, which is why sign leads and containment only pairs holes
+ * with containers).
+ */
+function bandComponents(loops: PlotPoly[]): BandComponent[] {
+  const outers: BandComponent[] = [];
+  const holes: PlotPoly[] = [];
+  for (const loop of loops) {
+    if (loopArea(loop) >= 0) outers.push({ outer: loop, holes: [] });
+    else holes.push(loop);
+  }
+  for (const hole of holes) {
+    let host: BandComponent | null = null;
+    for (const c of outers) {
+      if (
+        loopContains(c.outer, hole[0]) &&
+        (host === null || Math.abs(loopArea(host.outer)) > Math.abs(loopArea(c.outer)))
+      ) {
+        host = c;
+      }
+    }
+    // Uncontained negative rings do not occur in Clipper output; if one ever
+    // does, keeping it standalone errs toward paper rather than a window.
+    if (host) host.holes.push(hole);
+    else outers.push({ outer: hole, holes: [] });
+  }
+  return outers;
+}
+
+/**
+ * The outlined mat's kept paper, as tile-local doc-mm loops under non-zero
+ * winding — the geometry `buildMulticolorMatsSVG` and the mats preview draw
+ * when outlines are on. Null when the feature is off (`matOutlineMm` below
+ * `MIN_MAT_OUTLINE_MM`), which callers read as "fall back to the plain mat".
+ *
+ * **This is the outline layer effect's geometry, lifted to a cut.** The merged
+ * artwork is one multi-region layer; its outline effect strokes every region
+ * ring at the given weight, composed with round corners (the rings are the
+ * rounded ones already). The stroke becomes area here:
+ *
+ *     bands = (∪ᵢ grow(Rᵢ, +h)) \ (∪ᵢ grow(Rᵢ, −h))     h = weight / 2
+ *
+ * Per-region offsets, not one union-level offset — a boolean on the merged
+ * silhouette cannot see interior color seams, and the seams are the point.
+ * The visible difference from the on-screen effect: the silhouette's own band
+ * is replaced by the page rectangle, so a piece still sits flush against the
+ * window edge. The band is still built — where each seam meets the silhouette
+ * it is what welds that seam's band to the frame body across the silhouette
+ * line (a bare seam band stops half a width short of solid contact) — and the
+ * final union then absorbs it into the frame.
+ *
+ * Two guards, both the user's rules:
+ *
+ * - **Nothing thinner than 3 mm is offered, and band fragments narrower than
+ *   `PRUNE_WIDTH_MM` are removed.** The thickness itself is clamped by the
+ *   caller; here an opening (erode by half the prune width, dilate back)
+ *   removes fragments narrower than that — slivers pinched off where two
+ *   seams run close together, or where a thin shape is swallowed whole. The
+ *   prune threshold sits deliberately *below* the clamp: a band at exactly
+ *   the minimum thickness has no core left once the opening's half-width
+ *   comes out of each side, and would erase itself.
+ * - **No floating edges.** A component is kept only where it overlaps the
+ *   frame body — the paper outside the silhouette, always one connected piece
+ *   (the complement of a bounded blob in a rectangle). Everything else rests
+ *   on nothing once the window is cut. Rounding is what severs these: two
+ *   regions whose bands welded through a sharp pinch corner lose the weld when
+ *   the corners round away, and the chain behind the pinch drops.
+ *
+ * Clipper loads on demand, so this is async like every other consumer
+ * (`clipper-offset.ts`). Pure apart from that: no DOM, no React.
+ */
+export async function computeMatOutline(
+  plan: MulticolorPlan,
+  options: MulticolorOptions,
+  gridRotation = 0,
+): Promise<Pt[][] | null> {
+  const thicknessMm = options.matOutlineMm ?? 0;
+  if (!(thicknessMm >= MIN_MAT_OUTLINE_MM)) return null;
+
+  const clipper = await loadClipper();
+  const tileW = options.paperWidthMm;
+  const tileH = options.paperHeightMm;
+  // Tile-local doc mm at the FIRST tile's placement — design centred in its
+  // paper tile. Every other tile is this geometry translated by its layout
+  // origin, which is how the builders consume it.
+  const cx0 = (tileW - plan.designWmm) / 2;
+  const cy0 = (tileH - plan.designHmm) / 2;
+  const toDoc = (p: Pt): [number, number] => {
+    const [x, y] = rotatePoint(p.x, p.y, gridRotation);
+    return [(x - plan.box.minX) * plan.scale + cx0, (y - plan.box.minY) * plan.scale + cy0];
+  };
+  const regionDocs = plan.regionRings.map((rings) => rings.map((ring) => ring.map(toDoc)));
+  const asPts = (loops: PlotPoly[]): Pt[][] => loops.map((loop) => loop.map(toPt));
+
+  const page: PlotPoly = [
+    [0, 0],
+    [tileW, 0],
+    [tileW, tileH],
+    [0, tileH],
+  ];
+  const silhouette = clipper.union(regionDocs.flat());
+  if (silhouette.length === 0) return null;
+  const frameBody = clipper.difference([page], silhouette);
+
+  // The stroke band, half a width to each side of every region boundary.
+  const half = thicknessMm / 2;
+  let bands = clipper.difference(
+    clipper.union(regionDocs.flatMap((rd) => clipper.offset(rd, half))),
+    clipper.union(regionDocs.flatMap((rd) => clipper.offset(rd, -half))),
+  );
+  // A wide outline can reach past the paper edge when the margin is small.
+  bands = clipper.intersect(bands, [page]);
+
+  // Opening prunes anything narrower than the prune width: erode by half of
+  // it, dilate back. What survives is the thick part of the band, unchanged
+  // in place; what vanished was too thin to cut reliably. The threshold is
+  // under the thickness clamp so a minimum-thickness band survives its own
+  // cleanup (see `PRUNE_WIDTH_MM`).
+  const minHalf = PRUNE_WIDTH_MM / 2;
+  const eroded = clipper.offset(bands, -minHalf);
+  const opened = eroded.length > 0 ? clipper.offset(eroded, minHalf) : [];
+  bands = opened.length > 0 ? clipper.intersect(bands, opened) : [];
+
+  // Keep only components attached to the frame body. Zero-width contacts do
+  // not count — Clipper returns no area for them, and a cut along a tangent
+  // falls apart anyway — which is exactly the rounding-severed case.
+  const attached = bandComponents(bands)
+    .filter((c) => clipper.intersect([c.outer], frameBody).length > 0)
+    .flatMap((c) => [c.outer, ...c.holes]);
+
+  // The page rect replaces the silhouette's own band; the union absorbs the
+  // band's outward half and keeps the window edge exactly at the silhouette.
+  return asPts(clipper.union([...frameBody, ...attached]));
 }
 
 // ---------------------------------------------------------------------------
@@ -365,15 +566,36 @@ export function buildMulticolorSVG(
   );
 }
 
+/** Tile-local doc-mm loops laid out at a tile origin, as one compound path.
+ *  Non-zero winding: the loops come from a boolean union with consistent
+ *  orientations, so nesting resolves without even-odd. */
+function loopsPathAt(loops: Pt[][], ox: number, oy: number): string {
+  return loops
+    .map((loop) => {
+      let d = "";
+      loop.forEach((p, j) => {
+        d += `${j === 0 ? "M" : "L"}${rnd(p.x + ox)} ${rnd(p.y + oy)}`;
+      });
+      return `${d} Z`;
+    })
+    .join(" ");
+}
+
 /**
  * The mats file: one paper-sized tile per color — the design's outline cut out
  * of the sheet's own rectangle, exactly the mat every color sheet also carries
  * (without the pieces). One pass per color leaves you a full colored mat.
+ *
+ * With `matLoops` (from `computeMatOutline`) the mat keeps an outline band of
+ * the chosen thickness along every color boundary; the page rect replaces the
+ * silhouette's own band so a piece still sits flush. Full-size pieces overlap
+ * the seam bands — the mat is a backing and alignment guide, not a flush fit.
  */
 export function buildMulticolorMatsSVG(
   plan: MulticolorPlan,
   options: MulticolorOptions,
   gridRotation = 0,
+  matLoops: Pt[][] | null = null,
 ): string | null {
   if (plan.sheets.length === 0) return null;
   const tileW = options.paperWidthMm;
@@ -386,12 +608,18 @@ export function buildMulticolorMatsSVG(
   const parts: string[] = [];
   plan.sheets.forEach((sheet, i) => {
     const { ox, oy } = layoutCell(i, cols, tileW, tileH, gap);
-    const cx = ox + (tileW - plan.designWmm) / 2;
-    const cy = oy + (tileH - plan.designHmm) / 2;
-    const d = frameWindowPath(plan, map, ox, oy, tileW, tileH, cx, cy);
+    const d =
+      matLoops && matLoops.length > 0
+        ? loopsPathAt(matLoops, ox, oy)
+        : (() => {
+            const cx = ox + (tileW - plan.designWmm) / 2;
+            const cy = oy + (tileH - plan.designHmm) / 2;
+            return frameWindowPath(plan, map, ox, oy, tileW, tileH, cx, cy);
+          })();
+    const fillRule = matLoops && matLoops.length > 0 ? "nonzero" : "evenodd";
     parts.push(
       `  <g inkscape:groupmode="layer" inkscape:label="Mat ${i + 1} — ${xmlEscape(sheet.hex)}" id="multicolor-mat-${i + 1}">\n` +
-        `    <path d="${d}" fill="${sheet.hex}" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>\n` +
+        `    <path d="${d}" fill="${sheet.hex}" fill-rule="${fillRule}" stroke="#000000" stroke-width="0.1"/>\n` +
         `  </g>`,
     );
   });
@@ -414,7 +642,8 @@ export type MulticolorPreviewMode = "sheets" | "mats";
 /**
  * Draws the preview: the tiled sheets (paper-sized, every polygon per sheet) or
  * the mats (border-sized, outline window per sheet), at whatever scale fits the
- * canvas.
+ * canvas. `matLoops` (from `computeMatOutline`) replaces the mats mode's plain
+ * frame+window with the outlined mat.
  */
 export function renderMulticolorPreview(
   canvas: HTMLCanvasElement,
@@ -424,6 +653,7 @@ export function renderMulticolorPreview(
   w: number,
   h: number,
   gridRotation = 0,
+  matLoops: Pt[][] | null = null,
 ): void {
   canvas.width = w;
   canvas.height = h;
@@ -474,14 +704,30 @@ export function renderMulticolorPreview(
 
     // Both modes draw the mat frame + window first — on the color sheets the
     // leftover cardstock between the border and the window is the colored mat —
-    // then the sheets mode adds the pieces on top, inside the window.
+    // then the sheets mode adds the pieces on top, inside the window. With
+    // computed mat loops the mats tile is that geometry instead: doc-mm local,
+    // so only the fit scale applies inside the translated tile.
     ctx.beginPath();
-    ctx.rect(0, 0, tileW * fit, tileH * fit);
-    for (const loop of plan.outline) ringPath(loop);
-    ctx.fillStyle = sheet.hex;
-    ctx.fill("evenodd");
-    ctx.strokeStyle = "rgba(0,0,0,0.35)";
-    ctx.stroke();
+    if (mode === "mats" && matLoops && matLoops.length > 0) {
+      for (const loop of matLoops) {
+        loop.forEach((p, j) => {
+          if (j === 0) ctx.moveTo(p.x * fit, p.y * fit);
+          else ctx.lineTo(p.x * fit, p.y * fit);
+        });
+        ctx.closePath();
+      }
+      ctx.fillStyle = sheet.hex;
+      ctx.fill("nonzero");
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.stroke();
+    } else {
+      ctx.rect(0, 0, tileW * fit, tileH * fit);
+      for (const loop of plan.outline) ringPath(loop);
+      ctx.fillStyle = sheet.hex;
+      ctx.fill("evenodd");
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.stroke();
+    }
 
     if (mode === "sheets") {
       for (const ring of plan.polygons) {

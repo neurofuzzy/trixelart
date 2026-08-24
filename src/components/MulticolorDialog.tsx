@@ -6,9 +6,12 @@ import { Layers, Palette, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, normalizeProjectFilename } from "@/lib/utils";
 import { downloadBlob } from "@/lib/png-export";
+import type { Pt } from "@/lib/mesh-export";
 import {
   buildMulticolorMatsSVG,
   buildMulticolorSVG,
+  computeMatOutline,
+  MIN_MAT_OUTLINE_MM,
   multicolorMetrics,
   planMulticolor,
   renderMulticolorPreview,
@@ -59,8 +62,12 @@ function Section({
 
 /** A length field. The value it carries is always in mm; when `unit` is "in"
  *  it is converted for display and the typed value is converted back on commit.
- *  Clamped on commit, not per keystroke, so a half-typed "1" on the way to
- *  "150" is not snapped away underneath. */
+ *  The draft always mirrors what is in the box, so partial values like a
+ *  trailing "7." survive keystroke by keystroke. Downstream sees changes
+ *  live — spinner steps, arrow keys and any typed value already inside
+ *  [min, max] notify onChange immediately — but an out-of-range half-typed
+ *  "1" on the way to "150" stays local until blur or Enter clamps it, so
+ *  nothing is ever snapped away underneath. */
 function NumberMm({
   label,
   value,
@@ -85,6 +92,17 @@ function NumberMm({
     setDraft(null);
     if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n / factor)));
   };
+  const update = (raw: string) => {
+    setDraft(raw);
+    const n = Number(raw);
+    if (
+      Number.isFinite(n) &&
+      n >= min * factor &&
+      n <= max * factor
+    ) {
+      onChange(Math.min(max, Math.max(min, n / factor)));
+    }
+  };
   const shown = (n: number) => Math.round(n * 100) / 100;
   return (
     <label className="flex items-center gap-2">
@@ -97,7 +115,7 @@ function NumberMm({
         max={shown(max * factor)}
         step={unit === "mm" ? 1 : 0.1}
         value={draft ?? String(shown(value * factor))}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => update(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
@@ -158,6 +176,16 @@ export function MulticolorDialog({
   const [spacingMm, setSpacingMm] = useState(6);
   const [unit, setUnit] = useState<Unit>("mm");
   const [mat, setMat] = useState(false);
+  const [matOutline, setMatOutline] = useState(false);
+  const [matOutlineMm, setMatOutlineMm] = useState(MIN_MAT_OUTLINE_MM);
+  // The outlined-mat geometry, computed by `computeMatOutline` (Clipper loads
+  // on demand). Null while pending or when outlines are off; the builders then
+  // fall back to the plain mat. Same request-id + debounce shape as
+  // PlotterDialog's async plot: a superseded request never lands, and typing a
+  // new thickness does not recompute per keystroke.
+  const [matLoops, setMatLoops] = useState<Pt[][] | null>(null);
+  const [matPending, setMatPending] = useState(false);
+  const matRequestRef = useRef(0);
   const [mode, setMode] = useState<MulticolorPreviewMode>("sheets");
   const [busy, setBusy] = useState(false);
 
@@ -168,8 +196,19 @@ export function MulticolorDialog({
       marginMm,
       pageSpacingMm: spacingMm,
       mat,
+      matOutlineMm: matOutline
+        ? Math.max(MIN_MAT_OUTLINE_MM, matOutlineMm)
+        : 0,
     }),
-    [paperWidthMm, paperHeightMm, marginMm, spacingMm, mat],
+    [
+      paperWidthMm,
+      paperHeightMm,
+      marginMm,
+      spacingMm,
+      mat,
+      matOutline,
+      matOutlineMm,
+    ],
   );
 
   const plan = useMemo(
@@ -180,6 +219,32 @@ export function MulticolorDialog({
     () => (plan ? multicolorMetrics(plan, options) : null),
     [plan, options],
   );
+
+  const outlineOn = (options.matOutlineMm ?? 0) >= MIN_MAT_OUTLINE_MM;
+
+  useEffect(() => {
+    if (!open || !plan || !outlineOn) {
+      setMatLoops(null);
+      setMatPending(false);
+      return;
+    }
+    const id = ++matRequestRef.current;
+    setMatPending(true);
+    const timer = setTimeout(() => {
+      computeMatOutline(plan, options, gridRotation)
+        .then((loops) => {
+          if (matRequestRef.current !== id) return;
+          setMatLoops(loops);
+          setMatPending(false);
+        })
+        .catch(() => {
+          if (matRequestRef.current !== id) return;
+          setMatLoops(null);
+          setMatPending(false);
+        });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [open, plan, outlineOn, options, gridRotation]);
 
   useEffect(() => {
     if (!open) return;
@@ -209,6 +274,7 @@ export function MulticolorDialog({
         Math.max(1, Math.round(wrap.clientWidth * dpr)),
         Math.max(1, Math.round(wrap.clientHeight * dpr)),
         gridRotation,
+        matLoops,
       );
       c.style.width = `${wrap.clientWidth}px`;
       c.style.height = `${wrap.clientHeight}px`;
@@ -217,16 +283,17 @@ export function MulticolorDialog({
     const ro = new ResizeObserver(draw);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [open, plan, mode, options, gridRotation]);
+  }, [open, plan, mode, options, gridRotation, matLoops]);
 
   const handleExport = (file: "sheets" | "mats") => {
     if (!plan) return;
+    if (file === "mats" && matPending) return;
     setBusy(true);
     try {
       const svg =
         file === "sheets"
           ? buildMulticolorSVG(plan, options, gridRotation)
-          : buildMulticolorMatsSVG(plan, options, gridRotation);
+          : buildMulticolorMatsSVG(plan, options, gridRotation, matLoops);
       if (!svg) return;
       const base = normalizeProjectFilename(projectName) || "trixel";
       downloadBlob(
@@ -387,6 +454,30 @@ export function MulticolorDialog({
               <Check checked={mat} onChange={setMat}>
                 Mats (separate file)
               </Check>
+              {mat && (
+                <>
+                  <Check checked={matOutline} onChange={setMatOutline}>
+                    Shape outlines
+                  </Check>
+                  {matOutline && (
+                    <NumberMm
+                      key={`outline-${unit}`}
+                      label="Thickness"
+                      value={Math.max(MIN_MAT_OUTLINE_MM, matOutlineMm)}
+                      min={MIN_MAT_OUTLINE_MM}
+                      max={30}
+                      unit={unit}
+                      onChange={setMatOutlineMm}
+                    />
+                  )}
+                  {matOutline && (
+                    <p className="text-[11px] text-muted-foreground/60 leading-relaxed">
+                      Keeps a band of this width along every color boundary.
+                      Bands that would float free of the mat are left out.
+                    </p>
+                  )}
+                </>
+              )}
             </Section>
 
             {plan && (
@@ -424,11 +515,11 @@ export function MulticolorDialog({
           {mat && (
             <button
               onClick={() => handleExport("mats")}
-              disabled={!plan || busy}
+              disabled={!plan || busy || (matOutline && matPending)}
               className="flex items-center gap-2 px-4 py-2 rounded-md bg-amber-400/15 hover:bg-amber-400/25 disabled:opacity-40 text-sm text-amber-100"
             >
               <Palette className="w-4 h-4" />
-              {busy ? "Building…" : "Export mats"}
+              {busy ? "Building…" : matOutline && matPending ? "Outlining…" : "Export mats"}
             </button>
           )}
           <button

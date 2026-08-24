@@ -61,6 +61,10 @@ export interface ClipperApi {
    * that arrive wound inconsistently will union as solids.
    */
   union(rings: PlotPoly[]): PlotPoly[];
+  /** `a \ b`, both closed ring sets under non-zero fill. */
+  difference(a: PlotPoly[], b: PlotPoly[]): PlotPoly[];
+  /** `a ∩ b`, both closed ring sets under non-zero fill. */
+  intersect(a: PlotPoly[], b: PlotPoly[]): PlotPoly[];
 }
 
 let pending: Promise<ClipperApi> | null = null;
@@ -92,6 +96,45 @@ function makeApi(C: typeof ClipperNS): ClipperApi {
       X: Math.round(x * CLIPPER_SCALE),
       Y: Math.round(y * CLIPPER_SCALE),
     }));
+
+  /** Closed-path boolean through non-zero fill, shared by union/difference/
+   *  intersect. `clip === undefined` means a pure self-union of the subject. */
+  function boolean(
+    clipType: ClipperNS.ClipType,
+    subject: PlotPoly[],
+    clip?: PlotPoly[],
+  ): PlotPoly[] {
+    const clipper = new C.Clipper();
+    let added = false;
+    for (const ring of subject) {
+      if (ring.length < 3) continue;
+      clipper.AddPath(toPath(ring), C.PolyType.ptSubject, true);
+      added = true;
+    }
+    if (clip !== undefined) {
+      for (const ring of clip) {
+        if (ring.length < 3) continue;
+        clipper.AddPath(toPath(ring), C.PolyType.ptClip, true);
+        added = true;
+      }
+    }
+    if (!added) return [];
+
+    const solution: ClipperNS.Paths = [];
+    clipper.Execute(clipType, solution, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero);
+
+    const out: PlotPoly[] = [];
+    for (const path of C.Clipper.CleanPolygons(solution)) {
+      if (path.length < 3) continue;
+      out.push(
+        path.map(
+          (p) =>
+            [p.X / CLIPPER_SCALE, p.Y / CLIPPER_SCALE] as [number, number],
+        ),
+      );
+    }
+    return out;
+  }
 
   return {
     offset(rings, delta) {
@@ -134,36 +177,15 @@ function makeApi(C: typeof ClipperNS): ClipperApi {
     },
 
     union(rings) {
-      if (rings.length === 0) return [];
+      return boolean(C.ClipType.ctUnion, rings);
+    },
 
-      const clipper = new C.Clipper();
-      let added = false;
-      for (const ring of rings) {
-        if (ring.length < 3) continue;
-        clipper.AddPath(toPath(ring), C.PolyType.ptSubject, true);
-        added = true;
-      }
-      if (!added) return [];
+    difference(a, b) {
+      return boolean(C.ClipType.ctDifference, a, b);
+    },
 
-      const solution: ClipperNS.Paths = [];
-      clipper.Execute(
-        C.ClipType.ctUnion,
-        solution,
-        C.PolyFillType.pftNonZero,
-        C.PolyFillType.pftNonZero,
-      );
-
-      const out: PlotPoly[] = [];
-      for (const path of C.Clipper.CleanPolygons(solution)) {
-        if (path.length < 3) continue;
-        out.push(
-          path.map(
-            (p) =>
-              [p.X / CLIPPER_SCALE, p.Y / CLIPPER_SCALE] as [number, number],
-          ),
-        );
-      }
-      return out;
+    intersect(a, b) {
+      return boolean(C.ClipType.ctIntersection, a, b);
     },
 
     clipLines(segs, rings) {
