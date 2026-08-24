@@ -10,31 +10,37 @@ import type { Tool } from "@/lib/tools";
 import { cropWorldBounds, handlePositions, type CropRect } from "@/lib/crop";
 import {
   buildRenderPlan,
-  drawHatchLayer,
-  glowReceivers,
   stepBlendMode,
   stepColorAdjust,
   stepGlow,
   stepRoundRadius,
   stepOutlineWeight,
   stepSubdivisionNoise,
+  glowReceivers,
   type RenderStep,
 } from "@/lib/hatch-render";
-import { drawComposited } from "@/lib/blend";
 import {
+  groupHatchMarks,
+  hatchLinesInBox,
+  arcSegmentsInTri,
+  intersectBox,
+  trisBox,
+  type Box,
+} from "@/lib/hatch";
+import { colorRamp, subdivisionMode } from "@/lib/subdivision-noise";
+import {
+  flattenRoundedRing,
   stepRegionGeometry,
-  traceRoundedRing,
   type RoundedRing,
 } from "@/lib/round-corners";
-import type { Box } from "@/lib/hatch";
+import { silhouetteGeometry } from "@/lib/glow";
 import {
-  drawSubFills,
-  noiseRegionFills,
-  noiseSubFills,
-  type NoisePeriod,
-  type SubFill,
-} from "@/lib/subdivision-noise";
-import { drawGlow, silhouetteGeometry, type GlowSpec } from "@/lib/glow";
+  GLRenderer,
+  hexColor,
+  type FillBatch,
+  type PosBatch,
+  type Color4,
+} from "@/lib/webgl/renderer";
 
 /**
  * The hexagon the stamp and select hover cues outline: the region their next
@@ -88,25 +94,8 @@ function stampSelectHoverRegion(a: {
   return null;
 }
 
-/** The geometry a step with a rounding, outline or grain effect draws with —
- *  memoised on the plan by the component, since none of it changes on a pan. */
-interface StepGeometry {
-  radius: number;
-  outline: number;
-  adjust: ((hex: string) => string) | undefined;
-  regionFills: Map<string, SubFill[]> | null;
-  regions: { fill: string; base: string; rings: RoundedRing[] }[];
-}
-
-/** The two shapes a glow needs: what casts it, and what catches it. */
-interface StepGlow {
-  spec: GlowSpec;
-  caster: RoundedRing[];
-  receiver: RoundedRing[];
-}
-
-/** What the draw is culled to: the visible world box, the lattice index range
- *  covering it, and the zoom the hatch weights are clamped against. */
+/** What the draw is culled to: the visible world box and the lattice index
+ *  range covering it. */
 interface DrawView extends Box {
   zoom: number;
   minR: number;
@@ -115,142 +104,187 @@ interface DrawView extends Box {
   maxQ: number;
 }
 
+/** The geometry a fill *step* batches into the GPU once per plan: whatever the
+ *  cells of a plain (unrounded) step would paint, with colour adjust and
+ *  subdivision noise already baked into the vertex colours. */
+interface FillGeometry {
+  positions: Float32Array;
+  colors: Float32Array;
+}
+
+/** Per-pixel noise parameters, straight off the effect spec. */
+interface NoiseParams {
+  mode: "midpoint" | "centroid";
+  amountScale: number;
+  seed: number;
+  period?: { m: number; n: number };
+}
+
+/** The rounded/outline geometry of one step, from `effectPlan`. */
+interface EffectStep {
+  radius: number;
+  outline: number;
+  adjust: ((hex: string) => string) | undefined;
+  /** Ring-fan triangles per region, present when grain rides under this
+   *  step's rounding; the fragment shader computes the dither. */
+  fans: Float32Array[] | null;
+  noise: NoiseParams | null;
+  regions: { fill: string; base: string; rings: RoundedRing[] }[];
+}
+
+/** One colour group of a noisy step: its cells' lattice triangles and the
+ *  dither ramp every one of them shades with. */
+interface NoiseGroupData {
+  ramp: Float32Array;
+  positions: Float32Array;
+}
+/** Per-step noise payload: one group per distinct encoded colour. */
+interface NoiseStepData {
+  groups: NoiseGroupData[];
+  params: NoiseParams;
+}
+/** The GPU-side copy: same groups with uploaded position buffers. */
+interface NoiseStepBatches {
+  params: NoiseParams;
+  groups: { ramp: Float32Array; positions: Float32Array; batch: PosBatch }[];
+}
+
+/** The glow geometry of one step, from `glowPlan`. */
+interface GlowStep {
+  spec: { sigma: number; opacity: number; color: string };
+  caster: RoundedRing[];
+  receiver: RoundedRing[];
+}
+
 /**
- * One render step of the artwork, painted into whatever context it is handed —
- * the live one normally, or a blend layer's buffer.
- *
- * Module level rather than a closure inside the draw effect, and everything it
- * needs comes in as an argument: a nested function that both captures the
- * effect's locals and takes a plan step as a parameter reads to the React
- * compiler as one that may mutate the memoised plan, which is an error rather
- * than a warning. Taking the memo's *contents* as parameters says the same
- * thing to a reader and nothing untrue to the compiler.
- *
- * Fill steps group by colour for fewer `fillStyle` changes; hatch steps draw
- * line work. The branch is not optional: a hatch value fed to `resolveColor`
- * comes back as the raw string, and canvas silently *keeps the previous*
- * fillStyle rather than erroring, so the marks would paint as solid colour.
+ * Builds the retained geometry of one plain fill step, or null for a step the
+ * effect path draws per frame (rounded/outlined) or that has nothing to paint.
+ * No viewport culling: the whole layer is uploaded once so pan and the marching
+ * ants tick redraw without rebuilding geometry.
  */
-function drawArtworkStep(
-  ctx: CanvasRenderingContext2D,
+function fillStepGeometry(
   step: RenderStep,
-  geom: StepGeometry | null,
-  glow: StepGlow | null,
-  view: DrawView,
-  noisePeriod: NoisePeriod | undefined,
-): void {
-  if (step.kind === "hatch") {
-    drawHatchLayer(ctx, step.painted, view, view.zoom);
-    return;
-  }
-
-  // Under this step's own fills, and clipped to the layers below: the layer
-  // casts the shadow, it does not receive it.
-  if (glow) drawGlow(ctx, glow.spec, glow.caster, glow.receiver);
-
-  // Corner rounding and outlines draw whole regions, so they cannot be
-  // viewport-culled the way loose triangles are — a region reaches past the
-  // visible box and its ring has to be closed. The geometry is memoised on the
-  // plan instead, so the cost lands on an edit rather than on every pan and
-  // hover redraw.
-  if (geom) {
-    for (const { fill, base, rings } of geom.regions) {
-      const grain = geom.regionFills?.get(base);
-      if (grain?.length) {
-        // Solid first, grain clipped over it: the clip is antialiased, so
-        // painting only the sub-triangles would feather the region's edge.
-        ctx.save();
-        ctx.beginPath();
-        for (const ring of rings) traceRoundedRing(ctx, ring);
-        ctx.fillStyle = fill;
-        ctx.fill();
-        ctx.clip();
-        drawSubFills(ctx, grain, geom.adjust);
-        ctx.restore();
-        continue;
-      }
-      ctx.beginPath();
-      for (const ring of rings) traceRoundedRing(ctx, ring);
-      if (geom.outline > 0) {
-        // The outline effect swaps the solid for a stroke of the region
-        // boundary at the layer's selected weight; the interior stays empty.
-        // Round joins land exactly on the stroke edge; miter pokes 2x past it
-        // and bevel cuts back to the midpoint.
-        ctx.strokeStyle = fill;
-        ctx.lineWidth = geom.outline;
-        ctx.lineJoin = "round";
-        ctx.lineCap = "round";
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = fill;
-        ctx.fill();
-      }
-    }
-    return;
-  }
-
-  // Built once per step so its memo covers the whole layer; `undefined` unless
-  // a colour-adjust effect is on, which keeps the common case on the path it
-  // has always taken. The rounded/outlined branch above needs no equivalent —
-  // `stepRegionGeometry` has already applied it.
+  noisePeriod: { m: number; n: number } | undefined,
+): FillGeometry | null {
+  if (step.kind !== "fill") return null;
+  const radius = stepRoundRadius(step);
+  const outline = stepOutlineWeight(step);
+  if (radius > 0 || outline > 0) return null;
+  // A noisy plain step renders through the noise shader instead (see
+  // `noiseData`) — its geometry is just the lattice triangles, positions only.
+  if (stepSubdivisionNoise(step, noisePeriod)) return null;
   const adjust = stepColorAdjust(step);
-  const noise = stepSubdivisionNoise(step, noisePeriod);
 
-  // Subdivision noise emits four fills per cell instead of one, so it gets its
-  // own gather rather than widening the plain one. Still viewport-culled — the
-  // sub-triangles live inside the cell that produced them, so the same bounds
-  // hold — which is why this is not memoised the way the rounded path above
-  // has to be.
-  if (noise) {
-    const fills: SubFill[] = [];
-    for (let r = view.minR; r <= view.maxR; r++) {
-      for (let q = view.minQ; q <= view.maxQ; q++) {
-        for (const type of ["up", "down"] as const) {
-          const encoded = step.painted[`${q},${r},${type}`];
-          if (encoded) {
-            fills.push(...noiseSubFills(q, r, type, encoded, noise));
-          }
-        }
-      }
-    }
-    drawSubFills(ctx, fills, adjust);
-    return;
+  const pos: number[] = [];
+  const col: number[] = [];
+  const pushTri = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number },
+    rgb: Color4,
+  ) => {
+    pos.push(a.x, a.y, b.x, b.y, c.x, c.y);
+    for (let k = 0; k < 3; k++) col.push(rgb[0], rgb[1], rgb[2], rgb[3]);
+  };
+
+  for (const [key, encoded] of Object.entries(step.painted)) {
+    const parts = key.split(",");
+    if (parts.length !== 3) continue;
+    const q = parseInt(parts[0]);
+    const r = parseInt(parts[1]);
+    if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
+    const type = parts[2] as TriType;
+    if (isNoPrint(encoded)) continue;
+
+    const resolved = adjust ? adjust(resolveColor(encoded)) : resolveColor(encoded);
+    const rgb = hexColor(resolved);
+    const [a, b, c] = getTriVertices(q, r, type);
+    pushTri(a, b, c, rgb);
   }
 
-  const colorGroups = new Map<string, TriKey[]>();
-  for (let r = view.minR; r <= view.maxR; r++) {
-    for (let q = view.minQ; q <= view.maxQ; q++) {
-      for (const type of ["up", "down"] as const) {
-        const key = `${q},${r},${type}`;
-        const fill = step.painted[key];
-        // A no-print marker never joins the artwork; it gets its own pass in
-        // the component. Skipping it here is not cosmetic — `resolveColor`
-        // hands back the raw marker string, and canvas *silently keeps the
-        // previous `fillStyle`* for a value it cannot parse, so the cell would
-        // paint in whatever colour happened to be current.
-        if (fill && !isNoPrint(fill)) {
-          const resolved = resolveColor(fill);
-          const hex = adjust ? adjust(resolved) : resolved;
-          const list = colorGroups.get(hex);
-          if (list) list.push({ q, r, type });
-          else colorGroups.set(hex, [{ q, r, type }]);
-        }
-      }
-    }
-  }
+  return pos.length ? { positions: new Float32Array(pos), colors: new Float32Array(col) } : null;
+}
 
-  for (const [fillColor, tris] of colorGroups) {
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    for (const tri of tris) {
-      const [a, b, c] = getTriVertices(tri.q, tri.r, tri.type);
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(c.x, c.y);
-      ctx.closePath();
+/**
+ * Builds the per-step noise payload: cells grouped by encoded colour, each
+ * group carrying its lattice triangles and that colour's dither ramp. The
+ * fragment shader does everything else — see FS_NOISE.
+ */
+function buildNoiseGroups(
+  step: RenderStep,
+  noisePeriod: { m: number; n: number } | undefined,
+): NoiseStepData | null {
+  if (step.kind !== "fill") return null;
+  const spec = stepSubdivisionNoise(step, noisePeriod);
+  if (!spec) return null;
+
+  const ids = new Map<string, number>();
+  const groups: { ramp: Float32Array; positions: number[] }[] = [];
+  let count = 0;
+
+  for (const [key, encoded] of Object.entries(step.painted)) {
+    const parts = key.split(",");
+    if (parts.length !== 3) continue;
+    const q = parseInt(parts[0]);
+    const r = parseInt(parts[1]);
+    if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
+    const type = parts[2] as TriType;
+    if (isNoPrint(encoded)) continue;
+
+    let gi = ids.get(encoded);
+    if (gi === undefined) {
+      gi = groups.length;
+      ids.set(encoded, gi);
+      const rampHexes = colorRamp(encoded);
+      groups.push({
+        ramp: new Float32Array(rampHexes.flatMap((h) => hexColor(h).slice(0, 3))),
+        positions: [],
+      });
     }
-    ctx.fill();
+    const [a, b, c] = getTriVertices(q, r, type);
+    groups[gi].positions.push(a.x, a.y, b.x, b.y, c.x, c.y);
+    count++;
   }
+  if (count === 0) return null;
+
+  return {
+    groups: groups.map((g) => ({ ramp: g.ramp, positions: new Float32Array(g.positions) })),
+    params: {
+      mode: subdivisionMode(spec),
+      amountScale: Math.max(0, Math.min(100, spec.amount)) / 100,
+      seed: spec.seed | 0,
+      period: spec.period,
+    },
+  };
+}
+
+/** Ring fans for the rounded-grain path: one flattened ring fanned from its
+ *  first point. Exporter-grade flattening (the shader colours it per pixel,
+ *  so chord accuracy only has to beat the dither scale). */
+function fanPositions(rings: RoundedRing[]): Float32Array {
+  const tris: number[] = [];
+  for (const ring of rings) {
+    const pts = flattenRoundedRing(ring);
+    for (let i = 1; i < pts.length - 1; i++) {
+      tris.push(pts[0][0], pts[0][1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+    }
+  }
+  return new Float32Array(tris);
+}
+
+/** Whether a triangle's bounding box overlaps `box` — the cheap off-screen test
+ *  the hatch arc path wants so a large document does not rebuild its whole arc
+ *  set on every pointer move. */
+function triInBox(t: TriKey, box: Box): boolean {
+  const v = getTriVertices(t.q, t.r, t.type);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of v) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return maxX >= box.minX && minX <= box.maxX && maxY >= box.minY && minY <= box.maxY;
 }
 
 export function GridCanvas({
@@ -308,6 +342,10 @@ export function GridCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [antPhase, setAntPhase] = useState(0);
+  const [renderer, setRenderer] = useState<GLRenderer | null>(null);
+  // Bumped when the WebGL context is lost: remounts the canvas so a brand-new
+  // context backs the new renderer.
+  const [glEpoch, setGlEpoch] = useState(0);
 
   // Marching-ants animation tick (8 px/s equivalent in screen px). Stops
   // when there's no selection so we don't repaint forever.
@@ -322,6 +360,64 @@ export function GridCanvas({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [selectedHexes]);
+
+  // Create the WebGL renderer once per canvas lifetime. `glEpoch` bumps only
+  // when the context is lost (a lost context's only reliable reset is a new
+  // canvas + context); the effect deliberately does NOT list `renderer` in its
+  // dependencies — the `setRenderer` below changes it, and a re-run would run
+  // this cleanup first, disposing the renderer we just installed (an endless
+  // create/dispose storm). The local ref guards double-invocation instead.
+ //
+ // Creation can fail transiently: drivers may defer shader compilation and
+ // report COMPILE/LINK_STATUS=false with a null info log while the GLSL is
+ // still being compiled on the GPU process. Retry on the same canvas — the
+ // context is reused, so attempts are cheap — before declaring failure.
+  const createdRef = useRef<GLRenderer | null>(null);
+  useEffect(() => {
+    if (createdRef.current || !canvasRef.current) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryCreate = () => {
+      if (cancelled || createdRef.current || !canvasRef.current) return;
+      attempts++;
+      try {
+        const r = new GLRenderer(canvasRef.current);
+        createdRef.current = r;
+        setRenderer(r);
+      } catch (e) {
+        if (attempts >= 40) {
+          console.error("WebGL init failed:", e);
+          return;
+        }
+        setTimeout(tryCreate, 80);
+      }
+    };
+    tryCreate();
+    return () => {
+      cancelled = true;
+      createdRef.current?.dispose();
+      createdRef.current = null;
+      setRenderer(null);
+    };
+  }, [glEpoch]);
+
+  // A lost context silently no-ops every draw — the artwork would vanish with
+  // no error anywhere user-visible. Swallow the default (which would tear the
+  // canvas down) and rebuild. Losses on a stale canvas (the one being torn
+  // down by a rebuild) must be ignored, or the disposal itself would trigger
+  // another rebuild.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onLost = (e: Event) => {
+      if (e.target !== canvas) return;
+      e.preventDefault();
+      console.warn("[trixel] WebGL context lost — rebuilding the renderer.");
+      setGlEpoch((n) => n + 1);
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
+    return () => canvas.removeEventListener("webglcontextlost", onLost);
+  }, [glEpoch]);
 
   // The same plan the exporters walk, so preview and file agree on coalescing.
   const plan = useMemo(() => buildRenderPlan(layers), [layers]);
@@ -345,19 +441,15 @@ export function GridCanvas({
     [cropM, cropN],
   );
 
-  // Effect geometry (rounding + outline), memoised on the plan. The draw effect
-  // below re-runs on pan, zoom, hover and the marching-ants tick — none of which
-  // change geometry — so rebuilding rings inside it would redo the whole artwork
-  // many times a second. Keyed on `plan`, it is rebuilt only when a stroke lands
-  // or a slider moves. Entries are `null` for steps with no effect, which keeps
-  // this array index-aligned with `plan`.
+  // Effect geometry (rounding + outline), memoised on the plan. Rebuilt only
+  // when a stroke lands or a slider moves — never on pan, zoom, hover or the
+  // marching-ants tick, which is exactly why it lands here rather than inside
+  // the draw effect.
   //
   // The offsets are dependencies even though they are not arguments: regions are
   // grouped by *resolved* colour, and `resolveColor` reads the global hue and
   // saturation shift. Without them a palette shift would leave the previous
   // colours — and the region boundaries they implied — baked into the memo.
-  // The rule cannot see that dependency, since the offsets are read through
-  // module-level state rather than passed in — hence the suppression.
   const effectPlan = useMemo(
     () =>
       plan.map((step) => {
@@ -366,31 +458,70 @@ export function GridCanvas({
         const outline = stepOutlineWeight(step);
         if (radius <= 0 && outline <= 0) return null;
         const adjust = stepColorAdjust(step);
-        const noise = stepSubdivisionNoise(step, noisePeriod);
+        const spec = stepSubdivisionNoise(step, noisePeriod);
+        const noise: NoiseParams | null = spec
+          ? {
+              mode: subdivisionMode(spec),
+              amountScale: Math.max(0, Math.min(100, spec.amount)) / 100,
+              seed: spec.seed | 0,
+              period: spec.period,
+            }
+          : null;
+        const regions =
+          radius > 0 || outline > 0
+            ? stepRegionGeometry(step.painted, radius, adjust)
+            : [];
         return {
           radius,
           outline,
           adjust,
-          // Memoised here rather than rebuilt per frame for the same reason the
-          // rings are: this path cannot be viewport-culled, so it must not land
-          // on a pan or a hover. An outline has no interior to texture, so it
-          // takes none.
-          regionFills:
-            noise && outline <= 0
-              ? noiseRegionFills(step.painted, noise)
-              : null,
-          regions: stepRegionGeometry(step.painted, radius, adjust),
-        };
+          // Grain under rounding shades the region's own ring fans (the
+          // fragment shader decides per pixel), so each region carries its
+          // fan mesh. An outlined layer has no interior to texture.
+          fans:
+            regions.map((rg) => fanPositions(rg.rings)),
+          noise,
+          regions,
+        } as EffectStep;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [plan, hueOffset, saturationOffset, noisePeriod],
   );
 
+  // Per-step noise groups (cells grouped by colour + their dither ramps),
+  // memoised on the same key as `effectPlan` — a palette shift re-resolves
+  // every ramp through module state, exactly like the geometry memos above.
+  const noiseData = useMemo(
+    () => plan.map((step) => buildNoiseGroups(step, noisePeriod)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, hueOffset, saturationOffset, noisePeriod],
+  );
+
+  // Plain noisy steps get one retained positions batch per colour group.
+  // Rounded steps shade their region fans instead (see drawFillStep), uploaded
+  // per frame — regions are few and fans are small.
+  const noiseBatchesRef = useRef<(NoiseStepBatches | null)[] | null>(null);
+  useEffect(() => {
+    if (!renderer) return;
+    const own = renderer;
+    const build = (d: NoiseStepData | null): NoiseStepBatches | null =>
+      d && d.groups.length
+        ? {
+            params: d.params,
+            groups: d.groups.map((g) => ({ ...g, batch: own.makePosBatch(g.positions) })),
+          }
+        : null;
+    const arr = noiseData.map(build);
+    noiseBatchesRef.current = arr;
+    return () => {
+      for (const s of arr)
+        if (s) for (const g of s.groups) own.disposePosBatch(g.batch);
+    };
+  }, [renderer, noiseData]);
+
   // Glow geometry, memoised on the same key and for the same reason. Kept apart
   // from `effectPlan` because a glow needs two shapes rather than one: the
   // caster (this step's own silhouette) and the receiver (everything below it).
-  // Entries are `null` for steps that cast nothing, or that have nothing beneath
-  // them to catch it.
   const glowPlan = useMemo(() => {
     const receivers = glowReceivers(plan);
     return plan.map((step, si) => {
@@ -401,39 +532,49 @@ export function GridCanvas({
         spec,
         receiver,
         caster: silhouetteGeometry(step.painted, stepRoundRadius(step)),
-      };
+      } as GlowStep;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, hueOffset, saturationOffset]);
 
+  // The retained artwork geometry: one FillBatch per unrounded fill step, built
+  // once per plan/offset change and redrawn identically on every pan and hover.
+  const fillGeo = useMemo(
+    () => plan.map((step) => fillStepGeometry(step, noisePeriod)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, hueOffset, saturationOffset, noisePeriod],
+  );
+
+  const fillBatchesRef = useRef<(FillBatch | null)[] | null>(null);
+
+  useEffect(() => {
+    if (!renderer) return;
+    const old = fillBatchesRef.current;
+    if (old) for (const b of old) if (b) renderer.disposeFillBatch(b);
+    const batches = fillGeo.map((g) => (g ? renderer.makeFillBatch(g.positions, g.colors) : null));
+    fillBatchesRef.current = batches;
+    return () => {
+      const cur = fillBatchesRef.current;
+      if (cur) for (const b of cur) if (b) renderer.disposeFillBatch(b);
+      fillBatchesRef.current = null;
+    };
+  }, [renderer, fillGeo]);
+
+  // ---- per-frame drawing ---------------------------------------------------
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || size.width === 0 || !mounted) return;
+    if (!canvas || !renderer || size.width === 0 || !mounted) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
+    const r = renderer;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = size.width * dpr;
-    canvas.height = size.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    ctx.clearRect(0, 0, size.width, size.height);
-
-    ctx.save();
-
-    // Forward canvas transform: screen = center + zoom * R(θ) * (world + view).
-    // The rotation θ lets us display a pointy-top hex grid by rotating the
-    // entire flat-top lattice 90°; all world-space math (tri-axial hex
-    // geometry, symmetry, flower) is unchanged.
-    ctx.translate(size.width / 2, size.height / 2);
-    ctx.scale(view.zoom, view.zoom);
-    ctx.rotate(gridRotation);
-    ctx.translate(view.x, view.y);
+    r.resize(size.width, size.height, dpr);
+    r.setView({ x: view.x, y: view.y, zoom: view.zoom, rotation: gridRotation });
+    r.beginFrame();
 
     // Visible world bounds: when rotated, the screen's 4 corners map to a
-    // rotated rectangle in world space, so we sample all four corners and
-    // take their envelope to ensure no visible triangle is skipped.
+    // rotated rectangle in world space, so we sample all four corners and take
+    // their envelope to ensure no visible triangle is skipped.
     const buffer = 3;
     const corners = [
       screenToWorld(0, 0),
@@ -445,342 +586,67 @@ export function GridCanvas({
     const maxX = Math.max(...corners.map((c) => c.x));
     const minY = Math.min(...corners.map((c) => c.y));
     const maxY = Math.max(...corners.map((c) => c.y));
-
     const minR = Math.floor(minY / H) - buffer;
     const maxR = Math.ceil(maxY / H) + buffer;
-    const minQ =
-      Math.floor(
-        Math.min(minX, maxX) / SIDE - maxR * 0.5,
-      ) - buffer;
-    const maxQ =
-      Math.ceil(
-        Math.max(minX, maxX) / SIDE - minR * 0.5,
-      ) + buffer;
+    const minQ = Math.floor(Math.min(minX, maxX) / SIDE - maxR * 0.5) - buffer;
+    const maxQ = Math.ceil(Math.max(minX, maxX) / SIDE - minR * 0.5) + buffer;
+    const drawView: DrawView = { minX, minY, maxX, maxY, minR, maxR, minQ, maxQ, zoom: view.zoom };
 
-    // Artwork — rendered bottom-to-top through the same `buildRenderPlan` the
-    // exporters walk, so the canvas and a file cannot disagree about which
-    // layers coalesce. That matters for effects: a rounded step finds its region
-    // boundaries in the coalesced map, so rounding what the plan merged is the
-    // only way the preview matches the export.
-    const drawView = { minX, minY, maxX, maxY, minR, maxR, minQ, maxQ, zoom: view.zoom };
+    // Artwork — bottom-to-top through the same plan the exporters walk. A
+    // blended layer lands in an isolated buffer first and composites whole.
+    const batches = fillBatchesRef.current ?? [];
+    const noiseGroups = noiseBatchesRef.current ?? [];
     for (let si = 0; si < plan.length; si++) {
       const step = plan[si];
-      // A blended layer is flattened into its own buffer and composited whole —
-      // see `drawComposited` for why blending each shape as it is drawn is not
-      // the same thing. Nothing has been painted yet at this point (the artwork
-      // is the first thing after the clear), so the backdrop a blend sees is the
-      // artwork below it and nothing else, exactly as in an export.
+      if (step.kind === "hatch") {
+        drawHatchStep(r, step, drawView);
+        continue;
+      }
       const blend = stepBlendMode(step);
       if (blend) {
-        drawComposited(ctx, blend, (c) =>
-          drawArtworkStep(c, step, effectPlan[si], glowPlan[si], drawView, noisePeriod),
-        );
+        r.beginBlendStep();
+        drawFillStep(r, si, effectPlan, glowPlan, batches, noiseGroups);
+        const layerTex = r.endBlendStep();
+        r.compositeStep(layerTex, blend);
+        r.setOpaque();
       } else {
-        drawArtworkStep(ctx, step, effectPlan[si], glowPlan[si], drawView, noisePeriod);
+        drawFillStep(r, si, effectPlan, glowPlan, batches, noiseGroups);
       }
     }
 
     // No-print markers, drawn over the artwork as scaffolding rather than paint.
-    // They are editor-only by definition — every exporter drops them — so this is
-    // the one place they are ever visible, and the toggle hides them without
-    // touching the shape they produce.
+    // They are editor-only by definition — every exporter drops them.
     if (showNoPrint) {
-      ctx.fillStyle = "rgba(236,72,153,0.35)";
-      ctx.beginPath();
-      for (const layer of layers) {
-        if (!layer.visible) continue;
-        for (let r = minR; r <= maxR; r++) {
-          for (let q = minQ; q <= maxQ; q++) {
-            for (const type of ["up", "down"] as const) {
-              if (!isNoPrint(layer.painted[`${q},${r},${type}`] ?? "")) continue;
-              const [a, b, c] = getTriVertices(q, r, type);
-              ctx.moveTo(a.x, a.y);
-              ctx.lineTo(b.x, b.y);
-              ctx.lineTo(c.x, c.y);
-              ctx.closePath();
-            }
-          }
-        }
-      }
-      ctx.fill();
+      drawNoPrint(r, layers, drawView);
     }
 
-    // Grid outlines — 3 families of parallel lines
-    const gridWidth = Math.max(1.0 / view.zoom, 0.2);
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.lineWidth = gridWidth;
+    // Grid outlines, division guides and the hex honeycomb overlay.
+    drawGrid(r, drawView, gridDivisions);
+    drawHexOverlay(r, drawView, hexMode, gridDivisions, view.zoom);
 
-    ctx.beginPath();
-
-    // Family 1: horizontal lines at y = r*H
-    for (let r = minR; r <= maxR + 1; r++) {
-      const y = r * H;
-      const x0 = minQ * SIDE + r * SIDE / 2;
-      const x1 = (maxQ + 1) * SIDE + r * SIDE / 2;
-      ctx.moveTo(x0, y);
-      ctx.lineTo(x1, y);
-    }
-
-    // Family 2: / diagonals (slope sqrt(3)) — lines through A(q, r) for fixed q
-    for (let q = minQ; q <= maxQ + 1; q++) {
-      const x0 = q * SIDE + minR * SIDE / 2;
-      const y0 = minR * H;
-      const x1 = q * SIDE + (maxR + 1) * SIDE / 2;
-      const y1 = (maxR + 1) * H;
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-    }
-
-    // Family 3: \ diagonals (slope -sqrt(3)) — lines through B(q, r) for fixed q+r
-    const sumMin = minQ + minR;
-    const sumMax = maxQ + maxR + 1;
-    for (let S = sumMin; S <= sumMax; S++) {
-      const qStart = Math.max(minQ, S - (maxR + 1));
-      const qEnd = Math.min(maxQ, S - minR);
-      if (qStart > qEnd) continue;
-
-      const x0 = qStart * SIDE + (S - qStart) * SIDE / 2 + SIDE;
-      const y0 = (S - qStart) * H;
-      const x1 = qEnd * SIDE + (S - qEnd) * SIDE / 2 + SIDE;
-      const y1 = (S - qEnd) * H;
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-    }
-
-    ctx.stroke();
-
-    // Division / guide lines
-    const divWidth = Math.max(1 / view.zoom, 1);
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = divWidth;
-
-    if (gridDivisions > 0) {
-      const N = gridDivisions;
-      ctx.beginPath();
-
-      // Family 1: horizontal lines at r % N === 0
-      for (let r = minR; r <= maxR + 1; r++) {
-        if (r % N !== 0) continue;
-        const y = r * H;
-        const x0 = minQ * SIDE + r * SIDE / 2;
-        const x1 = (maxQ + 1) * SIDE + r * SIDE / 2;
-        ctx.moveTo(x0, y);
-        ctx.lineTo(x1, y);
-      }
-
-      // Family 2: / diagonals at q % N === 0
-      for (let q = minQ; q <= maxQ + 1; q++) {
-        if (q % N !== 0) continue;
-        const x0 = q * SIDE + minR * SIDE / 2;
-        const y0 = minR * H;
-        const x1 = q * SIDE + (maxR + 1) * SIDE / 2;
-        const y1 = (maxR + 1) * H;
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-      }
-
-      // Family 3: \ diagonals at S % N === 0
-      for (let S = sumMin; S <= sumMax; S++) {
-        if ((S + 1) % N !== 0) continue;
-        const qStart = Math.max(minQ, S - (maxR + 1));
-        const qEnd = Math.min(maxQ, S - minR);
-        if (qStart > qEnd) continue;
-
-        const x0 = qStart * SIDE + (S - qStart) * SIDE / 2 + SIDE;
-        const y0 = (S - qStart) * H;
-        const x1 = qEnd * SIDE + (S - qEnd) * SIDE / 2 + SIDE;
-        const y1 = (S - qEnd) * H;
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-      }
-
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(-10000, 0);
-      ctx.lineTo(10000, 0);
-      ctx.moveTo(-5000, -8660);
-      ctx.lineTo(5000, 8660);
-      ctx.moveTo(5000, -8660);
-      ctx.lineTo(-5000, 8660);
-      ctx.stroke();
-    }
-
-    // Hex mode: flat-top honeycomb. Hex side s = N*SIDE so each hex edge
-    // lies along a grid division guide line. Centers form the lattice
-    //   (Q,R) = (cN - kN, cN + 2kN)  (axial)
-    // whose world x = 1.5*c*N*SIDE (columns are vertical) and y advances by
-    // 2N*H (= s*sqrt(3)) within a column, adjacent columns offset by N*H.
-    if (hexMode !== "world" && gridDivisions > 0) {
-      const N = gridDivisions;
-      const s = N * SIDE;        // hex side = circumradius
-      const vHalf = N * H;       // s*sqrt(3)/2 — vertical vertex offset
-      const colWidth = 1.5 * s;  // horizontal column pitch
-      const rowHeight = 2 * vHalf; // vertical pitch within a column
-
-      const xMinW = minX;
-      const xMaxW = maxX;
-      const yMinW = minY;
-      const yMaxW = maxY;
-
-      const cMin = Math.floor(xMinW / colWidth) - 1;
-      const cMax = Math.ceil(xMaxW / colWidth) + 1;
-
-      ctx.strokeStyle = "rgba(255,255,255,0.16)";
-      ctx.lineWidth = Math.max(1.5 / view.zoom, 1);
-
-      const centers: { cx: number; cy: number }[] = [];
-
-      for (let c = cMin; c <= cMax; c++) {
-        const cx = 1.5 * c * N * SIDE;
-        const cyBase = c * N * H;
-        const kMin = Math.floor((yMinW - cyBase) / rowHeight) - 1;
-        const kMax = Math.ceil((yMaxW - cyBase) / rowHeight) + 1;
-
-        for (let k = kMin; k <= kMax; k++) {
-          const cy = cyBase + k * rowHeight;
-
-          ctx.beginPath();
-          ctx.moveTo(cx + s, cy);
-          ctx.lineTo(cx + s / 2, cy + vHalf);
-          ctx.lineTo(cx - s / 2, cy + vHalf);
-          ctx.lineTo(cx - s, cy);
-          ctx.lineTo(cx - s / 2, cy - vHalf);
-          ctx.lineTo(cx + s / 2, cy - vHalf);
-          ctx.closePath();
-          ctx.stroke();
-
-          centers.push({ cx, cy });
-        }
-      }
-
-      if (hexMode === "honeycomb") {
-        // Center markers — same radius as the origin dot, dimmer.
-        const r = Math.max(5 / view.zoom, 2);
-        ctx.fillStyle = "rgba(255,255,255,0.4)";
-        for (const { cx, cy } of centers) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(5 / view.zoom, 2), 0, Math.PI * 2);
-    ctx.fill();
-
-    // Selection overlay — cyan/blue tint on each selected hex's trixels, with a
-    // marching-ants hex outline. Drawn from each region's own anchor and size
-    // rather than from the lattice, so a selection that was anchored freely is
-    // outlined where it actually is.
+    // Selection overlay — cyan tint + marching-ants hex outline, drawn from each
+    // region's own anchor and size rather than from the lattice.
     if (selectedHexes.length > 0 && gridDivisions > 0) {
-      for (const sel of selectedHexes) {
-        // Cyan tint on the selected trixels.
-        ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.fillStyle = "rgb(34, 211, 238)"; // cyan-400
-        ctx.beginPath();
-        for (const t of regionTrixels(sel)) {
-          const [a, b, c] = getTriVertices(t.q, t.r, t.type);
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(c.x, c.y);
-          ctx.closePath();
-        }
-        ctx.fill();
-        ctx.restore();
-
-        // Hex outline with marching-ants dash.
-        ctx.save();
-        ctx.strokeStyle = "rgb(34, 211, 238)";
-        ctx.lineWidth = Math.max(2 / view.zoom, 1.5);
-        ctx.setLineDash([8, 6]);
-        ctx.lineDashOffset = -antPhase / view.zoom;
-        ctx.beginPath();
-        const corners = regionCorners(sel);
-        ctx.moveTo(corners[0].x, corners[0].y);
-        for (let i = 1; i < corners.length; i++) {
-          ctx.lineTo(corners[i].x, corners[i].y);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
-      }
+      drawSelectionOverlay(r, selectedHexes, antPhase, view.zoom);
     }
 
-    // Export crop overlay. Drawn inside the world transform, so the rotation
-    // that makes a pointy-top grid is already applied — a quarter turn keeps the
-    // rect axis-aligned on screen, so no separate screen-space pass is needed.
+    // Export crop overlay. Drawn in the world transform, so the rotation that
+    // makes a pointy-top grid is already applied.
     if (showCrop && crop) {
-      const c = cropWorldBounds(crop);
-
-      // Dim everything outside the crop: one even-odd path of a very large
-      // rectangle with the crop punched out of it.
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.beginPath();
-      ctx.rect(-1e6, -1e6, 2e6, 2e6);
-      ctx.rect(c.x, c.y, c.w, c.h);
-      ctx.fill("evenodd");
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = "rgb(251, 191, 36)"; // amber-400
-      ctx.lineWidth = Math.max(1.5 / view.zoom, 1);
-      ctx.strokeRect(c.x, c.y, c.w, c.h);
-
-      // Handles keep a constant on-screen size, so they stay grabbable at any
-      // zoom — matching the hit radius the crop tool tests against.
-      const hs = 8 / view.zoom;
-      ctx.fillStyle = "rgb(251, 191, 36)";
-      for (const p of handlePositions(crop)) {
-        ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
-      }
-      ctx.restore();
+      drawCropOverlay(r, crop, view.zoom);
     }
 
-    // Stamp flash — yellow highlight on the source hex that fades out.
+    // Stamp / clone flashes.
     if (stampFlash && gridDivisions > 0) {
-      ctx.save();
-      ctx.globalAlpha = stampFlash.opacity * 0.4;
-      ctx.fillStyle = "rgb(250, 204, 21)"; // yellow-400
-      const flashTris = enumerateHexTrixels(stampFlash.c, stampFlash.k, gridDivisions);
-      ctx.beginPath();
-      for (const t of flashTris) {
-        const [a, b, c] = getTriVertices(t.q, t.r, t.type);
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.closePath();
-      }
-      ctx.fill();
-      ctx.restore();
+      drawStampFlash(r, stampFlash, gridDivisions);
     }
-
-    // Clone flash — green highlight on the source triangle that fades out.
     if (cloneFlash && gridDivisions > 0) {
-      ctx.save();
-      ctx.globalAlpha = cloneFlash.opacity * 0.5;
-      ctx.fillStyle = "rgb(74, 222, 128)"; // green-400
-      const [a, b, c] = getTriVertices(cloneFlash.q, cloneFlash.r, cloneFlash.type as TriType);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineTo(c.x, c.y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      drawCloneFlash(r, cloneFlash);
     }
 
     // Stamp preview: render the active selection's trixels translated to where
-    // a stamp would land — the hovered hex in honeycomb mode, the hovered
-    // trixel in world mode — using their real colors. Skip in capture mode.
+    // a stamp would land, using their real colours. Skip in capture mode.
     const hexLatticeOn = hexMode !== "world" && gridDivisions > 0;
-    // The selection's own lattice, which a free-anchored selection shifts off
-    // the honeycomb. Hover cues for select are placed on it so they line up
-    // with what is already selected.
     const selAnchor = selectedHexes[0] ?? null;
     if (
       tool === "stamp" &&
@@ -789,251 +655,569 @@ export function GridCanvas({
       activeSelection &&
       (!hexLatticeOn || gridDivisions === activeSelection.N)
     ) {
-      const N = gridDivisions;
-      const hov = hoverTargets[0];
-      const { qc, rc } = placementAnchor(hov, N, hexLatticeOn);
-
-      // Group snapshot trixels by resolved color so we batch fills.
-      const previewGroups = new Map<string, typeof activeSelection.trixels>();
-      for (const t of activeSelection.trixels) {
-        const hex = resolveColor(t.color);
-        const list = previewGroups.get(hex);
-        if (list) list.push(t);
-        else previewGroups.set(hex, [t]);
-      }
-
-      ctx.save();
-      ctx.globalAlpha = 0.6;
-      for (const [fillColor, list] of previewGroups) {
-        ctx.fillStyle = fillColor;
-        ctx.beginPath();
-        for (const t of list) {
-          const [a, b, c] = getTriVertices(
-            qc + t.dq,
-            rc + t.dr,
-            t.type,
-          );
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(c.x, c.y);
-          ctx.closePath();
-        }
-        ctx.fill();
-      }
-      ctx.restore();
+      drawStampPreview(r, hoverTargets[0], activeSelection, gridDivisions, hexLatticeOn);
     }
 
-    // Clone source cursor — green triangle outline that follows the cursor
-    // at the persistent clone offset, or stays at the source point until
-    // the offset is established by the first click.
+    // Clone source cursor — green triangle outline at the persistent offset.
     if (tool === "clone" && cloneSource && hoverTargets.length > 0) {
-      const h = hoverTargets[0];
-
-      if (!cloneOffset && h.type !== cloneSource.type) {
-        // skip: offset not yet established and types don't match
-      } else {
-        const hbx = h.q * SIDE + h.r * (SIDE / 2);
-        const hby = h.r * H;
-        const hcX = h.type === "up" ? hbx + SIDE / 2 : hbx + SIDE;
-        const hcY = h.type === "up" ? hby + H / 3 : hby + (2 * H) / 3;
-
-        let srcX: number;
-        let srcY: number;
-
-        if (cloneOffset) {
-          srcX = hcX + cloneOffset.x;
-          srcY = hcY + cloneOffset.y;
-        } else {
-          srcX = cloneSource.x;
-          srcY = cloneSource.y;
-        }
-
-        const srcTri = worldToTri(srcX, srcY);
-
-        ctx.save();
-        ctx.globalAlpha = 0.8;
-        ctx.strokeStyle = "rgb(74, 222, 128)";
-        ctx.lineWidth = Math.max(2 / view.zoom, 1);
-        const [a, b, c] = getTriVertices(srcTri.q, srcTri.r, srcTri.type);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
-      }
+      drawCloneCursor(r, hoverTargets[0], cloneSource, cloneOffset ?? null, view.zoom);
     }
 
     // Hover outlines — primary + affected (flower/symmetry) ghosts.
-    // Stamp tool renders a hexagon hover instead of per-trixel triangles.
-    // Hex brush renders a filled wedge polygon instead of individual trixels.
     if (hoverTargets.length > 0) {
-      const isHexBrush =
-        brushSize === "hex" &&
-        gridDivisions > 0 &&
-        tool !== "stamp" &&
-        tool !== "select" &&
-        tool !== "fill";
-      ctx.lineWidth = Math.max(2 / view.zoom, 1);
-
-      const hoverColor = tool === "clone" && !cloneSource ? "rgb(239, 68, 68)" : "white";
-
-      // The hexagon frames what is about to happen, so it is drawn on the
-      // region the gesture would actually act on — `hoverRegion` below — not on
-      // the hex of the global honeycomb the cursor happens to be over. In
-      // honeycomb mode the two are the same and nothing here changes.
-      const hoverRegion = stampSelectHoverRegion({
+      drawHover(r, {
         tool,
-        tri: hoverTargets[0],
+        hoverTargets,
+        brushSize,
         gridDivisions,
         hexLatticeOn,
         captureMode: !!captureMode,
         activeSelection,
         selectedHexes,
         selAnchor,
+        cloneSource: cloneSource ?? null,
+        viewZoom: view.zoom,
       });
-
-      if (hoverRegion) {
-        const corners = regionCorners(hoverRegion);
-        ctx.beginPath();
-        ctx.moveTo(corners[0].x, corners[0].y);
-        for (let i = 1; i < corners.length; i++) {
-          ctx.lineTo(corners[i].x, corners[i].y);
-        }
-        ctx.closePath();
-        if (tool === "stamp") {
-          if (captureMode) {
-            ctx.strokeStyle = "#fbbf24";
-            ctx.globalAlpha = 0.9;
-            ctx.setLineDash([8, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.globalAlpha = 1;
-          } else {
-          ctx.strokeStyle = hoverColor;
-            ctx.globalAlpha = 0.7;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
-        } else {
-          // Select: fill only, no stroke.
-          ctx.fillStyle = "white";
-          ctx.globalAlpha = 0.08;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-        }
-      } else if (isHexBrush) {
-        // Hex brush: group hoverTargets by hex. If a hex has only one
-        // wedge, draw that wedge polygon. If symmetry spreads the brush
-        // across multiple wedges of the same hex, draw a full hex fill.
-        const hexWedges = new Map<string, Set<number>>();
-        for (const t of hoverTargets) {
-          const { c, k } = triToHex(t.q, t.r, t.type, gridDivisions);
-          const key = `${c},${k}`;
-          let set = hexWedges.get(key);
-          if (!set) {
-            set = new Set();
-            hexWedges.set(key, set);
-          }
-          set.add(hexWedgeIndex(t, c, k, gridDivisions));
-        }
-        const entries = [...hexWedges.entries()];
-
-        for (let i = 0; i < entries.length; i++) {
-          const [key, wedges] = entries[i];
-          const [cStr, kStr] = key.split(",");
-          const c = Number(cStr);
-          const k = Number(kStr);
-          const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
-          const hs = gridDivisions * SIDE;
-          const hv = gridDivisions * H;
-          const V = [
-            { x: hx + hs, y: hy },
-            { x: hx + hs / 2, y: hy + hv },
-            { x: hx - hs / 2, y: hy + hv },
-            { x: hx - hs, y: hy },
-            { x: hx - hs / 2, y: hy - hv },
-            { x: hx + hs / 2, y: hy - hv },
-          ];
-          const alpha = i === 0 ? 0.25 : 0.1;
-
-          if (wedges.size === 1) {
-            const wedge = [...wedges][0];
-            ctx.fillStyle = hoverColor;
-            ctx.globalAlpha = alpha;
-            ctx.beginPath();
-            ctx.moveTo(hx, hy);
-            ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
-            ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
-            ctx.closePath();
-            ctx.fill();
-          } else {
-            // Multiple wedges (symmetry) — draw each wedge polygon
-            ctx.fillStyle = hoverColor;
-            ctx.globalAlpha = alpha;
-            for (const wedge of wedges) {
-              ctx.beginPath();
-              ctx.moveTo(hx, hy);
-              ctx.lineTo(V[wedge % 6].x, V[wedge % 6].y);
-              ctx.lineTo(V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
-              ctx.closePath();
-              ctx.fill();
-            }
-          }
-
-          ctx.strokeStyle = hoverColor;
-          ctx.globalAlpha = alpha * 2;
-          ctx.beginPath();
-          ctx.moveTo(V[0].x, V[0].y);
-          for (let v = 1; v < 6; v++) ctx.lineTo(V[v].x, V[v].y);
-          ctx.closePath();
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.strokeStyle = hoverColor;
-        const [pa, pb, pc] = getTriVertices(
-          hoverTargets[0].q,
-          hoverTargets[0].r,
-          hoverTargets[0].type,
-        );
-        ctx.globalAlpha = 0.7;
-        ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-        ctx.lineTo(pc.x, pc.y);
-        ctx.closePath();
-        ctx.stroke();
-
-        if (hoverTargets.length > 1) {
-          ctx.globalAlpha = 0.3;
-          ctx.beginPath();
-          for (let i = 1; i < hoverTargets.length; i++) {
-            const [a, b, c] = getTriVertices(
-              hoverTargets[i].q,
-              hoverTargets[i].r,
-              hoverTargets[i].type,
-            );
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.lineTo(c.x, c.y);
-            ctx.closePath();
-          }
-          ctx.stroke();
-        }
-
-        ctx.globalAlpha = 1;
-      }
     }
 
-    ctx.restore();
-  }, [size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld, gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection, stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation, brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod, showNoPrint, layers]);
+    r.endFrame();
+  }, [
+    size, view, plan, effectPlan, glowPlan, hoverTargets, mounted, screenToWorld,
+    gridDivisions, hexMode, selectedHexes, tool, antPhase, activeSelection,
+    stampFlash, cloneFlash, cloneSource, cloneOffset, captureMode, gridRotation,
+    brushSize, symmetry, hueOffset, saturationOffset, crop, showCrop, noisePeriod,
+    showNoPrint, layers, renderer, fillGeo,
+  ]);
 
   return (
     <canvas
+      key={glEpoch}
       ref={canvasRef}
       className="absolute inset-0 w-full h-full pointer-events-none"
     />
   );
 }
+
+// ---------------------------- artwork steps --------------------------------
+
+/**
+ * Draws one fill step into the current render target (the artwork accumulator
+ * or, for a blended step, the isolated buffer). Glow lands first, then regions
+ * (rounded/outlined) or the retained flat batch.
+ */
+function drawFillStep(
+  r: GLRenderer,
+  si: number,
+  effectPlan: (EffectStep | null)[],
+  glowPlan: (GlowStep | null)[],
+  batches: (FillBatch | null)[],
+  noiseGroups: (NoiseStepBatches | null)[],
+): void {
+  const geom = effectPlan[si];
+  const glow = glowPlan[si];
+  const stepNoise = noiseGroups[si] ?? null;
+
+  // The glow falls on the artwork below, clipped to it, and sits under this
+  // step's own fills.
+  if (glow) {
+    const tex = r.prepareGlow(glow.caster, hexColor(glow.spec.color), glow.spec.sigma);
+    r.beginClip(glow.receiver);
+    r.setOverlay();
+    r.drawTexture(tex, glow.spec.opacity);
+    r.endClip();
+    r.setOpaque();
+  }
+
+  if (!geom) {
+    // A plain noisy step shades its lattice triangles in the fragment shader;
+    // everything else uses its retained colour batch.
+    if (stepNoise) {
+      // One draw per distinct colour: each group's cells share a ramp.
+      r.setOpaque();
+      for (const g of stepNoise.groups)
+        if (g.batch) r.drawNoise(g.batch, g.ramp, stepNoise.params);
+      return;
+    }
+    const batch = batches[si];
+    if (batch) {
+      r.setOpaque();
+      r.drawFillBatch(batch);
+    }
+    return;
+  }
+
+  for (let ri = 0; ri < geom.regions.length; ri++) {
+    const region = geom.regions[ri];
+    const rings = region.rings;
+    if (geom.fans && geom.noise && stepNoise) {
+      const fans = geom.fans[ri];
+      if (fans.length === 0) continue;
+      // Solid region first — a rounded ring bulges past the painted cells at
+      // every reflex corner, and those bulges have no grain (they are not any
+      // cell). The clip then confines per-colour group draws to this region,
+      // where the fragment shader dithers each pixel by its own cell.
+      r.setOpaque();
+      r.fillRings(rings, hexColor(region.fill));
+      r.beginClip(rings);
+      for (const g of stepNoise.groups)
+        r.drawNoiseDynamic(g.positions, g.ramp, stepNoise.params);
+      r.endClip();
+    } else if (geom.outline > 0) {
+      // The outline effect swaps the solid for a stroke of the region boundary
+      // at the layer's selected weight; the interior stays empty. Drawn as an
+      // exact capsule union with analytic coverage, so width is constant by
+      // construction and joins are true circles.
+      r.strokeRingOutline(rings, geom.outline, hexColor(region.fill));
+    } else {
+      r.setOpaque();
+      r.fillRings(rings, hexColor(region.fill));
+    }
+  }
+}
+
+function drawHatchStep(r: GLRenderer, step: RenderStep, drawView: DrawView): void {
+  if (step.kind !== "hatch") return;
+  const { groups } = groupHatchMarks(step.painted);
+
+  for (const g of groups) {
+    const box = trisBox(g.tris);
+    if (!box) continue;
+    const clipped = intersectBox(box, drawView);
+    if (!clipped) continue;
+
+    // Arc centres move with each triangle, so unlike a line family they cannot
+    // be generated once for the whole group. The clip still earns its keep.
+    const lines: number[] = [];
+    if (g.kind === "arc") {
+      for (const t of g.tris) {
+        if (!triInBox(t, clipped)) continue;
+        for (const seg of arcSegmentsInTri(g.dir, g.density, t.q, t.r, t.type)) {
+          lines.push(seg[0], seg[1], seg[2], seg[3]);
+        }
+      }
+    } else {
+      for (const seg of hatchLinesInBox(g.dir, g.density, clipped)) {
+        lines.push(seg[0], seg[1], seg[2], seg[3]);
+      }
+    }
+    if (lines.length === 0) continue;
+
+    // Clip to the union of the group's triangles, then stroke the family once.
+    const triPositions: number[] = [];
+    for (const t of g.tris) {
+      for (const v of getTriVertices(t.q, t.r, t.type)) {
+        triPositions.push(v.x, v.y);
+      }
+    }
+    const weight = Math.max(g.weight, 0.75 / drawView.zoom);
+    r.beginClipTriangles(new Float32Array(triPositions));
+    r.setOpaque();
+    r.strokeLines(new Float32Array(lines), hexColor(resolveColor(g.color)), weight);
+    r.endClip();
+  }
+}
+
+// ---------------------------- overlays --------------------------------------
+
+function drawNoPrint(r: GLRenderer, layers: Layer[], view: DrawView): void {
+  const positions: number[] = [];
+  for (const layer of layers) {
+    if (!layer.visible) continue;
+    for (let rr = view.minR; rr <= view.maxR; rr++) {
+      for (let q = view.minQ; q <= view.maxQ; q++) {
+        for (const type of ["up", "down"] as const) {
+          if (!isNoPrint(layer.painted[`${q},${rr},${type}`] ?? "")) continue;
+          const [a, b, c] = getTriVertices(q, rr, type);
+          positions.push(a.x, a.y, b.x, b.y, c.x, c.y);
+        }
+      }
+    }
+  }
+  if (positions.length) {
+    r.setOverlay();
+    r.fillTris(new Float32Array(positions), hexColor("#ec4899", 0.35));
+  }
+}
+
+function drawGrid(r: GLRenderer, view: DrawView, gridDivisions: number): void {
+  const gridWidth = Math.max(1.0 / view.zoom, 0.2);
+  const segs: number[] = [];
+
+  // Family 1: horizontal lines at y = r*H
+  for (let rr = view.minR; rr <= view.maxR + 1; rr++) {
+    const y = rr * H;
+    segs.push(view.minQ * SIDE + (rr * SIDE) / 2, y, (view.maxQ + 1) * SIDE + (rr * SIDE) / 2, y);
+  }
+  // Family 2: / diagonals through A(q, r) for fixed q
+  for (let q = view.minQ; q <= view.maxQ + 1; q++) {
+    segs.push(
+      q * SIDE + (view.minR * SIDE) / 2, view.minR * H,
+      q * SIDE + ((view.maxR + 1) * SIDE) / 2, (view.maxR + 1) * H,
+    );
+  }
+  // Family 3: \ diagonals through B(q, r) for fixed q+r
+  const sumMin = view.minQ + view.minR;
+  const sumMax = view.maxQ + view.maxR + 1;
+  for (let S = sumMin; S <= sumMax; S++) {
+    const qStart = Math.max(view.minQ, S - (view.maxR + 1));
+    const qEnd = Math.min(view.maxQ, S - view.minR);
+    if (qStart > qEnd) continue;
+    segs.push(
+      qStart * SIDE + ((S - qStart) * SIDE) / 2 + SIDE, (S - qStart) * H,
+      qEnd * SIDE + ((S - qEnd) * SIDE) / 2 + SIDE, (S - qEnd) * H,
+    );
+  }
+  if (segs.length) {
+    r.setOverlay();
+    r.strokeLines(new Float32Array(segs), hexColor("#ffffff", 0.06), gridWidth);
+  }
+
+  // Division / guide lines.
+  const divWidth = Math.max(1 / view.zoom, 1);
+  const divSegs: number[] = [];
+  if (gridDivisions > 0) {
+    const N = gridDivisions;
+    for (let rr = view.minR; rr <= view.maxR + 1; rr++) {
+      if (rr % N !== 0) continue;
+      const y = rr * H;
+      divSegs.push(view.minQ * SIDE + (rr * SIDE) / 2, y, (view.maxQ + 1) * SIDE + (rr * SIDE) / 2, y);
+    }
+    for (let q = view.minQ; q <= view.maxQ + 1; q++) {
+      if (q % N !== 0) continue;
+      divSegs.push(
+        q * SIDE + (view.minR * SIDE) / 2, view.minR * H,
+        q * SIDE + ((view.maxR + 1) * SIDE) / 2, (view.maxR + 1) * H,
+      );
+    }
+    for (let S = sumMin; S <= sumMax; S++) {
+      if ((S + 1) % N !== 0) continue;
+      const qStart = Math.max(view.minQ, S - (view.maxR + 1));
+      const qEnd = Math.min(view.maxQ, S - view.minR);
+      if (qStart > qEnd) continue;
+      divSegs.push(
+        qStart * SIDE + ((S - qStart) * SIDE) / 2 + SIDE, (S - qStart) * H,
+        qEnd * SIDE + ((S - qEnd) * SIDE) / 2 + SIDE, (S - qEnd) * H,
+      );
+    }
+  } else {
+    divSegs.push(-10000, 0, 10000, 0);
+    divSegs.push(-5000, -8660, 5000, 8660);
+    divSegs.push(5000, -8660, -5000, 8660);
+  }
+  if (divSegs.length) {
+    r.setOverlay();
+    r.strokeLines(new Float32Array(divSegs), hexColor("#ffffff", 0.15), divWidth);
+  }
+}
+
+function drawHexOverlay(r: GLRenderer, view: DrawView, hexMode: HexMode, gridDivisions: number, zoom: number): void {
+  if (hexMode !== "world" && gridDivisions > 0) {
+    const N = gridDivisions;
+    const s = N * SIDE;
+    const vHalf = N * H;
+    const colWidth = 1.5 * s;
+    const rowHeight = 2 * vHalf;
+
+    const cMin = Math.floor(view.minX / colWidth) - 1;
+    const cMax = Math.ceil(view.maxX / colWidth) + 1;
+    const width = Math.max(1.5 / zoom, 1);
+    const dotR = Math.max(5 / zoom, 2);
+
+    r.setOverlay();
+
+    for (let c = cMin; c <= cMax; c++) {
+      const cx = 1.5 * c * N * SIDE;
+      const cyBase = c * N * H;
+      const kMin = Math.floor((view.minY - cyBase) / rowHeight) - 1;
+      const kMax = Math.ceil((view.maxY - cyBase) / rowHeight) + 1;
+      for (let k = kMin; k <= kMax; k++) {
+        const cy = cyBase + k * rowHeight;
+        r.strokePolyline(
+          [cx + s, cy, cx + s / 2, cy + vHalf, cx - s / 2, cy + vHalf, cx - s, cy, cx - s / 2, cy - vHalf, cx + s / 2, cy - vHalf],
+          hexColor("#ffffff", 0.16),
+          width,
+          { close: true },
+        );
+        if (hexMode === "honeycomb") {
+          // Center markers — the origin dot's radius, but dimmer, as the 2D
+          // original drew them.
+          r.fillCircle(cx, cy, dotR, hexColor("#ffffff", 0.4));
+        }
+      }
+    }
+  }
+
+  // Origin marker — the 2D original draws it in every hex mode.
+  r.setOverlay();
+  r.fillCircle(0, 0, Math.max(5 / zoom, 2), hexColor("#ffffff"));
+}
+
+function drawSelectionOverlay(r: GLRenderer, selectedHexes: HexRegion[], antPhase: number, zoom: number): void {
+  for (const sel of selectedHexes) {
+    const tintPos: number[] = [];
+    for (const t of regionTrixels(sel)) {
+      const [a, b, c] = getTriVertices(t.q, t.r, t.type);
+      tintPos.push(a.x, a.y, b.x, b.y, c.x, c.y);
+    }
+    if (tintPos.length) {
+      r.setOverlay();
+      r.fillTris(new Float32Array(tintPos), hexColor("#22d3ee", 0.25));
+    }
+
+    const corners = regionCorners(sel);
+    const pts: number[] = [];
+    for (const p of corners) pts.push(p.x, p.y);
+    r.setOverlay();
+    r.strokePolyline(pts, hexColor("#22d3ee"), Math.max(2 / zoom, 1.5), {
+      close: true,
+      cap: "butt",
+      // The ants sit in world units, marching at 24 units/s from the tick.
+      dash: { period: 14, phase: -antPhase / zoom, on: 8 / 14 },
+    });
+  }
+}
+
+function drawCropOverlay(r: GLRenderer, crop: CropRect, zoom: number): void {
+  const c = cropWorldBounds(crop);
+  // Dim everything outside the crop: the four bands around the crop rect, which
+  // is the same silhouette as the even-odd fill the 2D code drew.
+  const dim = hexColor("#000000", 0.55);
+  r.setOverlay();
+  r.fillRect(-1e6, -1e6, 2e6, c.y + 1e6, dim);
+  r.fillRect(-1e6, c.y + c.h, 2e6, 1e6, dim);
+  r.fillRect(-1e6, c.y, c.x + 1e6, c.h, dim);
+  r.fillRect(c.x + c.w, c.y, 1e6, c.h, dim);
+
+  const amber = hexColor("#fbbf24");
+  r.setOverlay();
+  r.strokeRect(c.x, c.y, c.w, c.h, amber, Math.max(1.5 / zoom, 1));
+
+  // Handles keep a constant on-screen size, so they stay grabbable at any zoom.
+  const hs = 8 / zoom;
+  for (const p of handlePositions(crop)) {
+    r.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs, amber);
+  }
+}
+
+function drawStampFlash(r: GLRenderer, flash: { c: number; k: number; opacity: number }, gridDivisions: number): void {
+  const positions: number[] = [];
+  for (const t of enumerateHexTrixels(flash.c, flash.k, gridDivisions)) {
+    const [a, b, c] = getTriVertices(t.q, t.r, t.type);
+    positions.push(a.x, a.y, b.x, b.y, c.x, c.y);
+  }
+  if (positions.length) {
+    r.setOverlay();
+    r.fillTris(new Float32Array(positions), hexColor("#facc15", flash.opacity * 0.4));
+  }
+}
+
+function drawCloneFlash(r: GLRenderer, flash: { q: number; r: number; type: string; opacity: number }): void {
+  const [a, b, c] = getTriVertices(flash.q, flash.r, flash.type as TriType);
+  r.setOverlay();
+  r.fillTris(new Float32Array([a.x, a.y, b.x, b.y, c.x, c.y]), hexColor("#4ade80", flash.opacity * 0.5));
+}
+
+function drawStampPreview(
+  r: GLRenderer,
+  hoverTri: TriKey,
+  activeSelection: SelectionSnapshot,
+  gridDivisions: number,
+  hexLatticeOn: boolean,
+): void {
+  const { qc, rc } = placementAnchor(hoverTri, gridDivisions, hexLatticeOn);
+  const positions: number[] = [];
+  const colors: number[] = [];
+  for (const t of activeSelection.trixels) {
+    const rgb = hexColor(resolveColor(t.color), 0.6);
+    const [a, b, c] = getTriVertices(qc + t.dq, rc + t.dr, t.type);
+    positions.push(a.x, a.y, b.x, b.y, c.x, c.y);
+    colors.push(rgb[0], rgb[1], rgb[2], rgb[3]);
+  }
+  if (positions.length) {
+    r.setOverlay();
+    r.drawTriangles(new Float32Array(positions), new Float32Array(colors));
+  }
+}
+
+function drawCloneCursor(
+  r: GLRenderer,
+  h: TriKey,
+  cloneSource: { x: number; y: number; q: number; r: number; type: string },
+  cloneOffset: { x: number; y: number } | null,
+  zoom: number,
+): void {
+  const hbx = h.q * SIDE + h.r * (SIDE / 2);
+  const hby = h.r * H;
+  const hcX = h.type === "up" ? hbx + SIDE / 2 : hbx + SIDE;
+  const hcY = h.type === "up" ? hby + H / 3 : hby + (2 * H) / 3;
+
+  let srcX: number;
+  let srcY: number;
+  if (cloneOffset) {
+    srcX = hcX + cloneOffset.x;
+    srcY = hcY + cloneOffset.y;
+  } else {
+    if (h.type !== cloneSource.type) return;
+    srcX = cloneSource.x;
+    srcY = cloneSource.y;
+  }
+  const srcTri = worldToTri(srcX, srcY);
+  const [a, b, c] = getTriVertices(srcTri.q, srcTri.r, srcTri.type);
+  r.setOverlay();
+  r.strokePolyline(
+    [a.x, a.y, b.x, b.y, c.x, c.y],
+    hexColor("#4ade80", 0.8),
+    Math.max(2 / zoom, 1),
+    { close: true, cap: "butt" },
+  );
+}
+
+function drawHover(
+  r: GLRenderer,
+  a: {
+    tool: Tool;
+    hoverTargets: TriKey[];
+    brushSize?: "single" | "hex";
+    gridDivisions: number;
+    hexLatticeOn: boolean;
+    captureMode: boolean;
+    activeSelection: SelectionSnapshot | null;
+    selectedHexes: HexRegion[];
+    selAnchor: HexRegion | null;
+    cloneSource: { x: number; y: number; q: number; r: number; type: string } | null;
+    viewZoom: number;
+  },
+): void {
+  const target = a.hoverTargets[0];
+  const isHexBrush =
+    a.brushSize === "hex" &&
+    a.gridDivisions > 0 &&
+    a.tool !== "stamp" &&
+    a.tool !== "select" &&
+    a.tool !== "fill";
+  const width = Math.max(2 / a.viewZoom, 1);
+  const hoverColor = a.tool === "clone" && !a.cloneSource ? "#ef4444" : "#ffffff";
+
+  // The hexagon frames what is about to happen, so it is drawn on the region
+  // the gesture would actually act on — `hoverRegion` below — not on the hex of
+  // the global honeycomb the cursor happens to be over.
+  const hoverRegion = stampSelectHoverRegion({
+    tool: a.tool,
+    tri: target,
+    gridDivisions: a.gridDivisions,
+    hexLatticeOn: a.hexLatticeOn,
+    captureMode: a.captureMode,
+    activeSelection: a.activeSelection,
+    selectedHexes: a.selectedHexes,
+    selAnchor: a.selAnchor,
+  });
+
+  r.setOverlay();
+
+  if (hoverRegion) {
+    const corners = regionCorners(hoverRegion);
+    const pts: number[] = [];
+    for (const p of corners) pts.push(p.x, p.y);
+    if (a.tool === "stamp") {
+      if (a.captureMode) {
+        r.strokePolyline(pts, hexColor("#fbbf24", 0.9), width, {
+          close: true,
+          cap: "butt",
+          dash: { period: 12, phase: 0, on: 0.66 },
+        });
+      } else {
+        r.strokePolyline(pts, hexColor(hoverColor, 0.7), width, { close: true, cap: "butt" });
+      }
+    } else {
+      // Select: fill only, no stroke.
+      r.fillTris(new Float32Array(polygonFanTris(corners)), hexColor("#ffffff", 0.08));
+    }
+    return;
+  }
+
+  if (isHexBrush) {
+    drawHexBrushHover(r, a.hoverTargets, a.gridDivisions, hoverColor);
+    return;
+  }
+
+  // Per-trixel hover outlines — primary + affected ghosts.
+  const [pa, pb, pc] = getTriVertices(target.q, target.r, target.type);
+  r.strokePolyline([pa.x, pa.y, pb.x, pb.y, pc.x, pc.y], hexColor(hoverColor, 0.7), width, { close: true, cap: "butt" });
+
+  for (let i = 1; i < a.hoverTargets.length; i++) {
+    const [a2, b2, c2] = getTriVertices(a.hoverTargets[i].q, a.hoverTargets[i].r, a.hoverTargets[i].type);
+    r.strokePolyline([a2.x, a2.y, b2.x, b2.y, c2.x, c2.y], hexColor(hoverColor, 0.3), width, { close: true, cap: "butt" });
+  }
+}
+
+function drawHexBrushHover(
+  r: GLRenderer,
+  hoverTargets: TriKey[],
+  gridDivisions: number,
+  hoverColor: string,
+): void {
+  // Group hover targets by hex. If a hex has only one wedge, draw that wedge
+  // polygon; if symmetry spreads the brush across multiple wedges of the same
+  // hex, draw a full hex fill.
+  const hexWedges = new Map<string, Set<number>>();
+  for (const t of hoverTargets) {
+    const { c, k } = triToHex(t.q, t.r, t.type, gridDivisions);
+    const key = `${c},${k}`;
+    let set = hexWedges.get(key);
+    if (!set) {
+      set = new Set();
+      hexWedges.set(key, set);
+    }
+    set.add(hexWedgeIndex(t, c, k, gridDivisions));
+  }
+  const entries = [...hexWedges.entries()];
+
+  for (let i = 0; i < entries.length; i++) {
+    const [key, wedges] = entries[i];
+    const [cStr, kStr] = key.split(",");
+    const c = Number(cStr);
+    const k = Number(kStr);
+    const { x: hx, y: hy } = hexCenterWorld(c, k, gridDivisions);
+    const hs = gridDivisions * SIDE;
+    const hv = gridDivisions * H;
+    const V = [
+      { x: hx + hs, y: hy },
+      { x: hx + hs / 2, y: hy + hv },
+      { x: hx - hs / 2, y: hy + hv },
+      { x: hx - hs, y: hy },
+      { x: hx - hs / 2, y: hy - hv },
+      { x: hx + hs / 2, y: hy - hv },
+    ];
+    const alpha = i === 0 ? 0.25 : 0.1;
+
+    if (wedges.size === 1) {
+      const wedge = [...wedges][0];
+      r.fillTris(
+        new Float32Array([hx, hy, V[wedge % 6].x, V[wedge % 6].y, V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y]),
+        hexColor(hoverColor, alpha),
+      );
+    } else {
+      const positions: number[] = [];
+      for (const wedge of wedges) {
+        positions.push(hx, hy, V[wedge % 6].x, V[wedge % 6].y, V[(wedge + 1) % 6].x, V[(wedge + 1) % 6].y);
+      }
+      r.fillTris(new Float32Array(positions), hexColor(hoverColor, alpha));
+    }
+
+    const hexPts: number[] = [];
+    for (const v of V) hexPts.push(v.x, v.y);
+    r.strokePolyline(hexPts, hexColor(hoverColor, alpha * 2), Math.max(2 / 1, 1), { close: true, cap: "butt" });
+  }
+}
+
+/** Vertex fan of a convex polygon, for single-colour fills. */
+function polygonFanTris(corners: { x: number; y: number }[]): number[] {
+  const out: number[] = [];
+  const head = corners[0];
+  for (let i = 1; i < corners.length - 1; i++) {
+    out.push(head.x, head.y, corners[i].x, corners[i].y, corners[i + 1].x, corners[i + 1].y);
+  }
+  return out;
+}
+
+export type { SubdivisionNoiseSpec } from "@/lib/subdivision-noise";

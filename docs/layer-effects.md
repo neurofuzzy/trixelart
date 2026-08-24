@@ -587,6 +587,67 @@ cutting and plotter exports walk `painted` directly and see no colour effect at
 all — nor in the apparel *cut*, which is `RawSeg` geometry with no compositing to
 speak of.
 
+## The WebGL preview backend
+
+The live preview is a fourth backend (`src/lib/webgl/renderer.ts`), walking the
+same plan and reading the same step readers as the other three. It reproduces
+canvas semantics rather than approximating them, through three decisions worth
+recording:
+
+- **Region fills are a nonzero-winding stencil fill, not a triangulation.** Each
+  ring is flattened once — `flattenRoundedRing`, the same function the cropped
+  SVG export uses — and drawn as fan triangles into the stencil buffer with
+  INCR/DECR chosen per triangle orientation; a masked quad then paints where
+  the count is nonzero. That is the GPU phrasing of exactly what canvas's
+  default `fill()` computes, and it needs no polygon machinery: holes cancel by
+  winding, concavities and even self-intersections come out right, and there is
+  no ear clipper to bail out or misfile a ring. The previous port triangulated
+  each ring and classified outer vs hole from the first output triangle's sign,
+  but the clipper normalised windings first — every ring got the same sign, so
+  **holes filled solid**, and its bail-out could drop regions whole.
+- **No preview-only clamp.** An earlier port re-clamped each corner's radius
+  against region-local edges so its polygons stayed simple enough to clip;
+  that is the region-local clamp the round-corners section above names as the
+  way to tear seams and diverge from the files. The preview now flattens with
+  the exporters' own radii, and ties the flattening *sagitta* to the view
+  instead — small enough that a chord deviates from its arc by well under half
+  a device pixel — so what is on screen matches what an exporter draws at any
+  zoom.
+- **The outline is an exact capsule union, not an approximation of a stroke.**
+  A round-join stroke of a closed polyline is precisely the union of
+  per-segment capsules — each segment swept by a disk of half the width — so
+  the renderer emits one expanded quad per segment and the fragment shader
+  keeps only pixels within half a width of the centreline, ramped over one
+  device pixel. Uniform width by construction, joins are true circles, and the
+  antialiasing is analytic rather than riding on multisample edges. An earlier
+  take reused the generic polyline stroker (segment quads plus join disks
+  emitted only above a turn-angle threshold), which left sub-pixel wedge notches
+  at corners and tessellation lumps on dense arcs; before that, miter-offset
+  donuts self-intersected on small features — anything canvas's `stroke()`
+  survives.
+
+- **Subdivision noise is computed per pixel in a fragment shader.** The mesh
+  stays at one triangle per cell (grouped by colour, since each colour shares
+  its own 17-entry dither ramp); the shader inverts `worldToTri` to find the
+  pixel's cell, derives barycentric coordinates from the cell's analytic
+  corners to pick the sub-piece (ordering matches `subdivideTri` /
+  `subdivideTriCentroid` exactly), runs the same 32-bit avalanche hash on the
+  folded cell key, quantises with the same round-to-NOISE_LEVELS, and reads the
+  final colour from the ramp `colorRamp` produced. Under rounding the region's
+  ring fans shade with a solid fallback for reflex-corner bulges — pixels that
+  belong to no cell — replacing the earlier clip + grain-triangle pass and its
+  seam concerns. An earlier port tessellated every cell into four or eight CPU
+  triangles per frame's worth of buffer, which multiplied geometry for no gain:
+  the grain is a pure function of cell, piece and seed, which is fragment-
+  shader territory.
+
+One renderer-internal rule keeps all of this deterministic: enabled vertex-
+attrib arrays are global GL state, and a deleted buffer leaves a dangling
+enabled array that makes the next `drawArrays` fail silently (INVALID_OPERATION,
+nothing painted). Every draw therefore disables the attribute locations it does
+not use — the class of bug that presented as whole regions vanishing depending
+on which other layers were edited first.
+
 ## Rounding in the cutting export
 
 The cutting export honours the effect too, but through a **different path** — it

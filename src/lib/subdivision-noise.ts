@@ -244,7 +244,7 @@ function mixHex(a: string, b: string, t: number): string {
  */
 const rampCache = new Map<string, string[]>();
 
-function colorRamp(encoded: string): string[] {
+export function colorRamp(encoded: string): string[] {
   const base = resolveColor(encoded);
   const cacheKey = `${encoded}|${base}`;
   const hit = rampCache.get(cacheKey);
