@@ -513,7 +513,8 @@ export class GLRenderer {
         gl.linkProgram(prog);
         linked = !!gl.getProgramParameter(prog!, gl.LINK_STATUS);
       }
-      if (!prog || !linked)
+      if (!prog) throw new Error("WebGL program create failed");
+      if (!linked)
         throw new Error(`WebGL program link failed: ${gl.getProgramInfoLog(prog) ?? "no log"}`);
       const cache = new Map<string, WebGLUniformLocation | null>();
       return {
