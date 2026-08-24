@@ -178,6 +178,7 @@ export function MulticolorDialog({
   const [mat, setMat] = useState(false);
   const [matOutline, setMatOutline] = useState(false);
   const [matOutlineMm, setMatOutlineMm] = useState(MIN_MAT_OUTLINE_MM);
+  const [matOuterEdge, setMatOuterEdge] = useState(false);
   // The outlined-mat geometry, computed by `computeMatOutline` (Clipper loads
   // on demand). Null while pending or when outlines are off; the builders then
   // fall back to the plain mat. Same request-id + debounce shape as
@@ -199,6 +200,7 @@ export function MulticolorDialog({
       matOutlineMm: matOutline
         ? Math.max(MIN_MAT_OUTLINE_MM, matOutlineMm)
         : 0,
+      matOutlineOuter: matOutline && matOuterEdge,
     }),
     [
       paperWidthMm,
@@ -208,6 +210,7 @@ export function MulticolorDialog({
       mat,
       matOutline,
       matOutlineMm,
+      matOuterEdge,
     ],
   );
 
@@ -471,9 +474,15 @@ export function MulticolorDialog({
                     />
                   )}
                   {matOutline && (
+                    <Check checked={matOuterEdge} onChange={setMatOuterEdge}>
+                      Outer edge, no page frame
+                    </Check>
+                  )}
+                  {matOutline && (
                     <p className="text-[11px] text-muted-foreground/60 leading-relaxed">
-                      Keeps a band of this width along every color boundary.
-                      Bands that would float free of the mat are left out.
+                      {matOuterEdge
+                        ? "Cuts just the outline network in the design's own shape — the artwork's edge is the boundary, not a rectangle."
+                        : "Keeps a band of this width along every color boundary. Bands that would float free of the mat are left out."}
                     </p>
                   )}
                 </>

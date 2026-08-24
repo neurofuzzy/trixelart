@@ -446,6 +446,18 @@ Two visible-form decisions:
 - **Non-zero winding, not even-odd.** The result is one boolean union, emitted
   as plain loops; nesting resolves by winding instead of parity.
 
+**Outer-edge mode** (`matOutlineOuter`) keeps the design's own edge instead:
+the page rect is left out of the final union and the outline network *is* the
+mat — line-art in the shape of the artwork, with no rectangle cut at all. This
+costs nothing extra to compute, because the silhouette's band was already in
+the set and the attach predicate already identifies it: it is the one
+component overlapping the frame body, and every seam chain rides to it across
+the silhouette line. The floating rule carries over unchanged; the only
+degenerate case is a margin smaller than half the thickness, where the page
+clip severs every component's outward contact — the builder then degrades to
+the backed mat rather than cutting nothing. The preview drops the per-tile
+paper bound in this mode, since no rectangle is cut.
+
 The user's two rules, both enforced in `computeMatOutline`:
 
 - **Nothing thinner than 3 mm is offered; band fragments narrower than 2.75 mm

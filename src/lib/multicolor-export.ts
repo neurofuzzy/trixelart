@@ -56,6 +56,10 @@ export interface MulticolorOptions {
   /** Outline weight on the mats, mm. 0 (the default) means no outlines.
    *  Clamped up to `MIN_MAT_OUTLINE_MM` wherever it is used. */
   matOutlineMm?: number;
+  /** With outlines on: keep the design's own outer edge instead of replacing
+   *  it with the page rectangle. The mat becomes pure line-art in the shape
+   *  of the artwork — no rectangular frame is cut at all. */
+  matOutlineOuter?: boolean;
 }
 
 export interface MulticolorSheet {
@@ -306,7 +310,9 @@ function bandComponents(loops: PlotPoly[]): BandComponent[] {
  * window edge. The band is still built — where each seam meets the silhouette
  * it is what welds that seam's band to the frame body across the silhouette
  * line (a bare seam band stops half a width short of solid contact) — and the
- * final union then absorbs it into the frame.
+ * final union then absorbs it into the frame. With `matOutlineOuter` the band
+ * is *not* absorbed: the page rectangle is left out of the final union and
+ * the mat is pure line-art in the design's own shape.
  *
  * Two guards, both the user's rules:
  *
@@ -382,14 +388,24 @@ export async function computeMatOutline(
 
   // Keep only components attached to the frame body. Zero-width contacts do
   // not count — Clipper returns no area for them, and a cut along a tangent
-  // falls apart anyway — which is exactly the rounding-severed case.
+  // falls apart anyway — which is exactly the rounding-severed case. The
+  // predicate doubles as the anchor test in outer-edge mode: the silhouette's
+  // own band is the one component that overlaps the frame body, and every
+  // seam chain rides to it across the silhouette line.
   const attached = bandComponents(bands)
     .filter((c) => clipper.intersect([c.outer], frameBody).length > 0)
     .flatMap((c) => [c.outer, ...c.holes]);
 
-  // The page rect replaces the silhouette's own band; the union absorbs the
-  // band's outward half and keeps the window edge exactly at the silhouette.
-  return asPts(clipper.union([...frameBody, ...attached]));
+  // Backed mode: the page rect replaces the silhouette's own band; the union
+  // absorbs the band's outward half and keeps the window edge exactly at the
+  // silhouette. Outer-edge mode: leave the page rect out entirely — the
+  // outline network *is* the mat, in the design's own shape.
+  const kept =
+    options.matOutlineOuter && attached.length > 0
+      ? attached
+      : [...frameBody, ...attached];
+  if (kept.length === 0) return null;
+  return asPts(clipper.union(kept));
 }
 
 // ---------------------------------------------------------------------------
@@ -739,10 +755,14 @@ export function renderMulticolorPreview(
     }
 
     // The tile's own bounds, so each sheet reads as a separate piece of paper.
-    ctx.strokeStyle = "rgba(70,70,70,0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(0, 0, tileW * fit, tileH * fit);
-    ctx.lineWidth = 1;
+    // Outer-edge mats cut no rectangle, so the bound would be a lie — there
+    // the design's own outline is the boundary.
+    if (!(mode === "mats" && matLoops && options.matOutlineOuter)) {
+      ctx.strokeStyle = "rgba(70,70,70,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0, 0, tileW * fit, tileH * fit);
+      ctx.lineWidth = 1;
+    }
     ctx.restore();
   });
 }
